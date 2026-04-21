@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  ORGANIZER
+  PLAYER
+}
+
+enum TournamentStatus {
+  OPEN
+  ONGOING
+  COMPLETED
+}
+
+enum TournamentFormat {
+  SINGLE_ELIMINATION
+  DOUBLE_ELIMINATION
+  SWISS
+  FREE_FOR_ALL
+  ROUND_ROBIN
+}
+
+enum MatchStatus {
+  PENDING
+  ONGOING
+  COMPLETED
+}
+
+model User {
+  id              String    @unique @default(uuid())
+  email           String    @unique
+  username        String    @unique
+  hashedPassword  String
+  roles           Role[]    @default([PLAYER])
+  createdAt       DateTime  @default(now())
+  updateAt        DateTime  @updatedAt()
+
+  tournamentsCreated    Tournament[]
+  participatedTournaments TournamentParticipant[]
+  matchesAsPlayer1      Match[] @relation("Player1")
+  matchesAsPlayer2      Match[] @relation("Player2")
+  wonMatches            Match[] @relation("Winner")
+}
+
+model Tournament {
+  id          String   @id @default(uuid())
+  name        String
+  format      TournamentFormat @default(SINGLE_ELIMINATION)
+  maxPlayers  Int
+  prizePool   Float?
+  isPrivate   Boolean @default(false)
+  status      TournamentStatus @default(OPEN)
+
+  createdById String
+  createdBy   User @relation(fields: [createdById], references: [id])
+
+  participants TournamentParticipant[]
+  rounds       Round[]
+
+  createdAt DateTime @default(now())
+}
+
+model TournamentParticipant {
+  id            String @id @default(uuid())
+  userId        String
+  tournamentId  String
+
+  user          User @relation(fields: [userId], references: [id])
+  tournament    Tournament @relation(fields: [tournamentId], references: [id])
+
+  seed          Int?   // optional (for seeding later)
+
+  @@unique([userId, tournamentId])
+}
+
+model Round {
+  id            String @id @default(uuid())
+  tournamentId  String
+  roundNumber   Int
+
+  matches       Match[]
+
+  tournament    Tournament @relation(fields: [tournamentId], references: [id])
+
+  @@unique([tournamentId, roundNumber])
+}
+
+model Match {
+  id            String @id @default(uuid())
+
+  roundId       String
+  round         Round @relation(fields: [roundId], references: [id])
+
+  player1Id     String?
+  player2Id     String?
+
+  player1       User? @relation("Player1", fields: [player1Id], references: [id])
+  player2       User? @relation("Player2", fields: [player2Id], references: [id])
+
+  winnerId      String?
+  winner        User? @relation("Winner", fields: [winnerId], references: [id])
+
+  nextMatchId   String?
+  nextMatch     Match? @relation("NextMatch", fields: [nextMatchId], references: [id])
+  previousMatches Match[] @relation("NextMatch")
+
+  status        MatchStatus @default(PENDING)
+
+  isBye         Boolean @default(false)
+
+  createdAt     DateTime @default(now())
+}
