@@ -65,6 +65,11 @@ export class TournamentController {
     return this.tournamentService.getTournament(id);
   }
 
+  @Get('invite/:token')
+  async getTournamentByInviteToken(@Param('token') token: string) {
+    return this.tournamentService.getTournamentByInviteToken(token);
+  }
+
   // GET /tournaments
   @Get()
   async getAllTournaments() {

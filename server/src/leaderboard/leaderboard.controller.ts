@@ -9,4 +9,9 @@ export class LeaderboardController {
   getLeaderboard(@Param('tournamentId') tournamentId: string) {
     return this.leaderboardService.getLeaderboard(tournamentId);
   }
+
+  @Get('leaderboard/global')
+  getGlobalLeaderboard() {
+    return this.leaderboardService.getGlobalLeaderboard();
+  }
 }

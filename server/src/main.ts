@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://192.168.3.2:3000'], // Frontend on port 3000
+    origin: true, // Frontend on port 3000
     credentials: true,
   });
   app.useGlobalPipes(

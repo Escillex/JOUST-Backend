@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { authenticatedFetch } from "@/app/utils/api";
+import { authenticatedFetch, signOut } from "@/app/utils/api";
 
 interface User {
   id: string;
@@ -98,8 +98,12 @@ export default function HandleOrganizerPage() {
     }
   };
 
-  const handleSignOut = () => {
-    localStorage.removeItem("token");
+  const handleSignOut = async () => {
+    try {
+      await signOut(`${apiUrl}/auth/signout`);
+    } catch {
+      // ignore and redirect
+    }
     router.push("/");
   };
 

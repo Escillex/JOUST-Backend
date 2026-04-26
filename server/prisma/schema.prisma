@@ -59,6 +59,10 @@ model Tournament {
   format      TournamentFormat @default(SINGLE_ELIMINATION)
   maxPlayers  Int
   prizePool   Float?
+  entranceFee Float?
+  venue       String?
+  date        DateTime?
+  inviteToken String   @default(uuid()) @unique
   isPrivate   Boolean @default(false)
   status      TournamentStatus @default(OPEN)
 

@@ -14,6 +14,7 @@ import {
   IsObject,
   ValidateNested,
   IsPositive,
+  IsDateString,
 } from 'class-validator';
 import { Prisma, TournamentFormat } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -129,6 +130,19 @@ export class CreateTournamentDto {
   @Min(0)
   @IsOptional()
   prizePool?: number;
+
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  entranceFee?: number;
+
+  @IsString()
+  @IsOptional()
+  venue?: string;
+
+  @IsDateString()
+  @IsOptional()
+  date?: string;
 
   @IsBoolean()
   @IsOptional()

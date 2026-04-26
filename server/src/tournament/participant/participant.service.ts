@@ -11,7 +11,7 @@ export class ParticipantService {
   constructor(private prisma: PrismaService) {}
 
   // ✅ JOIN TOURNAMENT
-  async joinTournament(tournamentId: string, dto: JoinTournamentDto) {
+  async joinTournament(tournamentId: string, userId: string) {
     // 1. Check tournament exists
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -36,9 +36,20 @@ export class ParticipantService {
       );
     }
 
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (tournament.isPrivate && user.isGuest) {
+      throw new BadRequestException(
+        'Private tournaments can only be joined by registered players',
+      );
+    }
+
     // 4. Prevent duplicate joins
     const alreadyJoined = tournament.participants.some(
-      (p) => p.userId === dto.userId,
+      (p) => p.userId === userId,
     );
 
     if (alreadyJoined) {
@@ -49,11 +60,63 @@ export class ParticipantService {
     return this.prisma.tournamentParticipant.create({
       data: {
         tournamentId,
-        userId: dto.userId,
+        userId,
       },
       include: {
         user: {
           select: { id: true, username: true, email: true },
+        },
+        tournament: {
+          select: { id: true, name: true, maxPlayers: true },
+        },
+      },
+    });
+  }
+
+  async joinTournamentAsGuest(tournamentId: string, guestName: string) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { participants: true },
+    });
+
+    if (!tournament) {
+      throw new NotFoundException('Tournament not found');
+    }
+
+    if (tournament.status !== 'OPEN') {
+      throw new BadRequestException(
+        'Tournament has already started — registration is closed',
+      );
+    }
+
+    if (tournament.participants.length >= tournament.maxPlayers) {
+      throw new BadRequestException(
+        `Tournament is full (${tournament.maxPlayers} players max)`,
+      );
+    }
+
+    if (tournament.isPrivate) {
+      throw new BadRequestException(
+        'Private tournaments cannot be joined by guests',
+      );
+    }
+
+    const guestUser = await this.prisma.user.create({
+      data: {
+        isGuest: true,
+        guestName,
+        roles: ['PLAYER'],
+      },
+    });
+
+    return this.prisma.tournamentParticipant.create({
+      data: {
+        tournamentId,
+        userId: guestUser.id,
+      },
+      include: {
+        user: {
+          select: { id: true, username: true, email: true, guestName: true },
         },
         tournament: {
           select: { id: true, name: true, maxPlayers: true },

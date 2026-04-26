@@ -27,6 +27,9 @@ export class TournamentService {
         format: dto.format,
         maxPlayers: dto.maxPlayers,
         prizePool: dto.prizePool,
+        entranceFee: dto.entranceFee,
+        venue: dto.venue,
+        date: dto.date ? new Date(dto.date) : undefined,
         isPrivate: dto.isPrivate,
         createdById: dto.createdById,
         ...(dto.formatConfig && {
@@ -52,12 +55,13 @@ export class TournamentService {
     if (tournament.status !== TournamentStatus.OPEN)
       throw new BadRequestException('Cannot edit started tournament');
 
-    const { formatConfig, createdById, ...rest } = dto;
+    const { formatConfig, createdById, date, ...rest } = dto;
 
     return this.prisma.tournament.update({
       where: { id },
       data: {
         ...rest,
+        ...(date !== undefined && { date: date ? new Date(date) : null }),
         ...(formatConfig && {
           formatConfig: {
             upsert: {
@@ -163,6 +167,67 @@ export class TournamentService {
   async getTournament(tournamentId: string) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
+      include: {
+        createdBy: { select: { id: true, username: true, email: true } },
+        winner: {
+          select: { id: true, username: true, guestName: true, isGuest: true },
+        },
+        formatConfig: true,
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                email: true,
+                guestName: true,
+                isGuest: true,
+              },
+            },
+          },
+        },
+        rounds: {
+          orderBy: { roundNumber: 'asc' },
+          include: {
+            matches: {
+              include: {
+                player1: {
+                  select: {
+                    id: true,
+                    username: true,
+                    guestName: true,
+                    isGuest: true,
+                  },
+                },
+                player2: {
+                  select: {
+                    id: true,
+                    username: true,
+                    guestName: true,
+                    isGuest: true,
+                  },
+                },
+                winner: {
+                  select: {
+                    id: true,
+                    username: true,
+                    guestName: true,
+                    isGuest: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+    return tournament;
+  }
+
+  async getTournamentByInviteToken(inviteToken: string) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { inviteToken },
       include: {
         createdBy: { select: { id: true, username: true, email: true } },
         winner: {

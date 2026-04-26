@@ -7,3 +7,10 @@ export async function authenticatedFetch(url: string, options: RequestInit = {})
     credentials: 'include',
   });
 }
+
+export async function signOut(url: string) {
+  return fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+  });
+}

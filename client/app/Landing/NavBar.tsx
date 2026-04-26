@@ -12,7 +12,7 @@ export default function Navbar() {
   const navLinks = [
     { label: "Home", href: "/" },
     { label: "Tournaments", href: "/join_tournament" },
-    { label: "Rankings", href: "/rankings" },
+    { label: "Rankings", href: "/GlobalLeaderBoards" },
   ];
 
   return (

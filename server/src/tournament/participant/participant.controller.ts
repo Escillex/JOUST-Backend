@@ -10,9 +10,13 @@ import {
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
+  Req,
+  UseGuards,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ParticipantService } from './participant.service';
-import { JoinTournamentDto } from './dto/participant.dto';
+import { JoinTournamentDto, JoinGuestDto } from './dto/participant.dto';
+import { JwtAuthGuard, type AuthenticatedRequest } from 'src/guards/jwt-auth.guard';
 
 @Controller('tournaments/:tournamentId/participants')
 export class ParticipantController {
@@ -20,12 +24,27 @@ export class ParticipantController {
 
   // POST /tournaments/:tournamentId/participants/join
   @Post('join')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   async join(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
     @Body() dto: JoinTournamentDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.participantService.joinTournament(tournamentId, dto);
+    if (req.user.sub !== dto.userId) {
+      throw new UnauthorizedException('Cannot join as another user');
+    }
+    return this.participantService.joinTournament(tournamentId, dto.userId);
+  }
+
+  // POST /tournaments/:tournamentId/participants/guest
+  @Post('guest')
+  @HttpCode(HttpStatus.CREATED)
+  async joinGuest(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Body() dto: JoinGuestDto,
+  ) {
+    return this.participantService.joinTournamentAsGuest(tournamentId, dto.guestName);
   }
 
   // DELETE /tournaments/:tournamentId/participants/leave

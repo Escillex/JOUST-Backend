@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { authenticatedFetch } from "@/app/utils/api";
+import { authenticatedFetch, signOut } from "@/app/utils/api";
 import { FormatConfig, FormatOption, FormatSelector } from "../FormatSelector/page";
 
 interface User {
@@ -40,6 +40,10 @@ interface Tournament {
     username: string;
     guestName?: string;
   };
+  inviteToken?: string;
+  venue?: string;
+  entranceFee?: number | null;
+  date?: string | null;
   rounds?: {
     id: string;
     roundNumber: number;
@@ -76,6 +80,7 @@ function TournamentViewContent() {
 
   const [guestUsername, setGuestUsername] = useState("");
   const [selectedUserId, setSelectedUserId] = useState("");
+  const [inviteLink, setInviteLink] = useState("");
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -110,6 +115,9 @@ function TournamentViewContent() {
         setEditPrizePool(tData.prizePool || "");
         setEditIsPrivate(tData.isPrivate || false);
         setEditFormatConfig(tData.formatConfig || {});
+        if (tData.inviteToken && typeof window !== "undefined") {
+          setInviteLink(`${window.location.origin}/join_tournament/invite/${tData.inviteToken}`);
+        }
       } else setMessage("Tournament not found");
 
       const formatsRes = await authenticatedFetch(`${apiUrl}/formats/details`);
@@ -228,7 +236,14 @@ function TournamentViewContent() {
     } catch { setMessage("Error: Start failed"); }
   };
 
-  const handleSignOut = () => { localStorage.removeItem("token"); router.push("/"); };
+  const handleSignOut = async () => {
+    try {
+      await signOut(`${apiUrl}/auth/signout`);
+    } catch {
+      // ignore and redirect
+    }
+    router.push("/");
+  };
 
   const isOrganizerOrAdmin = user?.roles?.some(role => role === "ADMIN" || role === "ORGANIZER") || false;
 
@@ -265,6 +280,12 @@ function TournamentViewContent() {
             <div className="flex items-center gap-3 mt-4">
               <span className="bg-[#52B946] text-white px-3 py-1 rounded-[10px] text-[10px] font-black uppercase tracking-[1.1px]">{tournament.status}</span>
               <span className="text-[#838383] text-xs font-bold uppercase tracking-[1.1px]">₱{tournament.prizePool?.toLocaleString() || "0"} Pool · {tournament.format.replace("_", " ")}</span>
+              {tournament.venue && (
+                <span className="text-[#838383] text-xs font-bold uppercase tracking-[1.1px]">Venue: {tournament.venue}</span>
+              )}
+              {tournament.date && (
+                <span className="text-[#838383] text-xs font-bold uppercase tracking-[1.1px]">{new Date(tournament.date).toLocaleString()}</span>
+              )}
               {championName && (
                 <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-[10px] border border-[#52B946]/30">
                   <span className="text-[10px] font-black text-[#52B946] uppercase tracking-[1.1px]">Champion:</span>
@@ -384,6 +405,9 @@ function TournamentViewContent() {
                   <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Format</span><span className="text-white">{tournament.format.replace("_", " ")}</span></div>
                   <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Players</span><span className="text-white">{tournament.maxPlayers}</span></div>
                   <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Access</span><span className="text-white">{tournament.isPrivate ? "Private" : "Public"}</span></div>
+                  <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Entrance Fee</span><span className="text-white">{tournament.entranceFee ? `₱${tournament.entranceFee.toLocaleString()}` : "Free"}</span></div>
+                  <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Venue</span><span className="text-white">{tournament.venue || "TBD"}</span></div>
+                  <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Date</span><span className="text-white">{tournament.date ? new Date(tournament.date).toLocaleString() : "TBD"}</span></div>
                   <div className="flex flex-col"><span className="text-[#838383] text-[9px] mb-1">Status</span><span className="text-[#52B946]">{tournament.status}</span></div>
                 </div>
               )}
@@ -417,6 +441,21 @@ function TournamentViewContent() {
                       <button onClick={() => selectedUserId && handleJoin(selectedUserId)} className="h-10 bg-[#52B946] text-white text-[12px] font-black uppercase rounded-[10px] tracking-[1.1px] hover:bg-[#3E9434]">Invite</button>
                     </div>
                   </div>
+                  {tournament.inviteToken && (
+                    <div className="pt-4 border-t border-[#2F2F2F]">
+                      <span className="text-[10px] text-[#838383] block mb-2 font-black uppercase tracking-[1.1px]">Invite Link</span>
+                      <div className="flex gap-2 items-center">
+                        <input type="text" readOnly value={inviteLink} className="flex-1 h-10 rounded-[5px] px-3 bg-[#101010] text-[10px] text-[#838383] uppercase tracking-[1.1px] outline-none" />
+                        <button onClick={() => {
+                            const link = typeof window !== 'undefined' && tournament.inviteToken ? `${window.location.origin}/join_tournament/invite/${tournament.inviteToken}` : '';
+                            if (link) navigator.clipboard.writeText(link);
+                          }}
+                          className="h-10 px-3 rounded-[5px] bg-[#52B946] text-white text-[10px] font-black uppercase tracking-[1.1px] hover:bg-[#3E9434] transition-colors">
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {tournament.participants.length < tournament.maxPlayers && (
                     <div className="pt-2 border-t border-[#2F2F2F]">
                       <button onClick={handleFillWithGuests} className="w-full py-3 bg-transparent border-2 border-[#838383] text-[#838383] hover:border-[#52B946] hover:text-[#52B946] text-[10px] font-black uppercase rounded-[10px] tracking-[1.1px] transition-all">

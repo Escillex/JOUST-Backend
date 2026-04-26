@@ -15,6 +15,10 @@ export interface LeaderboardEntry {
   oomw: number;
 }
 
+export interface GlobalLeaderboardEntry extends LeaderboardEntry {
+  tournamentsPlayed: number;
+}
+
 @Injectable()
 export class LeaderboardService {
   constructor(private readonly prisma: PrismaService) {}
@@ -180,6 +184,189 @@ export class LeaderboardService {
           Math.abs(entries[i].oomw - entries[i - 1].oomw) > 0.0001 ||
           Math.abs(entries[i].matchWinPct - entries[i - 1].matchWinPct) >
             0.0001)
+      ) {
+        currentRank = i + 1;
+      }
+      ranked.push({ rank: currentRank, ...entries[i] });
+    }
+
+    return ranked;
+  }
+
+  async getGlobalLeaderboard(): Promise<GlobalLeaderboardEntry[]> {
+    const matches = await this.prisma.match.findMany({
+      where: { status: MatchStatus.COMPLETED },
+      select: {
+        player1Id: true,
+        player2Id: true,
+        winnerId: true,
+        isBye: true,
+        round: {
+          select: {
+            tournament: {
+              select: {
+                id: true,
+                formatConfig: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const participants = await this.prisma.tournamentParticipant.findMany({
+      include: {
+        user: {
+          select: { id: true, username: true },
+        },
+      },
+    });
+
+    const tournamentSetByUser = new Map<string, Set<string>>();
+    const participantMap = new Map<string, string>();
+    for (const p of participants) {
+      participantMap.set(p.userId, p.user.username ?? 'Guest');
+      const tournaments = tournamentSetByUser.get(p.userId) ?? new Set<string>();
+      tournaments.add(p.tournamentId);
+      tournamentSetByUser.set(p.userId, tournaments);
+    }
+
+    const winsMap = new Map<string, number>();
+    const lossesMap = new Map<string, number>();
+    const drawsMap = new Map<string, number>();
+    const matchCountMap = new Map<string, number>();
+    const opponentMap = new Map<string, Set<string>>();
+    const pointsMap = new Map<string, number>();
+
+    const getTournamentPoints = (tournament: any) => {
+      return {
+        pointsForWin: tournament?.formatConfig?.swissPointsForWin ?? 3,
+        pointsForDraw: tournament?.formatConfig?.swissPointsForDraw ?? 1,
+        pointsForLoss: tournament?.formatConfig?.swissPointsForLoss ?? 0,
+      };
+    };
+
+    const ensurePlayer = (id: string) => {
+      if (!winsMap.has(id)) {
+        winsMap.set(id, 0);
+        lossesMap.set(id, 0);
+        drawsMap.set(id, 0);
+        matchCountMap.set(id, 0);
+        pointsMap.set(id, 0);
+        opponentMap.set(id, new Set());
+      }
+    };
+
+    for (const match of matches) {
+      const { player1Id: p1, player2Id: p2, winnerId, isBye, round } = match;
+      const tournament = round?.tournament;
+      if (!p1 || !tournament) continue;
+
+      const { pointsForWin, pointsForDraw, pointsForLoss } =
+        getTournamentPoints(tournament);
+
+      ensurePlayer(p1);
+      if (p2) ensurePlayer(p2);
+
+      if (isBye) {
+        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForWin);
+        winsMap.set(p1, (winsMap.get(p1) ?? 0) + 1);
+        continue;
+      }
+
+      if (!p2) continue;
+
+      matchCountMap.set(p1, (matchCountMap.get(p1) ?? 0) + 1);
+      matchCountMap.set(p2, (matchCountMap.get(p2) ?? 0) + 1);
+      opponentMap.get(p1)?.add(p2);
+      opponentMap.get(p2)?.add(p1);
+
+      if (!winnerId) {
+        drawsMap.set(p1, (drawsMap.get(p1) ?? 0) + 1);
+        drawsMap.set(p2, (drawsMap.get(p2) ?? 0) + 1);
+        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForDraw);
+        pointsMap.set(p2, (pointsMap.get(p2) ?? 0) + pointsForDraw);
+      } else if (winnerId === p1) {
+        winsMap.set(p1, (winsMap.get(p1) ?? 0) + 1);
+        lossesMap.set(p2, (lossesMap.get(p2) ?? 0) + 1);
+        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForWin);
+        pointsMap.set(p2, (pointsMap.get(p2) ?? 0) + pointsForLoss);
+      } else {
+        winsMap.set(p2, (winsMap.get(p2) ?? 0) + 1);
+        lossesMap.set(p1, (lossesMap.get(p1) ?? 0) + 1);
+        pointsMap.set(p2, (pointsMap.get(p2) ?? 0) + pointsForWin);
+        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForLoss);
+      }
+    }
+
+    const playerIds = Array.from(new Set([...participants.map((p) => p.userId), ...Array.from(pointsMap.keys())]));
+
+    for (const id of playerIds) {
+      ensurePlayer(id);
+    }
+
+    const mwpMap = new Map<string, number>();
+    for (const id of playerIds) {
+      const wins = winsMap.get(id) ?? 0;
+      const draws = drawsMap.get(id) ?? 0;
+      const matchesPlayed = matchCountMap.get(id) ?? 0;
+      const possiblePoints = matchesPlayed * 3;
+      const earnedPoints = wins * 3 + draws * 1;
+      const raw = possiblePoints === 0 ? 0.33 : Math.max(earnedPoints / possiblePoints, 0.33);
+      mwpMap.set(id, raw);
+    }
+
+    const omwMap = new Map<string, number>();
+    for (const id of playerIds) {
+      const opponents = [...(opponentMap.get(id) ?? [])];
+      if (opponents.length === 0) {
+        omwMap.set(id, 0.33);
+        continue;
+      }
+      const avg = opponents.reduce((sum, oppId) => sum + (mwpMap.get(oppId) ?? 0.33), 0) / opponents.length;
+      omwMap.set(id, Math.max(avg, 0.33));
+    }
+
+    const oomwMap = new Map<string, number>();
+    for (const id of playerIds) {
+      const opponents = [...(opponentMap.get(id) ?? [])];
+      if (opponents.length === 0) {
+        oomwMap.set(id, 0.33);
+        continue;
+      }
+      const avg = opponents.reduce((sum, oppId) => sum + (omwMap.get(oppId) ?? 0.33), 0) / opponents.length;
+      oomwMap.set(id, avg);
+    }
+
+    const entries: Omit<GlobalLeaderboardEntry, 'rank'>[] = playerIds.map((id) => ({
+      userId: id,
+      username: participantMap.get(id) ?? 'Guest',
+      points: pointsMap.get(id) ?? 0,
+      wins: winsMap.get(id) ?? 0,
+      losses: lossesMap.get(id) ?? 0,
+      draws: drawsMap.get(id) ?? 0,
+      matchWinPct: mwpMap.get(id) ?? 0.33,
+      omw: omwMap.get(id) ?? 0.33,
+      oomw: oomwMap.get(id) ?? 0.33,
+      tournamentsPlayed: tournamentSetByUser.get(id)?.size ?? 0,
+    }));
+
+    entries.sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      if (Math.abs(b.omw - a.omw) > 0.0001) return b.omw - a.omw;
+      if (Math.abs(b.oomw - a.oomw) > 0.0001) return b.oomw - a.oomw;
+      return b.matchWinPct - a.matchWinPct;
+    });
+
+    const ranked: GlobalLeaderboardEntry[] = [];
+    let currentRank = 1;
+    for (let i = 0; i < entries.length; i++) {
+      if (
+        i > 0 &&
+        (entries[i].points !== entries[i - 1].points ||
+          Math.abs(entries[i].omw - entries[i - 1].omw) > 0.0001 ||
+          Math.abs(entries[i].oomw - entries[i - 1].oomw) > 0.0001 ||
+          Math.abs(entries[i].matchWinPct - entries[i - 1].matchWinPct) > 0.0001)
       ) {
         currentRank = i + 1;
       }
