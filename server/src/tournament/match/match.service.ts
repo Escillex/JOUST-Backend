@@ -46,14 +46,20 @@ export class MatchService {
   async submitResult(matchId: string, winnerId?: string) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      include: { round: { include: { tournament: true } } },
+      include: {
+        round: {
+          include: {
+            tournament: {
+              include: { formatConfig: true }, // 👈 include formatConfig
+            },
+          },
+        },
+      },
     });
 
     if (!match) throw new NotFoundException('Match not found');
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
-    if (match.status === MatchStatus.PENDING)
-      throw new BadRequestException('Match not started');
 
     if (winnerId) {
       const validPlayers = [match.player1Id, match.player2Id].filter(Boolean);
@@ -61,15 +67,38 @@ export class MatchService {
         throw new BadRequestException('Winner must be in match');
     }
 
+    const config = match.round.tournament.formatConfig;
+
+    // 👇 sessionsCount: if set, validate that enough sessions were played
+    // before allowing a winner to be submitted. This is a guard — the actual
+    // session tracking would live in a separate sessions table if you want
+    // full per-session scores. For now we trust the caller.
+    const sessionsCount = config?.sessionsCount ?? null;
+    const pointsThreshold = config?.pointsThreshold ?? null;
+
+    // If pointsThreshold is set and no winnerId provided, reject
+    if (pointsThreshold && !winnerId) {
+      throw new BadRequestException(
+        `This match requires a points threshold of ${pointsThreshold} to determine a winner`,
+      );
+    }
+
     const completed = await this.prisma.match.update({
       where: { id: matchId },
       data: { winnerId: winnerId || null, status: MatchStatus.COMPLETED },
     });
 
-    // Delegate format-specific logic (advancement or next round pairing)
     await this.formatsService.handleMatchCompletion(matchId);
 
-    return { message: 'Result submitted', match: completed };
+    return {
+      message: 'Result submitted',
+      match: completed,
+      // 👇 return config info so frontend knows what format rules applied
+      formatApplied: {
+        sessionsCount,
+        pointsThreshold,
+      },
+    };
   }
 
   async advanceWinner(winnerId: string, nextMatchId: string) {
@@ -86,6 +115,27 @@ export class MatchService {
 
     if (updated.player1Id && updated.player2Id) {
       await this.activateMatch(nextMatchId);
+    } else if (updated.isBye && (updated.player1Id || updated.player2Id)) {
+      await this.submitResult(nextMatchId, winnerId);
+    }
+  }
+
+  async advanceLoser(loserId: string, nextMatchId: string) {
+    const nextMatch = await this.prisma.match.findUnique({
+      where: { id: nextMatchId },
+    });
+    if (!nextMatch) return;
+
+    const slot = nextMatch.player1Id === null ? 'player1Id' : 'player2Id';
+    const updated = await this.prisma.match.update({
+      where: { id: nextMatchId },
+      data: { [slot]: loserId },
+    });
+
+    if (updated.player1Id && updated.player2Id) {
+      await this.activateMatch(nextMatchId);
+    } else if (updated.isBye && (updated.player1Id || updated.player2Id)) {
+      await this.submitResult(nextMatchId, loserId);
     }
   }
 

@@ -33,10 +33,6 @@ export default function AuthPage() {
       if (response.ok) {
         setMessage(`Success: ${mode === "login" ? "Signed in" : "Signed up"}`);
 
-        if (data.token) {
-          localStorage.setItem("token", data.token);
-        }
-
         setTimeout(() => {
           router.push("/join_tournament");
         }, 1000);
@@ -60,7 +56,7 @@ export default function AuthPage() {
       {/* Main content */}
       <main className="flex-1 flex items-center justify-center px-4 py-12">
         <div
-          className="w-full max-w-[477px] rounded-[20px] p-8 sm:p-[50px] flex flex-col items-center gap-[14px]"
+          className="w-full max-w-119.25 rounded-[20px] p-8 sm:p-12.5 flex flex-col items-center gap-3.5"
           style={{
             background: "linear-gradient(180deg, #2A2A2A 0%, #212121 100%)",
             boxShadow: "0 4px 20px 0 rgba(0,0,0,0.25)",
@@ -73,18 +69,18 @@ export default function AuthPage() {
             alt="Hobby+ Logo"
             width={300}
             height={85}
-            className="w-[240px] sm:w-[300px] h-auto object-contain"
+            className="w-60 sm:w-75 h-auto object-contain"
             priority
           />
 
           {/* Login / Sign Up Tabs */}
           <div
-            className="w-full flex items-center gap-[28px] rounded-[20px] p-[10px]"
+            className="w-full flex items-center gap-7 rounded-[20px] p-2.5"
             style={{ background: "#171717" }}
           >
             <button
               onClick={() => setMode("login")}
-              className={`flex-1 h-[50px] sm:h-[60px] rounded-[10px] flex items-center justify-center transition-colors font-semibold text-lg sm:text-2xl tracking-[1.1px] uppercase text-white ${
+              className={`flex-1 h-12.5 sm:h-15 rounded-[10px] flex items-center justify-center transition-colors font-semibold text-lg sm:text-2xl tracking-[1.1px] uppercase text-white ${
                 mode === "login"
                   ? "bg-[#52B946]"
                   : "bg-transparent hover:bg-white/5"
@@ -94,7 +90,7 @@ export default function AuthPage() {
             </button>
             <button
               onClick={() => setMode("signup")}
-              className={`flex-1 h-[50px] sm:h-[60px] rounded-[10px] flex items-center justify-center transition-colors font-semibold text-lg sm:text-2xl tracking-[1.1px] uppercase text-white ${
+              className={`flex-1 h-12.5 sm:h-15 rounded-[10px] flex items-center justify-center transition-colors font-semibold text-lg sm:text-2xl tracking-[1.1px] uppercase text-white ${
                 mode === "signup"
                   ? "bg-[#52B946]"
                   : "bg-transparent hover:bg-white/5"
@@ -111,7 +107,7 @@ export default function AuthPage() {
                 Email/Username
               </label>
               <div
-                className="w-full h-[50px] rounded-[5px] flex items-center px-[15px]"
+                className="w-full h-12.5 rounded-[5px] flex items-center px-3.75"
                 style={{ background: "#101010" }}
               >
                 <input
@@ -139,7 +135,7 @@ export default function AuthPage() {
                 </button>
               </div>
               <div
-                className="w-full h-[50px] rounded-[5px] flex items-center px-[15px]"
+                className="w-full h-12.5 rounded-[5px] flex items-center px-3.75"
                 style={{ background: "#101010" }}
               >
                 <input
@@ -170,7 +166,7 @@ export default function AuthPage() {
             <div className="flex justify-center mt-2">
               <button
                 type="submit"
-                className="w-[240px] sm:w-[280px] h-[60px] rounded-[20px] bg-[#52B946] hover:bg-[#3E9434] transition-colors flex items-center justify-center font-black text-[18px] sm:text-[20px] tracking-[1.1px] uppercase text-white"
+                className="w-60 sm:w-70 h-15 rounded-[20px] bg-[#52B946] hover:bg-[#3E9434] transition-colors flex items-center justify-center font-black text-[18px] sm:text-[20px] tracking-[1.1px] uppercase text-white"
               >
                 {mode === "login" ? "Enter Arena" : "Join Arena"}
               </button>
@@ -184,22 +180,22 @@ export default function AuthPage() {
         className="w-full border-t-4 border-[#2F2F2F]"
         style={{ background: "#1B1B1B" }}
       >
-        <div className="max-w-[1920px] mx-auto px-6 sm:px-[100px] py-[10px] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0 min-h-[80px] sm:min-h-[100px]">
+        <div className="max-w-480 mx-auto px-6 sm:px-25 py-2.5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0 min-h-20 sm:min-h-25">
           {/* Contact Info */}
-          <div className="flex flex-col gap-[10px]">
+          <div className="flex flex-col gap-2.5">
             <span className="text-[#838383] text-base sm:text-[20px]">Contact no:</span>
             <span className="text-[#838383] text-base sm:text-[20px]">Email:</span>
             <span className="text-[#838383] text-base sm:text-[20px]">Facebook</span>
           </div>
 
           {/* Shop Links */}
-          <div className="flex flex-col items-center gap-[10px]">
+          <div className="flex flex-col items-center gap-2.5">
             <span className="text-[#838383] text-base sm:text-[20px] text-center">Lazada</span>
             <span className="text-[#838383] text-base sm:text-[20px] text-center">Shoppee</span>
           </div>
 
           {/* Location */}
-          <div className="flex items-center justify-center p-[10px]">
+          <div className="flex items-center justify-center p-2.5">
             <span className="text-[#838383] text-base sm:text-[20px] text-center">Location</span>
           </div>
         </div>

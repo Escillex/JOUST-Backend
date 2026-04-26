@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  
 }
 
 enum Role {
@@ -24,6 +25,7 @@ enum TournamentFormat {
   SWISS
   FREE_FOR_ALL
   ROUND_ROBIN
+  CUSTOM
 }
 
 enum MatchStatus {
@@ -33,15 +35,18 @@ enum MatchStatus {
 }
 
 model User {
-  id              String    @unique @default(uuid())
-  email           String    @unique
-  username        String    @unique
-  hashedPassword  String
+  id              String    @id @default(uuid())
+  email           String?   @unique
+  username        String?   @unique
+  hashedPassword  String?
+  isGuest         Boolean   @default(false)
+  guestName       String?
   roles           Role[]    @default([PLAYER])
   createdAt       DateTime  @default(now())
   updateAt        DateTime  @updatedAt()
 
   tournamentsCreated    Tournament[]
+  wonTournaments        Tournament[] @relation("TournamentWinner")
   participatedTournaments TournamentParticipant[]
   matchesAsPlayer1      Match[] @relation("Player1")
   matchesAsPlayer2      Match[] @relation("Player2")
@@ -60,11 +65,44 @@ model Tournament {
   createdById String
   createdBy   User @relation(fields: [createdById], references: [id])
 
+  winnerId    String?
+  winner      User? @relation("TournamentWinner", fields: [winnerId], references: [id])
+
   participants TournamentParticipant[]
   rounds       Round[]
+  formatConfig FormatConfig? 
 
   createdAt DateTime @default(now())
 }
+
+model FormatConfig {
+  id                    String      @id @default(uuid())
+  tournamentId          String      @unique
+  tournament            Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  
+  // Single/Double Elimination
+  winsToAdvance         Int?        @default(1)
+  
+  // Swiss
+  swissRounds           Int?
+  swissPointsForWin     Int?        @default(3)
+  swissPointsForDraw    Int?        @default(1)
+  swissPointsForLoss    Int?        @default(0)
+  
+  // Points-based / Best-of
+  pointsThreshold       Int?
+  sessionsCount         Int?
+  pointsPerSession      Int?
+
+  // Custom / template support
+  customTemplateId      String?
+  customRules           Json?
+  progression           Json?
+
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+}
+
 
 model TournamentParticipant {
   id            String @id @default(uuid())
@@ -109,6 +147,10 @@ model Match {
   nextMatchId   String?
   nextMatch     Match? @relation("NextMatch", fields: [nextMatchId], references: [id])
   previousMatches Match[] @relation("NextMatch")
+
+  loserNextMatchId String?
+  loserNextMatch   Match? @relation("LoserNextMatch", fields: [loserNextMatchId], references: [id])
+  previousLoserMatches Match[] @relation("LoserNextMatch")
 
   status        MatchStatus @default(PENDING)
 

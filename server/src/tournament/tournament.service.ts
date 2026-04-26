@@ -29,11 +29,17 @@ export class TournamentService {
         prizePool: dto.prizePool,
         isPrivate: dto.isPrivate,
         createdById: dto.createdById,
+        ...(dto.formatConfig && {
+          formatConfig: {
+            create: dto.formatConfig,
+          },
+        }),
       },
       include: {
         createdBy: {
           select: { id: true, username: true, roles: true, email: true },
         },
+        formatConfig: true,
       },
     });
   }
@@ -46,11 +52,24 @@ export class TournamentService {
     if (tournament.status !== TournamentStatus.OPEN)
       throw new BadRequestException('Cannot edit started tournament');
 
-    const updateData = { ...dto };
-    delete updateData.createdById;
+    const { formatConfig, createdById, ...rest } = dto;
+
     return this.prisma.tournament.update({
       where: { id },
-      data: updateData,
+      data: {
+        ...rest,
+        ...(formatConfig && {
+          formatConfig: {
+            upsert: {
+              create: formatConfig,
+              update: formatConfig,
+            },
+          },
+        }),
+      },
+      include: {
+        formatConfig: true,
+      },
     });
   }
 
@@ -65,6 +84,12 @@ export class TournamentService {
       throw new BadRequestException('Tournament already started');
     if (tournament.participants.length < 2)
       throw new BadRequestException('Need at least 2 players');
+
+    const existingRounds = await this.prisma.round.count({
+      where: { tournamentId },
+    });
+    if (existingRounds > 0)
+      throw new BadRequestException('Tournament has already been initialized');
 
     const participants = tournament.participants.map((p) => p.userId);
     const shuffled = this.shuffle(participants);
@@ -101,56 +126,37 @@ export class TournamentService {
             user: true,
           },
         },
-        rounds: {
-          orderBy: { roundNumber: 'desc' },
-          take: 1,
-          include: {
-            matches: {
-              where: { status: MatchStatus.COMPLETED }, // Fixed enum here
-              include: { winner: true }
-            }
-          }
-        }
       },
     });
-  
+
     if (!tournament) throw new NotFoundException('Tournament not found');
-    
-    // Find the overall winner to exclude from deletion
-    let winnerId: string | null = null;
-    if (tournament.rounds.length > 0 && tournament.rounds[0].matches.length > 0) {
-      // In single elim, last round has 1 match with the champion
-      winnerId = tournament.rounds[0].matches[0].winnerId;
-    }
-  
-    // 1. Get guest user IDs from this tournament only, excluding the winner
+
+    const winnerId = tournament.winnerId;
+
     const guestUserIds = tournament.participants
-      .filter((p) => p.user.email.startsWith('guest_') && p.user.id !== winnerId)
+      .filter((p) => p.user.isGuest && p.user.id !== winnerId)
       .map((p) => p.user.id);
-  
-    // 2. Mark tournament as completed (if not already)
+
     if (tournament.status !== TournamentStatus.COMPLETED) {
       await this.prisma.tournament.update({
         where: { id: tournamentId },
         data: { status: TournamentStatus.COMPLETED },
       });
     }
-  
+
     if (guestUserIds.length > 0) {
-      // 3. Delete their TournamentParticipant records first (foreign key safety)
       await this.prisma.tournamentParticipant.deleteMany({
         where: { userId: { in: guestUserIds } },
       });
-  
-      // 4. Delete the guest users themselves
+
       await this.prisma.user.deleteMany({
         where: {
           id: { in: guestUserIds },
-          email: { startsWith: 'guest_' }, // double safety check
+          isGuest: true,
         },
       });
     }
-  
+
     return { message: 'Tournament data cleaned up. Winner preserved.' };
   }
 
@@ -159,9 +165,21 @@ export class TournamentService {
       where: { id: tournamentId },
       include: {
         createdBy: { select: { id: true, username: true, email: true } },
+        winner: {
+          select: { id: true, username: true, guestName: true, isGuest: true },
+        },
+        formatConfig: true,
         participants: {
           include: {
-            user: { select: { id: true, username: true, email: true } },
+            user: {
+              select: {
+                id: true,
+                username: true,
+                email: true,
+                guestName: true,
+                isGuest: true,
+              },
+            },
           },
         },
         rounds: {
@@ -169,9 +187,30 @@ export class TournamentService {
           include: {
             matches: {
               include: {
-                player1: { select: { id: true, username: true } },
-                player2: { select: { id: true, username: true } },
-                winner: { select: { id: true, username: true } },
+                player1: {
+                  select: {
+                    id: true,
+                    username: true,
+                    guestName: true,
+                    isGuest: true,
+                  },
+                },
+                player2: {
+                  select: {
+                    id: true,
+                    username: true,
+                    guestName: true,
+                    isGuest: true,
+                  },
+                },
+                winner: {
+                  select: {
+                    id: true,
+                    username: true,
+                    guestName: true,
+                    isGuest: true,
+                  },
+                },
               },
             },
           },
@@ -186,13 +225,16 @@ export class TournamentService {
     return this.prisma.tournament.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
+        winner: { select: { username: true, guestName: true, isGuest: true } },
         rounds: {
           orderBy: { roundNumber: 'desc' },
           take: 1,
           include: {
             matches: {
               include: {
-                winner: { select: { username: true } },
+                winner: {
+                  select: { username: true, guestName: true, isGuest: true },
+                },
               },
             },
           },

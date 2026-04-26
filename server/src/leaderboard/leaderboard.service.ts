@@ -20,7 +20,6 @@ export class LeaderboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getLeaderboard(tournamentId: string): Promise<LeaderboardEntry[]> {
-    // 1. Fetch all completed matches for this tournament
     const matches = await this.prisma.match.findMany({
       where: {
         round: { tournamentId },
@@ -34,20 +33,29 @@ export class LeaderboardService {
       },
     });
 
-    // 2. Fetch all participants
     const participants = await this.prisma.tournamentParticipant.findMany({
       where: { tournamentId },
       include: { user: { select: { id: true, username: true } } },
     });
 
+    // 👇 fetch formatConfig for custom points
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { formatConfig: true },
+    });
+
+    // 👇 use config values if set, fallback to defaults
+    const pointsForWin = tournament?.formatConfig?.swissPointsForWin ?? 3;
+    const pointsForDraw = tournament?.formatConfig?.swissPointsForDraw ?? 1;
+    const pointsForLoss = tournament?.formatConfig?.swissPointsForLoss ?? 0;
+
     const playerIds = participants.map((p) => p.userId);
 
-    // 3. Build data maps
     const opponentMap = new Map<string, Set<string>>();
     const winsMap = new Map<string, number>();
     const lossesMap = new Map<string, number>();
     const drawsMap = new Map<string, number>();
-    const matchCountMap = new Map<string, number>(); // Actual matches played (excluding byes)
+    const matchCountMap = new Map<string, number>();
 
     for (const id of playerIds) {
       opponentMap.set(id, new Set());
@@ -57,7 +65,6 @@ export class LeaderboardService {
       matchCountMap.set(id, 0);
     }
 
-    // 4. Calculate stats from matches
     for (const match of matches) {
       const { player1Id: p1, player2Id: p2, winnerId, isBye } = match;
       if (!p1) continue;
@@ -75,7 +82,6 @@ export class LeaderboardService {
       opponentMap.get(p2)?.add(p1);
 
       if (!winnerId) {
-        // DRAW
         drawsMap.set(p1, (drawsMap.get(p1) ?? 0) + 1);
         drawsMap.set(p2, (drawsMap.get(p2) ?? 0) + 1);
       } else if (winnerId === p1) {
@@ -87,25 +93,23 @@ export class LeaderboardService {
       }
     }
 
-    // 5. Calculate Match Win % (MWP)
-    // MWP = (Wins*3 + Draws*1) / (MatchesPlayed*3)
     const mwpMap = new Map<string, number>();
     for (const id of playerIds) {
       const wins = winsMap.get(id) ?? 0;
       const draws = drawsMap.get(id) ?? 0;
       const matchesPlayed = matchCountMap.get(id) ?? 0;
-      
-      const byes = matches.filter(m => m.isBye && m.player1Id === id).length;
+
+      const byes = matches.filter((m) => m.isBye && m.player1Id === id).length;
       const realWins = wins - byes;
-      
-      const possiblePoints = matchesPlayed * 3;
-      const earnedPoints = (realWins * 3) + (draws * 1);
-      
+
+      // 👇 use config points for MWP calculation
+      const possiblePoints = matchesPlayed * pointsForWin;
+      const earnedPoints = realWins * pointsForWin + draws * pointsForDraw;
+
       const raw = possiblePoints === 0 ? 0.33 : earnedPoints / possiblePoints;
       mwpMap.set(id, Math.max(raw, 0.33));
     }
 
-    // 6. Calculate OMW: average MWP of all opponents
     const omwMap = new Map<string, number>();
     for (const id of playerIds) {
       const opponents = [...(opponentMap.get(id) ?? [])];
@@ -119,7 +123,6 @@ export class LeaderboardService {
       omwMap.set(id, Math.max(avg, 0.33));
     }
 
-    // 7. Calculate OOMW: average OMW of all opponents
     const oomwMap = new Map<string, number>();
     for (const id of playerIds) {
       const opponents = [...(opponentMap.get(id) ?? [])];
@@ -133,17 +136,26 @@ export class LeaderboardService {
       oomwMap.set(id, avg);
     }
 
-    // 8. Build and sort leaderboard: Points → OMW → OOMW
+    // 👇 use config points for final score calculation
     const entries: Omit<LeaderboardEntry, 'rank'>[] = participants.map((p) => {
       const id = p.userId;
       const wins = winsMap.get(id) ?? 0;
+      const losses = lossesMap.get(id) ?? 0;
       const draws = drawsMap.get(id) ?? 0;
+
+      const byes = matches.filter((m) => m.isBye && m.player1Id === id).length;
+      const realWins = wins - byes;
+
       return {
         userId: id,
-        username: p.user.username,
-        points: (wins * 3) + (draws * 1),
+        username: p.user.username ?? 'Guest',
+        points:
+          realWins * pointsForWin +
+          draws * pointsForDraw +
+          losses * pointsForLoss +
+          byes * pointsForWin,
         wins,
-        losses: lossesMap.get(id) ?? 0,
+        losses,
         draws,
         matchWinPct: mwpMap.get(id) ?? 0.33,
         omw: omwMap.get(id) ?? 0.33,
@@ -154,10 +166,10 @@ export class LeaderboardService {
     entries.sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
       if (Math.abs(b.omw - a.omw) > 0.0001) return b.omw - a.omw;
-      return b.oomw - a.oomw;
+      if (Math.abs(b.oomw - a.oomw) > 0.0001) return b.oomw - a.oomw;
+      return b.matchWinPct - a.matchWinPct;
     });
 
-    // 9. Assign ranks
     const ranked: LeaderboardEntry[] = [];
     let currentRank = 1;
     for (let i = 0; i < entries.length; i++) {
@@ -165,7 +177,9 @@ export class LeaderboardService {
         i > 0 &&
         (entries[i].points !== entries[i - 1].points ||
           Math.abs(entries[i].omw - entries[i - 1].omw) > 0.0001 ||
-          Math.abs(entries[i].oomw - entries[i - 1].oomw) > 0.0001)
+          Math.abs(entries[i].oomw - entries[i - 1].oomw) > 0.0001 ||
+          Math.abs(entries[i].matchWinPct - entries[i - 1].matchWinPct) >
+            0.0001)
       ) {
         currentRank = i + 1;
       }

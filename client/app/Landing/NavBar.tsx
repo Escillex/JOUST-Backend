@@ -16,10 +16,10 @@ export default function Navbar() {
   ];
 
   return (
-    <nav className="w-full bg-[#1B1B1B] h-[70px] flex items-center px-3 md:px-12 gap-4 z-50 sticky top-0">
+    <nav className="w-full bg-[#1B1B1B] h-17.5 flex items-center px-3 md:px-12 gap-4 z-50 sticky top-0">
       {/* Logo */}
       <Link href="/" className="flex items-center shrink-0 h-full px-2">
-        <div className="relative h-7 w-[138px]">
+        <div className="relative h-7 w-34.5">
           <Image
             src="https://api.builder.io/api/v1/image/assets/TEMP/acefcd35d1741c1bba2b097e2b3f77c39dc917b8?width=276"
             alt="Hobby+ Logo"
@@ -77,7 +77,7 @@ export default function Navbar() {
 
       {/* Mobile Dropdown */}
       {menuOpen && (
-        <div className="absolute top-[70px] left-0 right-0 bg-[#1B1B1B] border-t border-[#2F2F2F] flex flex-col p-4 gap-4 md:hidden z-50">
+        <div className="absolute top-17.5 left-0 right-0 bg-[#1B1B1B] border-t border-[#2F2F2F] flex flex-col p-4 gap-4 md:hidden z-50">
           {navLinks.map((link) => (
             <Link
               key={link.href}
@@ -91,7 +91,7 @@ export default function Navbar() {
             </Link>
           ))}
           <Link
-            href="/signin"
+            href="/Auth"
             onClick={() => setMenuOpen(false)}
             className="inline-flex items-center justify-center px-5 py-2 rounded-[20px] bg-[#52B946] text-black font-questrial text-sm w-fit hover:bg-[#3E9434] transition-colors"
           >

@@ -53,8 +53,10 @@ export class TournamentController {
   }
 
   @Patch(':id/complete')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
   completeTournament(@Param('id') id: string) {
-  return this.tournamentService.completeTournament(id);
+    return this.tournamentService.completeTournament(id);
   }
 
   // GET /tournaments/:id

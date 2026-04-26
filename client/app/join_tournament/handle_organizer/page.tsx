@@ -7,6 +7,7 @@ import { authenticatedFetch } from "@/app/utils/api";
 interface User {
   id: string;
   username: string;
+  guestName?: string;
   email: string;
   roles: string[];
 }
@@ -16,6 +17,7 @@ interface CurrentUser {
   email: string;
   roles: string[];
   username: string;
+  guestName?: string;
 }
 
 export default function HandleOrganizerPage() {
@@ -187,7 +189,7 @@ export default function HandleOrganizerPage() {
                     return (
                       <tr key={user.id} className="hover:bg-white/5 transition-colors">
                         <td className="p-5 text-white font-bold uppercase tracking-[1.1px]">
-                          {user.username}
+                          {user.guestName || user.username || "TBD"}
                         </td>
                         <td className="p-5 text-[#838383] font-medium tracking-[1.1px]">
                           {user.email}

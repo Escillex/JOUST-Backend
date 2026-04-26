@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { AuthDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
@@ -57,6 +61,10 @@ export class AuthService {
       throw new BadRequestException('User is not Registered');
     }
 
+    if (!foundUser.hashedPassword) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     const isPasswordValid = await this.verifyPassword(
       password,
       foundUser.hashedPassword,
@@ -100,7 +108,12 @@ export class AuthService {
     return bcrypt.compare(password, hashedPassword);
   }
 
-  async generateToken(userId: string, email: string, roles: Role[], username: string) {
+  async generateToken(
+    userId: string,
+    email: string | null,
+    roles: Role[],
+    username: string | null,
+  ) {
     const payload = { sub: userId, email, roles, username };
     return this.jwt.signAsync(payload);
   }
@@ -121,11 +134,7 @@ export class AuthService {
   async getRegisteredUsers() {
     return this.prisma.user.findMany({
       where: {
-        NOT: {
-          email: {
-            startsWith: 'guest_',
-          },
-        },
+        isGuest: false,
       },
       select: {
         id: true,
@@ -153,30 +162,16 @@ export class AuthService {
 
   // 👤 CREATE GUEST USER (for walk-ins)
   async CreateGuestUser(username: string) {
-    const existing = await this.prisma.user.findUnique({
-      where: { username },
-    });
-
-    if (existing) {
-      throw new BadRequestException('A warrior with this name already exists');
-    }
-
-    // Generate a placeholder email and hash for the guest
-    const guestId = Math.random().toString(36).substring(7);
-    const email = `guest_${guestId}@joust.arena`;
-    const hashedPassword = await this.hashPassword(`guest_pass_${guestId}`);
-
     return this.prisma.user.create({
       data: {
-        username,
-        email,
-        hashedPassword,
+        isGuest: true,
+        guestName: username,
         roles: [Role.PLAYER],
       },
       select: {
         id: true,
-        username: true,
-        email: true,
+        guestName: true,
+        isGuest: true,
       },
     });
   }
