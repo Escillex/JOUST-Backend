@@ -14,6 +14,7 @@ enum Role {
 }
 
 enum TournamentStatus {
+  UPCOMING
   OPEN
   ONGOING
   COMPLETED
@@ -23,9 +24,7 @@ enum TournamentFormat {
   SINGLE_ELIMINATION
   DOUBLE_ELIMINATION
   SWISS
-  FREE_FOR_ALL
   ROUND_ROBIN
-  CUSTOM
 }
 
 enum MatchStatus {
@@ -97,11 +96,6 @@ model FormatConfig {
   pointsThreshold       Int?
   sessionsCount         Int?
   pointsPerSession      Int?
-
-  // Custom / template support
-  customTemplateId      String?
-  customRules           Json?
-  progression           Json?
 
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt

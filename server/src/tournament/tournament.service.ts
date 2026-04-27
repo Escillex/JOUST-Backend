@@ -6,7 +6,7 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { FormatsService } from 'src/Formats/formats.service';
 import { CreateTournamentDto, UpdateTournamentDto } from './dto/tournament.dto';
-import { Tournament, TournamentStatus, MatchStatus } from '@prisma/client';
+import { Tournament, TournamentStatus, MatchStatus, TournamentFormat } from '@prisma/client';
 
 @Injectable()
 export class TournamentService {
@@ -21,6 +21,10 @@ export class TournamentService {
     });
     if (existing) throw new BadRequestException('Tournament name exists');
 
+    const formatConfig = this.applyBaseRules(dto.format, dto.formatConfig);
+
+    const status = dto.startNow ? TournamentStatus.OPEN : TournamentStatus.UPCOMING;
+
     return this.prisma.tournament.create({
       data: {
         name: dto.name,
@@ -31,10 +35,11 @@ export class TournamentService {
         venue: dto.venue,
         date: dto.date ? new Date(dto.date) : undefined,
         isPrivate: dto.isPrivate,
+        status: status,
         createdById: dto.createdById,
-        ...(dto.formatConfig && {
+        ...(formatConfig && {
           formatConfig: {
-            create: dto.formatConfig,
+            create: formatConfig,
           },
         }),
       },
@@ -42,9 +47,40 @@ export class TournamentService {
         createdBy: {
           select: { id: true, username: true, roles: true, email: true },
         },
-        formatConfig: true,
+        formatConfig: {
+          select: {
+            winsToAdvance: true,
+            swissRounds: true,
+            swissPointsForWin: true,
+            swissPointsForDraw: true,
+            swissPointsForLoss: true,
+            pointsThreshold: true,
+            sessionsCount: true,
+            pointsPerSession: true,
+          },
+        },
       },
     });
+  }
+
+  private applyBaseRules(format: TournamentFormat, config?: any) {
+    const baseRules: any = { ...config };
+    if (
+      format === TournamentFormat.SINGLE_ELIMINATION ||
+      format === TournamentFormat.DOUBLE_ELIMINATION ||
+      format === TournamentFormat.ROUND_ROBIN
+    ) {
+      if (baseRules.winsToAdvance === undefined) baseRules.winsToAdvance = 1;
+    }
+    if (format === TournamentFormat.SWISS) {
+      if (baseRules.swissPointsForWin === undefined)
+        baseRules.swissPointsForWin = 3;
+      if (baseRules.swissPointsForDraw === undefined)
+        baseRules.swissPointsForDraw = 1;
+      if (baseRules.swissPointsForLoss === undefined)
+        baseRules.swissPointsForLoss = 0;
+    }
+    return Object.keys(baseRules).length > 0 ? baseRules : undefined;
   }
 
   async updateTournament(id: string, dto: UpdateTournamentDto) {
@@ -72,7 +108,18 @@ export class TournamentService {
         }),
       },
       include: {
-        formatConfig: true,
+        formatConfig: {
+          select: {
+            winsToAdvance: true,
+            swissRounds: true,
+            swissPointsForWin: true,
+            swissPointsForDraw: true,
+            swissPointsForLoss: true,
+            pointsThreshold: true,
+            sessionsCount: true,
+            pointsPerSession: true,
+          },
+        },
       },
     });
   }
@@ -172,7 +219,18 @@ export class TournamentService {
         winner: {
           select: { id: true, username: true, guestName: true, isGuest: true },
         },
-        formatConfig: true,
+        formatConfig: {
+          select: {
+            winsToAdvance: true,
+            swissRounds: true,
+            swissPointsForWin: true,
+            swissPointsForDraw: true,
+            swissPointsForLoss: true,
+            pointsThreshold: true,
+            sessionsCount: true,
+            pointsPerSession: true,
+          },
+        },
         participants: {
           include: {
             user: {
@@ -233,7 +291,18 @@ export class TournamentService {
         winner: {
           select: { id: true, username: true, guestName: true, isGuest: true },
         },
-        formatConfig: true,
+        formatConfig: {
+          select: {
+            winsToAdvance: true,
+            swissRounds: true,
+            swissPointsForWin: true,
+            swissPointsForDraw: true,
+            swissPointsForLoss: true,
+            pointsThreshold: true,
+            sessionsCount: true,
+            pointsPerSession: true,
+          },
+        },
         participants: {
           include: {
             user: {
@@ -287,6 +356,19 @@ export class TournamentService {
   }
 
   async getAllTournaments(): Promise<Tournament[]> {
+    // Auto-open scheduled tournaments
+    await this.prisma.tournament.updateMany({
+      where: {
+        status: TournamentStatus.UPCOMING,
+        date: {
+          lte: new Date(),
+        },
+      },
+      data: {
+        status: TournamentStatus.OPEN,
+      },
+    });
+
     return this.prisma.tournament.findMany({
       orderBy: { createdAt: 'desc' },
       include: {

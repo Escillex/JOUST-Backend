@@ -50,7 +50,14 @@ export class MatchService {
         round: {
           include: {
             tournament: {
-              include: { formatConfig: true }, // 👈 include formatConfig
+              include: {
+                formatConfig: {
+                  select: {
+                    sessionsCount: true,
+                    pointsThreshold: true,
+                  },
+                },
+              },
             },
           },
         },
@@ -150,9 +157,9 @@ export class MatchService {
     return this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
-        player1: { select: { id: true, username: true } },
-        player2: { select: { id: true, username: true } },
-        winner: { select: { id: true, username: true } },
+        player1: { select: { id: true, username: true, guestName: true, isGuest: true } },
+        player2: { select: { id: true, username: true, guestName: true, isGuest: true } },
+        winner: { select: { id: true, username: true, guestName: true, isGuest: true } },
       },
     });
   }
@@ -161,9 +168,9 @@ export class MatchService {
     return this.prisma.match.findMany({
       where: { roundId },
       include: {
-        player1: { select: { id: true, username: true } },
-        player2: { select: { id: true, username: true } },
-        winner: { select: { id: true, username: true } },
+        player1: { select: { id: true, username: true, guestName: true, isGuest: true } },
+        player2: { select: { id: true, username: true, guestName: true, isGuest: true } },
+        winner: { select: { id: true, username: true, guestName: true, isGuest: true } },
       },
     });
   }

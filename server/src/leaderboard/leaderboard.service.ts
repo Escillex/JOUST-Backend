@@ -45,7 +45,15 @@ export class LeaderboardService {
     // 👇 fetch formatConfig for custom points
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: { formatConfig: true },
+      include: {
+        formatConfig: {
+          select: {
+            swissPointsForWin: true,
+            swissPointsForDraw: true,
+            swissPointsForLoss: true,
+          },
+        },
+      },
     });
 
     // 👇 use config values if set, fallback to defaults
@@ -206,7 +214,13 @@ export class LeaderboardService {
             tournament: {
               select: {
                 id: true,
-                formatConfig: true,
+                formatConfig: {
+                  select: {
+                    swissPointsForWin: true,
+                    swissPointsForDraw: true,
+                    swissPointsForLoss: true,
+                  },
+                },
               },
             },
           },

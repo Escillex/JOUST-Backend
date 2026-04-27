@@ -86,26 +86,6 @@ export class FormatConfigDto {
   @IsOptional()
   @IsString()
   progressionType?: string;
-
-  @IsOptional()
-  @IsUUID('4', { message: 'customTemplateId must be a valid UUID' })
-  customTemplateId?: string;
-
-  @IsOptional()
-  @IsString()
-  customTemplateName?: string;
-
-  @IsOptional()
-  @IsString()
-  customTemplateDesc?: string;
-
-  @IsOptional()
-  @IsObject()
-  customRules?: Prisma.JsonObject;
-
-  @IsOptional()
-  @IsObject()
-  progression?: Prisma.JsonObject;
 }
 
 // ─── CREATE TOURNAMENT ───────────────────────────────────────────
@@ -147,6 +127,10 @@ export class CreateTournamentDto {
   @IsBoolean()
   @IsOptional()
   isPrivate?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  startNow?: boolean;
 
   @IsUUID('4', { message: 'createdById must be a valid UUID' })
   createdById!: string;

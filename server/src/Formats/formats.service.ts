@@ -39,10 +39,8 @@ export class FormatsService {
       await this.initSwiss(tournamentId, playerIds);
     } else if (format === TournamentFormat.ROUND_ROBIN) {
       await this.initRoundRobin(tournamentId, playerIds);
-    } else if (format === TournamentFormat.FREE_FOR_ALL) {
-      await this.initFreeForAll(tournamentId, playerIds);
     } else {
-      throw new BadRequestException(`Format ${format} not supported yet`);
+      throw new BadRequestException(`Format ${format} not supported`);
     }
   }
 
@@ -83,10 +81,7 @@ export class FormatsService {
       await this.checkTournamentComplete(tournament.id);
     } else if (tournament.format === TournamentFormat.SWISS) {
       await this.checkSwissRoundComplete(tournament.id, match.roundId);
-    } else if (
-      tournament.format === TournamentFormat.ROUND_ROBIN ||
-      tournament.format === TournamentFormat.FREE_FOR_ALL
-    ) {
+    } else if (tournament.format === TournamentFormat.ROUND_ROBIN) {
       await this.checkTournamentComplete(tournament.id);
     }
   }
@@ -103,44 +98,6 @@ export class FormatsService {
     return this.formatDefinitions[format];
   }
 
-  getFormatTemplates() {
-    return [];
-  }
-
-  createFormatTemplate(payload: {
-    name: string;
-    description?: string;
-    format: TournamentFormat;
-    config: Record<string, unknown>;
-  }) {
-    return {
-      id: 'template-placeholder',
-      ...payload,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  updateFormatTemplate(
-    id: string,
-    payload: Partial<{
-      name: string;
-      description?: string;
-      format: TournamentFormat;
-      config: Record<string, unknown>;
-    }>,
-  ) {
-    return {
-      id,
-      ...payload,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  deleteFormatTemplate(id: string) {
-    return { message: `Template ${id} deleted successfully` };
-  }
-
   private readonly formatDefinitions: Record<
     string,
     {
@@ -151,6 +108,7 @@ export class FormatsService {
         key: string;
         label: string;
         placeholder: string;
+        defaultValue?: number | null;
         min?: number;
         max?: number;
       }>;
@@ -164,27 +122,31 @@ export class FormatsService {
         {
           key: 'winsToAdvance',
           label: 'Wins to Advance',
-          placeholder: 'Default: 1',
+          placeholder: '1',
+          defaultValue: 1,
           min: 1,
           max: 7,
         },
         {
           key: 'sessionsCount',
           label: 'Sessions / Match',
-          placeholder: 'e.g. 3 (BO3)',
+          placeholder: '1',
+          defaultValue: 1,
           min: 1,
         },
         {
           key: 'pointsPerSession',
           label: 'Pts / Session',
-          placeholder: 'e.g. 21',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
         {
           key: 'pointsThreshold',
           label: 'Pts Threshold',
-          placeholder: 'e.g. 100',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
       ],
     },
@@ -197,27 +159,31 @@ export class FormatsService {
         {
           key: 'winsToAdvance',
           label: 'Wins to Advance',
-          placeholder: 'Default: 1',
+          placeholder: '1',
+          defaultValue: 1,
           min: 1,
           max: 7,
         },
         {
           key: 'sessionsCount',
           label: 'Sessions / Match',
-          placeholder: 'e.g. 3 (BO3)',
+          placeholder: '1',
+          defaultValue: 1,
           min: 1,
         },
         {
           key: 'pointsPerSession',
           label: 'Pts / Session',
-          placeholder: 'e.g. 21',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
         {
           key: 'pointsThreshold',
           label: 'Pts Threshold',
-          placeholder: 'e.g. 100',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
       ],
     },
@@ -230,44 +196,51 @@ export class FormatsService {
           key: 'swissRounds',
           label: 'Swiss Rounds',
           placeholder: 'Auto',
+          defaultValue: null,
           min: 1,
           max: 20,
         },
         {
           key: 'swissPointsForWin',
           label: 'Points · Win',
-          placeholder: 'Default: 3',
+          placeholder: '3',
+          defaultValue: 3,
           min: 0,
         },
         {
           key: 'swissPointsForDraw',
           label: 'Points · Draw',
-          placeholder: 'Default: 1',
+          placeholder: '1',
+          defaultValue: 1,
           min: 0,
         },
         {
           key: 'swissPointsForLoss',
           label: 'Points · Loss',
-          placeholder: 'Default: 0',
+          placeholder: '0',
+          defaultValue: 0,
           min: 0,
         },
         {
           key: 'sessionsCount',
           label: 'Sessions / Match',
-          placeholder: 'e.g. 3 (BO3)',
+          placeholder: '1',
+          defaultValue: 1,
           min: 1,
         },
         {
           key: 'pointsPerSession',
           label: 'Pts / Session',
-          placeholder: 'e.g. 21',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
         {
           key: 'pointsThreshold',
           label: 'Pts Threshold',
-          placeholder: 'e.g. 100',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
       ],
     },
@@ -279,84 +252,23 @@ export class FormatsService {
         {
           key: 'sessionsCount',
           label: 'Sessions / Match',
-          placeholder: 'e.g. 3 (BO3)',
+          placeholder: '1',
+          defaultValue: 1,
           min: 1,
         },
         {
           key: 'pointsPerSession',
           label: 'Pts / Session',
-          placeholder: 'e.g. 21',
-          min: 1,
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
         {
           key: 'pointsThreshold',
           label: 'Pts Threshold',
-          placeholder: 'e.g. 100',
-          min: 1,
-        },
-      ],
-    },
-    FREE_FOR_ALL: {
-      id: TournamentFormat.FREE_FOR_ALL,
-      label: 'Free For All',
-      description: 'All players compete together. Points decide the winner.',
-      configFields: [
-        {
-          key: 'sessionsCount',
-          label: 'Sessions / Match',
-          placeholder: 'e.g. 3 (BO3)',
-          min: 1,
-        },
-        {
-          key: 'pointsPerSession',
-          label: 'Pts / Session',
-          placeholder: 'e.g. 21',
-          min: 1,
-        },
-        {
-          key: 'pointsThreshold',
-          label: 'Pts Threshold',
-          placeholder: 'e.g. 100',
-          min: 1,
-        },
-      ],
-    },
-    CUSTOM: {
-      id: 'CUSTOM' as TournamentFormat,
-      label: 'Custom Format',
-      description:
-        'Build a template with your own match rules, scoring, and progression.',
-      configFields: [
-        {
-          key: 'progressionType',
-          label: 'Progression Type',
-          placeholder: 'e.g. SWISS, ROUND_ROBIN, FREE_FOR_ALL',
-        },
-        {
-          key: 'bestOf',
-          label: 'Best Of',
-          placeholder: 'e.g. 3',
-          min: 1,
-        },
-        {
-          key: 'allowDraw',
-          label: 'Allow Draws',
-          placeholder: 'true/false',
-        },
-        {
-          key: 'tieBreakerOrder',
-          label: 'Tie-Break Order',
-          placeholder: 'e.g. [points,omw,oomw]',
-        },
-        {
-          key: 'customRules',
-          label: 'Custom Rules',
-          placeholder: 'Freeform JSON object',
-        },
-        {
-          key: 'progression',
-          label: 'Progression',
-          placeholder: 'Freeform JSON object',
+          placeholder: '0',
+          defaultValue: 0,
+          min: 0,
         },
       ],
     },
@@ -468,10 +380,6 @@ export class FormatsService {
     );
     if (!allDone) return;
 
-    // FIX #3 (cont): Check whether any match in this round feeds a next match.
-    // If so, this is NOT the final round — don't mark the tournament complete.
-    // The old code looked for a nextRound by roundNumber, but that round may
-    // not exist yet when byes are processed during initialization.
     const hasNextMatchLinks = round.matches.some((m) => m.nextMatchId !== null);
     if (hasNextMatchLinks) return;
 
@@ -574,7 +482,6 @@ export class FormatsService {
     }
 
     // Link Winners Losers (loserNextMatchId)
-    // WR1 losers -> LR1 (Round 101)
     for (let i = 0; i < winnersMatchIds[0].length; i++) {
       await this.prisma.match.update({
         where: { id: winnersMatchIds[0][i] },
@@ -582,10 +489,9 @@ export class FormatsService {
       });
     }
 
-    // WR(i+1) losers -> LR(2i) (Round 100 + 2i)
     for (let i = 1; i < winnersMatchIds.length - 1; i++) {
       const wrMatches = winnersMatchIds[i];
-      const lrMatches = losersMatchIds[2 * i - 1]; // LR(2i) is index 2i-1
+      const lrMatches = losersMatchIds[2 * i - 1]; 
       for (let j = 0; j < wrMatches.length; j++) {
         await this.prisma.match.update({
           where: { id: wrMatches[j] },
@@ -603,14 +509,12 @@ export class FormatsService {
       isBye: false,
     });
 
-    // Winners Final -> Grand Final
     const winnersFinalId = winnersMatchIds[winnersMatchIds.length - 1][0];
     await this.prisma.match.update({
       where: { id: winnersFinalId },
       data: { nextMatchId: gfMatch.id },
     });
 
-    // Link Losers Final -> Grand Final
     if (losersMatchIds.length > 0) {
       const losersFinalId = losersMatchIds[losersMatchIds.length - 1][0];
       await this.prisma.match.update({
@@ -618,14 +522,12 @@ export class FormatsService {
         data: { nextMatchId: gfMatch.id },
       });
     } else {
-      // If no losers rounds (e.g. N=2), Winners R1 loser goes straight to GF
       await this.prisma.match.update({
         where: { id: winnersMatchIds[0][0] },
         data: { loserNextMatchId: gfMatch.id },
       });
     }
 
-    // Handle byes in Winners R1
     const r1Matches = await this.prisma.match.findMany({
       where: { round: { tournamentId, roundNumber: 1 } },
     });
@@ -688,12 +590,18 @@ export class FormatsService {
 
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: { participants: true },
+      include: {
+        participants: true,
+        formatConfig: {
+          select: {
+            swissRounds: true,
+          },
+        },
+      },
     });
 
-    // FIX #4: Math.log2(1) = 0, so clamp to at least 1 to avoid a 0-round
-    // Swiss tournament that completes immediately on round 1.
-    const maxRounds = Math.max(
+    // Use swissRounds from config if set, otherwise auto
+    const maxRounds = tournament?.formatConfig?.swissRounds ?? Math.max(
       1,
       Math.ceil(Math.log2(tournament!.participants.length)),
     );
@@ -738,8 +646,6 @@ export class FormatsService {
       data: { tournamentId, roundNumber },
     });
 
-    // FIX #5: Pass leaderboard into buildSwissPairings so score-based
-    // tiebreaking is available (it was accepted but never used before).
     const pairings = this.buildSwissPairings(
       pairableIds,
       leaderboard,
@@ -818,9 +724,6 @@ export class FormatsService {
     leaderboard: LeaderboardEntry[],
     opponentHistory: Map<string, Set<string>>,
   ) {
-    // FIX #5: Actually use leaderboard scores for tiebreaking. When two
-    // candidates are both novel opponents, prefer the one closest in score
-    // to p1 (i.e. minimise score differential) — standard Swiss convention.
     const scoreMap = new Map<string, number>(
       leaderboard.map((e) => [e.userId, e.points]),
     );
@@ -835,8 +738,6 @@ export class FormatsService {
 
       const p1Score = scoreMap.get(p1) ?? 0;
 
-      // Gather all valid candidates (not yet paired, not a repeat opponent).
-      // Prefer novel opponents; fall back to repeat if no choice.
       let bestP2: string | null = null;
       let bestScoreDiff = Infinity;
       let fallbackP2: string | null = null;
@@ -913,36 +814,7 @@ export class FormatsService {
           await this.handleMatchCompletion(match.id);
         }
       }
-      // Standard circle-method rotation: keep index 0 fixed, rotate the rest.
       players.splice(1, 0, players.pop()!);
-    }
-  }
-
-  // ─── FREE FOR ALL ───────────────────────────────────────────
-
-  private async initFreeForAll(tournamentId: string, playerIds: string[]) {
-    const round = await this.prisma.round.create({
-      data: { tournamentId, roundNumber: 1 },
-    });
-
-    for (let i = 0; i < playerIds.length; i += 2) {
-      const p1 = playerIds[i];
-      const p2 = playerIds[i + 1];
-      const match = await this.matchService.createMatch({
-        roundId: round.id,
-        player1Id: p1,
-        player2Id: p2,
-        isBye: !p2,
-      });
-      if (p1 && p2) {
-        await this.matchService.activateMatch(match.id);
-      } else if (p1 && !p2) {
-        await this.prisma.match.update({
-          where: { id: match.id },
-          data: { winnerId: p1, status: MatchStatus.COMPLETED },
-        });
-        await this.handleMatchCompletion(match.id);
-      }
     }
   }
 
@@ -972,7 +844,6 @@ export class FormatsService {
         matches.push({ p1: current[i], p2: current[i + 1] || null });
       }
       rounds.push(matches);
-      // Carry forward "ALIVE" if at least one player or an alive branch exists
       current = matches.map((m) =>
         m.p1 !== null || m.p2 !== null ? 'ALIVE' : null,
       );
