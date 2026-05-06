@@ -229,6 +229,9 @@ export class LeaderboardService {
     });
 
     const participants = await this.prisma.tournamentParticipant.findMany({
+      where: {
+        user: { isGuest: false },
+      },
       include: {
         user: {
           select: { id: true, username: true },
@@ -388,5 +391,10 @@ export class LeaderboardService {
     }
 
     return ranked;
+  }
+
+  async getUserStats(userId: string): Promise<GlobalLeaderboardEntry | null> {
+    const globalLeaderboard = await this.getGlobalLeaderboard();
+    return globalLeaderboard.find((entry) => entry.userId === userId) || null;
   }
 }

@@ -11,13 +11,19 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { TournamentService } from './tournament.service';
-import { CreateTournamentDto, UpdateTournamentDto } from './dto/tournament.dto';
+import {
+  CreateTournamentDto,
+  UpdateTournamentDto,
+  TournamentStatusDto,
+} from './dto/tournament.dto';
 import { Roles } from 'src/guards/decorators/roles.decorator';
 import { RolesGuard } from 'src/guards/roles.guard';
 import { Role } from '@prisma/client';
 import { JwtAuthGuard } from 'src/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from 'src/guards/jwt-auth.guard';
 
 @Controller('tournaments')
 export class TournamentController {
@@ -41,6 +47,28 @@ export class TournamentController {
     @Body() dto: UpdateTournamentDto,
   ) {
     return this.tournamentService.updateTournament(id, dto);
+  }
+
+  @Patch(':id/status')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  async updateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: TournamentStatusDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.tournamentService.updateStatus(id, dto, req.user);
+  }
+
+  @Post(':id/generate-bracket')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  async generateBracket(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.tournamentService.generateBracket(id, req.user);
   }
 
   // POST /tournaments/:id/start

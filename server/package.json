@@ -25,6 +25,7 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/mapped-types": "*",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^6.1.3",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "@types/uuid": "^10.0.0",
@@ -32,6 +33,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
     "cookie-parser": "^1.4.7",
+    "cron": "^4.4.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
@@ -46,6 +48,7 @@
     "@nestjs/testing": "^11.0.1",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
+    "@types/cron": "^2.0.1",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.10.7",
@@ -77,6 +80,12 @@
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
+    "moduleNameMapper": {
+      "^prisma/(.*)$": "<rootDir>/../prisma/$1"
+    },
+    "modulePaths": [
+      "<rootDir>/../"
+    ],
     "collectCoverageFrom": [
       "**/*.(t|j)s"
     ],

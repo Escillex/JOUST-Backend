@@ -81,7 +81,6 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   DeleteMe(@Req() req: AuthenticatedRequest) {
-    console.log(req.user);
     return 'Test Delete';
   }
 }

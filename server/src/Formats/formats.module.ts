@@ -3,11 +3,18 @@ import { FormatsService } from './formats.service';
 import { FormatsController } from './formats.controller';
 import { PrismaModule } from 'prisma/prisma.module';
 import { MatchModule } from '../tournament/match/match.module';
+import { TournamentModule } from '../tournament/tournament.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 import { AuthModule } from 'src/auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => MatchModule), LeaderboardModule, AuthModule],
+  imports: [
+    PrismaModule,
+    forwardRef(() => MatchModule),
+    forwardRef(() => TournamentModule),
+    LeaderboardModule,
+    AuthModule,
+  ],
   controllers: [FormatsController],
   providers: [FormatsService],
   exports: [FormatsService],

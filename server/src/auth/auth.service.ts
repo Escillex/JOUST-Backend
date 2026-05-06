@@ -10,6 +10,7 @@ import { JwtService } from '@nestjs/jwt';
 import { isEmail } from './utils/check-input';
 import { Response } from 'express';
 import { Role } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class AuthService {
@@ -17,6 +18,26 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
   ) {}
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async handleGuestCleanup() {
+    const orphanedGuests = await this.prisma.user.findMany({
+      where: {
+        isGuest: true,
+        participatedTournaments: {
+          none: {},
+        },
+      },
+    });
+
+    if (orphanedGuests.length > 0) {
+      await this.prisma.user.deleteMany({
+        where: {
+          id: { in: orphanedGuests.map((u) => u.id) },
+        },
+      });
+    }
+  }
 
   async SignUp(dto: AuthDto) {
     const { identifier, password } = dto;
@@ -114,7 +135,7 @@ export class AuthService {
     roles: Role[],
     username: string | null,
   ) {
-    const payload = { sub: userId, email, roles, username };
+    const payload = { id: userId, email, roles, username };
     return this.jwt.signAsync(payload);
   }
 

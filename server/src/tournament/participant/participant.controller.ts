@@ -31,7 +31,7 @@ export class ParticipantController {
     @Body() dto: JoinTournamentDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    if (req.user.sub !== dto.userId) {
+    if (req.user.id !== dto.userId) {
       throw new UnauthorizedException('Cannot join as another user');
     }
     return this.participantService.joinTournament(tournamentId, dto.userId);

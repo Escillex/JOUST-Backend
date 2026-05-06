@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { MatchService } from '../tournament/match/match.service';
+import { TournamentService } from '../tournament/tournament.service';
 import {
   LeaderboardService,
   LeaderboardEntry,
@@ -23,6 +24,8 @@ export class FormatsService {
     private prisma: PrismaService,
     @Inject(forwardRef(() => MatchService))
     private matchService: MatchService,
+    @Inject(forwardRef(() => TournamentService))
+    private tournamentService: TournamentService,
     private leaderboardService: LeaderboardService,
   ) {}
 
@@ -30,15 +33,16 @@ export class FormatsService {
     tournamentId: string,
     format: TournamentFormat,
     playerIds: string[],
+    activate: boolean = true,
   ) {
     if (format === TournamentFormat.SINGLE_ELIMINATION) {
-      await this.initSingleElimination(tournamentId, playerIds);
+      await this.initSingleElimination(tournamentId, playerIds, activate);
     } else if (format === TournamentFormat.DOUBLE_ELIMINATION) {
-      await this.initDoubleElimination(tournamentId, playerIds);
+      await this.initDoubleElimination(tournamentId, playerIds, activate);
     } else if (format === TournamentFormat.SWISS) {
-      await this.initSwiss(tournamentId, playerIds);
+      await this.initSwiss(tournamentId, playerIds, activate);
     } else if (format === TournamentFormat.ROUND_ROBIN) {
-      await this.initRoundRobin(tournamentId, playerIds);
+      await this.initRoundRobin(tournamentId, playerIds, activate);
     } else {
       throw new BadRequestException(`Format ${format} not supported`);
     }
@@ -286,10 +290,13 @@ export class FormatsService {
         await this.leaderboardService.getLeaderboard(tournamentId);
       const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
 
+      await this.tournamentService.updateStatusInternal(
+        tournamentId,
+        TournamentStatus.COMPLETED,
+      );
       await this.prisma.tournament.update({
         where: { id: tournamentId },
         data: {
-          status: TournamentStatus.COMPLETED,
           winnerId: winnerId,
         },
       });
@@ -301,6 +308,7 @@ export class FormatsService {
   private async initSingleElimination(
     tournamentId: string,
     playerIds: string[],
+    activate: boolean = true,
   ) {
     const bracketSize = this.nextPowerOfTwo(playerIds.length);
     const padded: (string | null)[] = [
@@ -327,7 +335,7 @@ export class FormatsService {
         });
         currentMatchIds.push(created.id);
 
-        if (i === 0) {
+        if (i === 0 && activate) {
           if (created.player1Id && created.player2Id) {
             await this.matchService.activateMatch(created.id);
           } else if (
@@ -350,7 +358,7 @@ export class FormatsService {
         await this.matchService.linkMatches(prevMatchIds, currentMatchIds);
       }
 
-      if (i === 0) {
+      if (i === 0 && activate) {
         const r1Matches = await this.prisma.match.findMany({
           where: { roundId: round.id },
         });
@@ -388,10 +396,13 @@ export class FormatsService {
     );
     if (!finalMatch) return;
 
+    await this.tournamentService.updateStatusInternal(
+      tournamentId,
+      TournamentStatus.COMPLETED,
+    );
     await this.prisma.tournament.update({
       where: { id: tournamentId },
       data: {
-        status: TournamentStatus.COMPLETED,
         winnerId: finalMatch.winnerId,
       },
     });
@@ -401,6 +412,7 @@ export class FormatsService {
   private async initDoubleElimination(
     tournamentId: string,
     playerIds: string[],
+    activate: boolean = true,
   ) {
     const bracketSize = this.nextPowerOfTwo(playerIds.length);
     const padded = [
@@ -429,7 +441,7 @@ export class FormatsService {
               (m.p1 !== null && m.p2 === null)),
         });
         ids.push(created.id);
-        if (i === 0) {
+        if (i === 0 && activate) {
           if (created.player1Id && created.player2Id) {
             await this.matchService.activateMatch(created.id);
           } else if (created.isBye && created.player1Id) {
@@ -531,16 +543,18 @@ export class FormatsService {
     const r1Matches = await this.prisma.match.findMany({
       where: { round: { tournamentId, roundNumber: 1 } },
     });
-    for (const rm of r1Matches) {
-      if (rm.isBye && rm.status === MatchStatus.COMPLETED) {
-        await this.handleMatchCompletion(rm.id);
+    if (activate) {
+      for (const rm of r1Matches) {
+        if (rm.isBye && rm.status === MatchStatus.COMPLETED) {
+          await this.handleMatchCompletion(rm.id);
+        }
       }
     }
   }
 
   // ─── SWISS ───────────────────────────────────────────────────
 
-  private async initSwiss(tournamentId: string, playerIds: string[]) {
+  private async initSwiss(tournamentId: string, playerIds: string[], activate: boolean = true) {
     const shuffledPlayers = this.shuffle(playerIds);
     const round = await this.prisma.round.create({
       data: { tournamentId, roundNumber: 1 },
@@ -558,7 +572,7 @@ export class FormatsService {
       });
       matchesCreated.push(match);
 
-      if (p1 && p2) await this.matchService.activateMatch(match.id);
+      if (p1 && p2 && activate) await this.matchService.activateMatch(match.id);
       else if (p1 && !p2) {
         await this.prisma.match.update({
           where: { id: match.id },
@@ -567,12 +581,14 @@ export class FormatsService {
       }
     }
 
-    for (const m of matchesCreated) {
-      const updated = await this.prisma.match.findUnique({
-        where: { id: m.id },
-      });
-      if (updated?.status === MatchStatus.COMPLETED) {
-        await this.handleMatchCompletion(updated.id);
+    if (activate) {
+      for (const m of matchesCreated) {
+        const updated = await this.prisma.match.findUnique({
+          where: { id: m.id },
+        });
+        if (updated?.status === MatchStatus.COMPLETED) {
+          await this.handleMatchCompletion(updated.id);
+        }
       }
     }
   }
@@ -607,10 +623,10 @@ export class FormatsService {
     );
 
     if (round.roundNumber >= maxRounds) {
-      await this.prisma.tournament.update({
-        where: { id: tournamentId },
-        data: { status: TournamentStatus.COMPLETED },
-      });
+      await this.tournamentService.updateStatusInternal(
+        tournamentId,
+        TournamentStatus.COMPLETED,
+      );
       return;
     }
 
@@ -776,7 +792,7 @@ export class FormatsService {
 
   // ─── ROUND ROBIN ─────────────────────────────────────────────
 
-  private async initRoundRobin(tournamentId: string, playerIds: string[]) {
+  private async initRoundRobin(tournamentId: string, playerIds: string[], activate: boolean = true) {
     const n = playerIds.length;
     const players = [...playerIds];
     if (n % 2 !== 0) players.push(null as any);
@@ -799,7 +815,7 @@ export class FormatsService {
             player2Id: p2,
             isBye: false,
           });
-          await this.matchService.activateMatch(match.id);
+          if (activate) await this.matchService.activateMatch(match.id);
         } else if (p1 || p2) {
           const p = p1 || p2;
           const match = await this.matchService.createMatch({
@@ -811,7 +827,7 @@ export class FormatsService {
             where: { id: match.id },
             data: { winnerId: p, status: MatchStatus.COMPLETED },
           });
-          await this.handleMatchCompletion(match.id);
+          if (activate) await this.handleMatchCompletion(match.id);
         }
       }
       players.splice(1, 0, players.pop()!);

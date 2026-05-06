@@ -7,18 +7,15 @@ import { PrismaModule } from 'prisma/prisma.module';
 import { JwtModule } from '@nestjs/jwt';
 import { FormatsModule } from '../Formats/formats.module';
 import { AuthModule } from '../auth/auth.module';
+import { forwardRef } from '@nestjs/common';
 
 @Module({
   imports: [
     PrismaModule,
     RoundModule,
     MatchModule,
-    FormatsModule,
+    forwardRef(() => FormatsModule),
     AuthModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '1d' },
-    }),
   ],
   controllers: [TournamentController],
   providers: [TournamentService],

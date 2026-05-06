@@ -16,7 +16,7 @@ import {
   IsPositive,
   IsDateString,
 } from 'class-validator';
-import { Prisma, TournamentFormat } from '@prisma/client';
+import { Prisma, TournamentFormat, TournamentStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
 
@@ -145,3 +145,10 @@ export class CreateTournamentDto {
 // ─── UPDATE TOURNAMENT ───────────────────────────────────────────
 
 export class UpdateTournamentDto extends PartialType(CreateTournamentDto) {}
+
+export class TournamentStatusDto {
+  @IsEnum(TournamentStatus, {
+    message: `Status must be one of: ${Object.values(TournamentStatus).join(', ')}`,
+  })
+  status!: TournamentStatus;
+}

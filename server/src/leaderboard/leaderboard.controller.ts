@@ -14,4 +14,9 @@ export class LeaderboardController {
   getGlobalLeaderboard() {
     return this.leaderboardService.getGlobalLeaderboard();
   }
+
+  @Get('users/:userId/stats')
+  getUserStats(@Param('userId') userId: string) {
+    return this.leaderboardService.getUserStats(userId);
+  }
 }

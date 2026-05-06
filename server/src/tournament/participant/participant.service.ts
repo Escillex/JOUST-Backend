@@ -5,7 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
-import { JoinTournamentDto } from './dto/participant.dto';
+
 @Injectable()
 export class ParticipantService {
   constructor(private prisma: PrismaService) {}

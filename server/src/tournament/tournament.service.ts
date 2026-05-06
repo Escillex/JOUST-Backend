@@ -2,18 +2,89 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
+  forwardRef,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { FormatsService } from 'src/Formats/formats.service';
-import { CreateTournamentDto, UpdateTournamentDto } from './dto/tournament.dto';
-import { Tournament, TournamentStatus, MatchStatus, TournamentFormat } from '@prisma/client';
+import {
+  CreateTournamentDto,
+  UpdateTournamentDto,
+  TournamentStatusDto,
+} from './dto/tournament.dto';
+import {
+  Tournament,
+  TournamentStatus,
+  MatchStatus,
+  TournamentFormat,
+  Role,
+} from '@prisma/client';
+import { JwtPayload } from 'src/guards/jwt-auth.guard';
 
 @Injectable()
 export class TournamentService {
+  private readonly ALLOWED_TRANSITIONS: Record<
+    TournamentStatus,
+    TournamentStatus[]
+  > = {
+    [TournamentStatus.UPCOMING]: [TournamentStatus.OPEN],
+    [TournamentStatus.PENDING]: [TournamentStatus.OPEN],
+    [TournamentStatus.OPEN]: [TournamentStatus.ONGOING],
+    [TournamentStatus.ONGOING]: [TournamentStatus.COMPLETED],
+    [TournamentStatus.COMPLETED]: [],
+  };
+
   constructor(
     private prisma: PrismaService,
+    @Inject(forwardRef(() => FormatsService))
     private formatsService: FormatsService,
   ) {}
+
+  async updateStatus(
+    tournamentId: string,
+    dto: TournamentStatusDto,
+    user: JwtPayload,
+  ) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    if (
+      tournament.createdById !== user.id &&
+      !user.roles.includes(Role.ADMIN)
+    ) {
+      throw new ForbiddenException(
+        'Only the tournament organizer can update the status',
+      );
+    }
+
+    const currentStatus = tournament.status;
+    const targetStatus = dto.status;
+
+    if (!this.ALLOWED_TRANSITIONS[currentStatus].includes(targetStatus)) {
+      throw new BadRequestException(
+        `Invalid status transition from ${currentStatus} to ${targetStatus}`,
+      );
+    }
+
+    return this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { status: targetStatus },
+    });
+  }
+
+  async updateStatusInternal(
+    tournamentId: string,
+    targetStatus: TournamentStatus,
+  ) {
+    return this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { status: targetStatus },
+    });
+  }
 
   async createTournament(dto: CreateTournamentDto) {
     const existing = await this.prisma.tournament.findFirst({
@@ -83,6 +154,74 @@ export class TournamentService {
     return Object.keys(baseRules).length > 0 ? baseRules : undefined;
   }
 
+  async generateBracket(tournamentId: string, user: JwtPayload) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: {
+        participants: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                guestName: true,
+                isGuest: true,
+              },
+            },
+          },
+          orderBy: [{ seed: 'asc' }, { id: 'asc' }],
+        },
+      },
+    });
+
+    if (!tournament) throw new BadRequestException('Tournament not found');
+    if (tournament.status !== TournamentStatus.PENDING)
+      throw new BadRequestException(
+        'Tournament must be PENDING to generate bracket',
+      );
+    if (tournament.participants.length < 2)
+      throw new BadRequestException('Need at least 2 players');
+
+    if (tournament.createdById !== user.id && !user.roles.includes(Role.ADMIN)) {
+      throw new ForbiddenException(
+        'Only the tournament organizer can generate the bracket',
+      );
+    }
+
+    const participants = tournament.participants
+      .filter((p) => p.user)
+      .map((p) => ({
+        id: p.user.id,
+        name: p.user.isGuest ? p.user.guestName : p.user.username,
+      }));
+
+    const bracketSize = this.nextPowerOfTwo(participants.length);
+    const matchups: {
+      matchIndex: number;
+      player1: (typeof participants)[0] | null;
+      player2: (typeof participants)[0] | null;
+    }[] = [];
+
+    for (let i = 0; i < bracketSize / 2; i++) {
+      const p1 = participants[i * 2] || null;
+      const p2 = participants[i * 2 + 1] || null;
+
+      matchups.push({
+        matchIndex: i + 1,
+        player1: p1,
+        player2: p2,
+      });
+    }
+
+    return matchups;
+  }
+
+  private nextPowerOfTwo(n: number): number {
+    let power = 1;
+    while (power < n) power *= 2;
+    return power;
+  }
+
   async updateTournament(id: string, dto: UpdateTournamentDto) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id },
@@ -127,7 +266,13 @@ export class TournamentService {
   async startTournament(tournamentId: string) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: { participants: true },
+      include: {
+        participants: true,
+        rounds: {
+          where: { roundNumber: 1 },
+          include: { matches: true },
+        },
+      },
     });
 
     if (!tournament) throw new NotFoundException('Tournament not found');
@@ -136,36 +281,79 @@ export class TournamentService {
     if (tournament.participants.length < 2)
       throw new BadRequestException('Need at least 2 players');
 
-    const existingRounds = await this.prisma.round.count({
-      where: { tournamentId },
-    });
-    if (existingRounds > 0)
-      throw new BadRequestException('Tournament has already been initialized');
+    const firstRound = tournament.rounds[0];
 
-    const participants = tournament.participants.map((p) => p.userId);
-    const shuffled = this.shuffle(participants);
+    if (!firstRound) {
+      // If bracket wasn't pre-generated/locked, generate it now
+      const playerIds = tournament.participants.map((p) => p.userId);
+      await this.formatsService.initializeTournamentFormat(
+        tournamentId,
+        tournament.format,
+        playerIds,
+        false, // don't activate yet, we do it below
+      );
 
-    await this.formatsService.initializeTournamentFormat(
-      tournamentId,
-      tournament.format,
-      shuffled,
-    );
+      // Re-fetch to get the newly created rounds
+      const updatedTournament = await this.prisma.tournament.findUnique({
+        where: { id: tournamentId },
+        include: {
+          rounds: {
+            where: { roundNumber: 1 },
+            include: { matches: true },
+          },
+        },
+      });
+      
+      const newFirstRound = updatedTournament?.rounds[0];
+      if (!newFirstRound) {
+        throw new BadRequestException('Failed to generate bracket');
+      }
 
-    await this.prisma.tournament.update({
-      where: { id: tournamentId },
-      data: { status: TournamentStatus.ONGOING },
-    });
+      // Activate matches in the first round
+      for (const match of newFirstRound.matches) {
+        if (match.player1Id && match.player2Id) {
+          await this.prisma.match.update({
+            where: { id: match.id },
+            data: { status: MatchStatus.ONGOING },
+          });
+        } else if (match.isBye && (match.player1Id || match.player2Id)) {
+          const winnerId = (match.player1Id || match.player2Id) as string;
+          await this.prisma.match.update({
+            where: { id: match.id },
+            data: {
+              winnerId: winnerId,
+              status: MatchStatus.COMPLETED,
+            },
+          });
+          await this.formatsService.handleMatchCompletion(match.id);
+        }
+      }
+    } else {
+      // Activate pre-generated first round matches
+      for (const match of firstRound.matches) {
+        if (match.player1Id && match.player2Id) {
+          await this.prisma.match.update({
+            where: { id: match.id },
+            data: { status: MatchStatus.ONGOING },
+          });
+        } else if (match.isBye && (match.player1Id || match.player2Id)) {
+          const winnerId = (match.player1Id || match.player2Id) as string;
+          await this.prisma.match.update({
+            where: { id: match.id },
+            data: {
+              winnerId: winnerId,
+              status: MatchStatus.COMPLETED,
+            },
+          });
+          // Handle progression for bye
+          await this.formatsService.handleMatchCompletion(match.id);
+        }
+      }
+    }
+
+    await this.updateStatusInternal(tournamentId, TournamentStatus.ONGOING);
 
     return { message: 'Tournament started successfully' };
-  }
-
-  private shuffle(array: string[]): string[] {
-    const arr = [...array];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
   }
 
   async completeTournament(tournamentId: string) {
@@ -189,10 +377,7 @@ export class TournamentService {
       .map((p) => p.user.id);
 
     if (tournament.status !== TournamentStatus.COMPLETED) {
-      await this.prisma.tournament.update({
-        where: { id: tournamentId },
-        data: { status: TournamentStatus.COMPLETED },
-      });
+      await this.updateStatusInternal(tournamentId, TournamentStatus.COMPLETED);
     }
 
     if (guestUserIds.length > 0) {

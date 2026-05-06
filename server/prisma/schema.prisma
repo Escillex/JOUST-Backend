@@ -15,6 +15,7 @@ enum Role {
 
 enum TournamentStatus {
   UPCOMING
+  PENDING
   OPEN
   ONGOING
   COMPLETED

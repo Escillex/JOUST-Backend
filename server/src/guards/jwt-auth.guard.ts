@@ -9,8 +9,9 @@ import { Request } from 'express';
 import { Role } from '@prisma/client';
 
 export interface JwtPayload {
-  sub: string;
-  email: string;
+  id: string;
+  email: string | null;
+  username: string | null;
   roles: Role[];
 }
 
