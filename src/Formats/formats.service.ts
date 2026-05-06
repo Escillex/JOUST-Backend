@@ -290,16 +290,13 @@ export class FormatsService {
         await this.leaderboardService.getLeaderboard(tournamentId);
       const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
 
-      await this.tournamentService.updateStatusInternal(
-        tournamentId,
-        TournamentStatus.COMPLETED,
-      );
+      // Update winnerId first so completeTournament sees it
       await this.prisma.tournament.update({
         where: { id: tournamentId },
-        data: {
-          winnerId: winnerId,
-        },
+        data: { winnerId },
       });
+
+      await this.tournamentService.completeTournament(tournamentId);
     }
   }
 
@@ -396,16 +393,12 @@ export class FormatsService {
     );
     if (!finalMatch) return;
 
-    await this.tournamentService.updateStatusInternal(
-      tournamentId,
-      TournamentStatus.COMPLETED,
-    );
     await this.prisma.tournament.update({
       where: { id: tournamentId },
-      data: {
-        winnerId: finalMatch.winnerId,
-      },
+      data: { winnerId: finalMatch.winnerId },
     });
+
+    await this.tournamentService.completeTournament(tournamentId);
   }
 
   // ─── DOUBLE ELIMINATION ───────────────────────────────────────
@@ -623,10 +616,15 @@ export class FormatsService {
     );
 
     if (round.roundNumber >= maxRounds) {
-      await this.tournamentService.updateStatusInternal(
-        tournamentId,
-        TournamentStatus.COMPLETED,
-      );
+      const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+      const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
+      
+      await this.prisma.tournament.update({
+        where: { id: tournamentId },
+        data: { winnerId }
+      });
+
+      await this.tournamentService.completeTournament(tournamentId);
       return;
     }
 

@@ -40,8 +40,9 @@ model User {
   username        String?   @unique
   hashedPassword  String?
   isGuest         Boolean   @default(false)
-  guestName       String?
   roles           Role[]    @default([PLAYER])
+  expiresAt       DateTime?
+  isExpired       Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updateAt        DateTime  @updatedAt()
 
@@ -66,11 +67,14 @@ model Tournament {
   isPrivate   Boolean @default(false)
   status      TournamentStatus @default(OPEN)
 
-  createdById String
-  createdBy   User @relation(fields: [createdById], references: [id])
+  createdById String?
+  createdBy   User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   winnerId    String?
-  winner      User? @relation("TournamentWinner", fields: [winnerId], references: [id])
+  winner      User? @relation("TournamentWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  winnerName  String?
+
+  guestCleanupAt DateTime?
 
   participants TournamentParticipant[]
   rounds       Round[]
@@ -108,7 +112,7 @@ model TournamentParticipant {
   userId        String
   tournamentId  String
 
-  user          User @relation(fields: [userId], references: [id])
+  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
   tournament    Tournament @relation(fields: [tournamentId], references: [id])
 
   seed          Int?   // optional (for seeding later)
@@ -137,11 +141,16 @@ model Match {
   player1Id     String?
   player2Id     String?
 
-  player1       User? @relation("Player1", fields: [player1Id], references: [id])
-  player2       User? @relation("Player2", fields: [player2Id], references: [id])
+  player1       User? @relation("Player1", fields: [player1Id], references: [id], onDelete: SetNull)
+  player2       User? @relation("Player2", fields: [player2Id], references: [id], onDelete: SetNull)
+
+  // Historical name snapshots — populated when a user is deleted so brackets remain readable
+  p1Name        String?
+  p2Name        String?
+  winnerName    String?
 
   winnerId      String?
-  winner        User? @relation("Winner", fields: [winnerId], references: [id])
+  winner        User? @relation("Winner", fields: [winnerId], references: [id], onDelete: SetNull)
 
   nextMatchId   String?
   nextMatch     Match? @relation("NextMatch", fields: [nextMatchId], references: [id])

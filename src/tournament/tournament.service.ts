@@ -24,22 +24,24 @@ import { JwtPayload } from 'src/guards/jwt-auth.guard';
 
 @Injectable()
 export class TournamentService {
+  public static GUEST_EXPIRY_DAYS = 30;
+
   private readonly ALLOWED_TRANSITIONS: Record<
     TournamentStatus,
     TournamentStatus[]
   > = {
-    [TournamentStatus.UPCOMING]: [TournamentStatus.OPEN],
-    [TournamentStatus.PENDING]: [TournamentStatus.OPEN],
-    [TournamentStatus.OPEN]: [TournamentStatus.ONGOING],
-    [TournamentStatus.ONGOING]: [TournamentStatus.COMPLETED],
-    [TournamentStatus.COMPLETED]: [],
-  };
+      [TournamentStatus.UPCOMING]: [TournamentStatus.OPEN],
+      [TournamentStatus.PENDING]: [TournamentStatus.OPEN],
+      [TournamentStatus.OPEN]: [TournamentStatus.ONGOING],
+      [TournamentStatus.ONGOING]: [TournamentStatus.COMPLETED],
+      [TournamentStatus.COMPLETED]: [],
+    };
 
   constructor(
     private prisma: PrismaService,
     @Inject(forwardRef(() => FormatsService))
     private formatsService: FormatsService,
-  ) {}
+  ) { }
 
   async updateStatus(
     tournamentId: string,
@@ -164,7 +166,6 @@ export class TournamentService {
               select: {
                 id: true,
                 username: true,
-                guestName: true,
                 isGuest: true,
               },
             },
@@ -175,9 +176,9 @@ export class TournamentService {
     });
 
     if (!tournament) throw new BadRequestException('Tournament not found');
-    if (tournament.status !== TournamentStatus.PENDING)
+    if (tournament.status !== TournamentStatus.PENDING && tournament.status !== TournamentStatus.OPEN && tournament.status !== TournamentStatus.UPCOMING)
       throw new BadRequestException(
-        'Tournament must be PENDING to generate bracket',
+        'Tournament must be PENDING, UPCOMING, or OPEN to generate bracket',
       );
     if (tournament.participants.length < 2)
       throw new BadRequestException('Need at least 2 players');
@@ -192,7 +193,7 @@ export class TournamentService {
       .filter((p) => p.user)
       .map((p) => ({
         id: p.user.id,
-        name: p.user.isGuest ? p.user.guestName : p.user.username,
+        name: p.user.username,
       }));
 
     const bracketSize = this.nextPowerOfTwo(participants.length);
@@ -303,7 +304,7 @@ export class TournamentService {
           },
         },
       });
-      
+
       const newFirstRound = updatedTournament?.rounds[0];
       if (!newFirstRound) {
         throw new BadRequestException('Failed to generate bracket');
@@ -360,11 +361,18 @@ export class TournamentService {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
       include: {
-        participants: {
+        participants: { include: { user: true } },
+        rounds: {
           include: {
-            user: true,
-          },
-        },
+            matches: {
+              include: {
+                player1: true,
+                player2: true,
+                winner: true,
+              }
+            }
+          }
+        }
       },
     });
 
@@ -380,20 +388,59 @@ export class TournamentService {
       await this.updateStatusInternal(tournamentId, TournamentStatus.COMPLETED);
     }
 
-    if (guestUserIds.length > 0) {
-      await this.prisma.tournamentParticipant.deleteMany({
-        where: { userId: { in: guestUserIds } },
-      });
+    // Snapshot names for all matches before guest purge (Immediate)
+    for (const round of tournament.rounds) {
+      for (const match of round.matches) {
+        await this.prisma.match.update({
+          where: { id: match.id },
+          data: {
+            p1Name: match.player1?.username || match.p1Name,
+            p2Name: match.player2?.username || match.p2Name,
+            winnerName: match.winner?.username || match.winnerName,
+          }
+        });
+      }
+    }
 
-      await this.prisma.user.deleteMany({
+    // Snapshot tournament winner name
+    if (winnerId) {
+      const winner = tournament.participants.find(p => p.userId === winnerId)?.user;
+      await this.prisma.tournament.update({
+        where: { id: tournamentId },
+        data: { winnerName: winner?.username || "Unknown Champion" } as any,
+      });
+    }
+
+    // Set cleanup timestamp
+    const cleanupTime = new Date();
+    cleanupTime.setDate(cleanupTime.getDate() + TournamentService.GUEST_EXPIRY_DAYS);
+    await this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { guestCleanupAt: cleanupTime },
+    });
+
+    // Also update the individual guests to expire in 10 seconds
+    if (guestUserIds.length > 0) {
+      await this.prisma.user.updateMany({
         where: {
           id: { in: guestUserIds },
           isGuest: true,
         },
+        data: {
+          expiresAt: cleanupTime,
+          isExpired: false,
+        }
       });
     }
 
     return { message: 'Tournament data cleaned up. Winner preserved.' };
+  }
+
+  async cancelCleanup(tournamentId: string) {
+    return this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { guestCleanupAt: null },
+    });
   }
 
   async getTournament(tournamentId: string) {
@@ -402,7 +449,7 @@ export class TournamentService {
       include: {
         createdBy: { select: { id: true, username: true, email: true } },
         winner: {
-          select: { id: true, username: true, guestName: true, isGuest: true },
+          select: { id: true, username: true, isGuest: true },
         },
         formatConfig: {
           select: {
@@ -423,7 +470,6 @@ export class TournamentService {
                 id: true,
                 username: true,
                 email: true,
-                guestName: true,
                 isGuest: true,
               },
             },
@@ -438,7 +484,6 @@ export class TournamentService {
                   select: {
                     id: true,
                     username: true,
-                    guestName: true,
                     isGuest: true,
                   },
                 },
@@ -446,7 +491,6 @@ export class TournamentService {
                   select: {
                     id: true,
                     username: true,
-                    guestName: true,
                     isGuest: true,
                   },
                 },
@@ -454,7 +498,6 @@ export class TournamentService {
                   select: {
                     id: true,
                     username: true,
-                    guestName: true,
                     isGuest: true,
                   },
                 },
@@ -474,7 +517,7 @@ export class TournamentService {
       include: {
         createdBy: { select: { id: true, username: true, email: true } },
         winner: {
-          select: { id: true, username: true, guestName: true, isGuest: true },
+          select: { id: true, username: true, isGuest: true },
         },
         formatConfig: {
           select: {
@@ -495,7 +538,6 @@ export class TournamentService {
                 id: true,
                 username: true,
                 email: true,
-                guestName: true,
                 isGuest: true,
               },
             },
@@ -510,7 +552,6 @@ export class TournamentService {
                   select: {
                     id: true,
                     username: true,
-                    guestName: true,
                     isGuest: true,
                   },
                 },
@@ -518,7 +559,6 @@ export class TournamentService {
                   select: {
                     id: true,
                     username: true,
-                    guestName: true,
                     isGuest: true,
                   },
                 },
@@ -526,7 +566,6 @@ export class TournamentService {
                   select: {
                     id: true,
                     username: true,
-                    guestName: true,
                     isGuest: true,
                   },
                 },
@@ -541,7 +580,29 @@ export class TournamentService {
   }
 
   async getAllTournaments(): Promise<Tournament[]> {
-    // Auto-open scheduled tournaments
+    // 1. Auto-purge expired guests on access
+    const now = new Date();
+    const expired = await this.prisma.user.findMany({
+      where: {
+        isGuest: true,
+        OR: [
+          { isExpired: true },
+          { expiresAt: { lte: now } }
+        ]
+      },
+      select: { id: true }
+    });
+
+    // We can't easily call authService.deleteUser here without circular dependency
+    // but we can at least mark them so they don't show up
+    if (expired.length > 0) {
+      await this.prisma.user.updateMany({
+        where: { id: { in: expired.map(u => u.id) } },
+        data: { isExpired: true }
+      });
+    }
+
+    // 2. Auto-open scheduled tournaments
     await this.prisma.tournament.updateMany({
       where: {
         status: TournamentStatus.UPCOMING,
@@ -557,7 +618,7 @@ export class TournamentService {
     return this.prisma.tournament.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        winner: { select: { username: true, guestName: true, isGuest: true } },
+        winner: { select: { username: true, isGuest: true } },
         rounds: {
           orderBy: { roundNumber: 'desc' },
           take: 1,
@@ -565,7 +626,7 @@ export class TournamentService {
             matches: {
               include: {
                 winner: {
-                  select: { username: true, guestName: true, isGuest: true },
+                  select: { username: true, isGuest: true },
                 },
               },
             },

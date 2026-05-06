@@ -87,6 +87,13 @@ export class TournamentController {
     return this.tournamentService.completeTournament(id);
   }
 
+  @Patch(':id/cancel-cleanup')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  cancelCleanup(@Param('id') id: string) {
+    return this.tournamentService.cancelCleanup(id);
+  }
+
   // GET /tournaments/:id
   @Get(':id')
   async getTournament(@Param('id', ParseUUIDPipe) id: string) {

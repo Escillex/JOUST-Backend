@@ -20,10 +20,22 @@ export class RolesGuard implements CanActivate {
 
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
 
-    if (!user || !user.roles) {
+    if (!user || !user.roles || user.roles.length === 0) {
       return false;
     }
 
-    return requiredRoles.some((role) => user.roles.includes(role));
+    const ROLE_HIERARCHY: Record<Role, number> = {
+      [Role.ADMIN]: 3,
+      [Role.ORGANIZER]: 2,
+      [Role.PLAYER]: 1,
+    };
+
+    const userRoleLevels = user.roles.map(r => ROLE_HIERARCHY[r] || 0);
+    const maxUserRoleLevel = Math.max(...userRoleLevels);
+
+    return requiredRoles.some((role) => {
+      const requiredLevel = ROLE_HIERARCHY[role] || 0;
+      return maxUserRoleLevel >= requiredLevel;
+    });
   }
 }

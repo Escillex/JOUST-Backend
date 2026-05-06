@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
+import { TournamentService } from '../tournament.service';
 
 @Injectable()
 export class ParticipantService {
@@ -73,7 +74,7 @@ export class ParticipantService {
     });
   }
 
-  async joinTournamentAsGuest(tournamentId: string, guestName: string) {
+  async joinTournamentAsGuest(tournamentId: string, username: string) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
       include: { participants: true },
@@ -101,11 +102,15 @@ export class ParticipantService {
       );
     }
 
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + TournamentService.GUEST_EXPIRY_DAYS);
+
     const guestUser = await this.prisma.user.create({
       data: {
         isGuest: true,
-        guestName,
+        username,
         roles: ['PLAYER'],
+        expiresAt,
       },
     });
 
@@ -116,7 +121,7 @@ export class ParticipantService {
       },
       include: {
         user: {
-          select: { id: true, username: true, email: true, guestName: true },
+          select: { id: true, username: true, email: true },
         },
         tournament: {
           select: { id: true, name: true, maxPlayers: true },
@@ -166,7 +171,6 @@ export class ParticipantService {
     return { message: 'Successfully left the tournament' };
   }
 
-  // 📋 FETCH ALL PARTICIPANTS
   async getParticipants(tournamentId: string) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -186,4 +190,36 @@ export class ParticipantService {
       orderBy: { seed: 'asc' },
     });
   }
+
+  // 🌱 UPDATE PARTICIPANT SEED
+  async updateSeed(tournamentId: string, userId: string, seed: number) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    if (tournament.status !== 'OPEN') {
+      throw new BadRequestException(
+        'Cannot change seeding after the tournament has started',
+      );
+    }
+
+    const participant = await this.prisma.tournamentParticipant.findUnique({
+      where: { userId_tournamentId: { userId, tournamentId } },
+    });
+
+    if (!participant) {
+      throw new NotFoundException('Participant not found in this tournament');
+    }
+
+    return this.prisma.tournamentParticipant.update({
+      where: { userId_tournamentId: { userId, tournamentId } },
+      data: { seed },
+      include: {
+        user: { select: { id: true, username: true, isGuest: true } },
+      },
+    });
+  }
 }
+
