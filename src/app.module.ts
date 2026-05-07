@@ -8,6 +8,7 @@ import { FormatsModule } from './Formats/formats.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { JobsModule } from './jobs/jobs.module';
 import { UserModule } from './user/user.module';
+import { DevModule } from './dev/dev.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { UserModule } from './user/user.module';
     LeaderboardModule,
     JobsModule,
     UserModule,
+    DevModule,
   ],
 })
-export class AppModule {}
+export class AppModule { }

@@ -11,7 +11,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { AuthDto, UpdateRolesDto } from './dto/auth.dto';
+import {
+  AuthDto,
+  UpdateRolesDto,
+  ConvertGuestDto,
+  UpdateProfileDto,
+  AdminCreateUserDto,
+} from './dto/auth.dto';
 import * as express from 'express';
 import {
   JwtAuthGuard,
@@ -24,6 +30,10 @@ import { Role } from '@prisma/client';
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  // ──────────────────────────────────────────────
+  // PUBLIC AUTH
+  // ──────────────────────────────────────────────
 
   @Post('signup')
   signup(@Body() dto: AuthDto) {
@@ -49,6 +59,10 @@ export class AuthController {
     return req.user;
   }
 
+  // ──────────────────────────────────────────────
+  // USER QUERIES
+  // ──────────────────────────────────────────────
+
   @Get('users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -63,12 +77,9 @@ export class AuthController {
     return this.authService.getRegisteredUsers();
   }
 
-  @Patch('roles/:id')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  updateRoles(@Param('id') userId: string, @Body() dto: UpdateRolesDto) {
-    return this.authService.updateRoles(userId, dto.roles);
-  }
+  // ──────────────────────────────────────────────
+  // GUEST MANAGEMENT
+  // ──────────────────────────────────────────────
 
   @Post('createguest')
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -77,10 +88,53 @@ export class AuthController {
     return this.authService.CreateGuestUser(username);
   }
 
-  @Delete('delete')
+  // ITEM 2: Convert a guest to a registered pilot
+  @Patch('convert-guest/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  convertGuest(@Param('id') guestId: string, @Body() dto: ConvertGuestDto) {
+    return this.authService.convertGuest(guestId, dto);
+  }
+
+  // ──────────────────────────────────────────────
+  // ROLE MANAGEMENT
+  // ──────────────────────────────────────────────
+
+  @Patch('roles/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  DeleteMe(@Req() req: AuthenticatedRequest) {
-    return 'Test Delete';
+  updateRoles(@Param('id') userId: string, @Body() dto: UpdateRolesDto) {
+    return this.authService.updateRoles(userId, dto.roles);
+  }
+
+  // ──────────────────────────────────────────────
+  // ADMIN — USER MANAGEMENT
+  // ──────────────────────────────────────────────
+
+  // ITEM 4: Admin manually creates a registered user
+  @Post('users')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  adminCreateUser(@Body() dto: AdminCreateUserDto) {
+    return this.authService.adminCreateUser(dto);
+  }
+
+  // ITEM 4: Admin edits a user's profile (username / email / password)
+  @Patch('users/:id/profile')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  updateProfile(
+    @Param('id') targetId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(targetId, dto);
+  }
+
+  // ITEM 1: Admin permanently deletes a user (preserves match history)
+  @Delete('users/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  deleteUser(@Param('id') targetId: string) {
+    return this.authService.deleteUser(targetId);
   }
 }

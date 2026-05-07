@@ -13,6 +13,57 @@ export class CleanGuestsJob {
     await this.cleanOrphanedGuests();
   }
 
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleTimedCleanup() {
+    const now = new Date();
+    const tournaments = await this.prisma.tournament.findMany({
+      where: {
+        guestCleanupAt: {
+          lte: now,
+          not: null,
+        },
+      },
+      include: {
+        participants: {
+          where: {
+            user: {
+              isGuest: true,
+            },
+          },
+          select: { userId: true },
+        },
+      },
+    });
+
+    for (const t of tournaments) {
+      const guestIds = t.participants.map(p => p.userId);
+      if (guestIds.length > 0) {
+        // Re-check each user is still a guest (could have been upgraded)
+        const stillGuests = await this.prisma.user.findMany({
+          where: {
+            id: { in: guestIds },
+            isGuest: true,
+          },
+          select: { id: true }
+        });
+        const toDelete = stillGuests.map(g => g.id);
+
+        if (toDelete.length > 0) {
+          await this.prisma.user.deleteMany({
+            where: { id: { in: toDelete } },
+          });
+          this.logger.log(`Tournament ${t.id}: Purged ${toDelete.length} guests.`);
+        }
+      }
+
+      // Clear the cleanup marker
+      await this.prisma.tournament.update({
+        where: { id: t.id },
+        data: { guestCleanupAt: null },
+      });
+    }
+  }
+
   async cleanOrphanedGuests() {
     this.logger.log('Starting cleanup of orphaned guest accounts...');
 

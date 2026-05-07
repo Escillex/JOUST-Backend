@@ -1,4 +1,4 @@
-import { IsUUID, IsString, MinLength, MaxLength } from 'class-validator';
+import { IsUUID, IsString, MinLength, MaxLength, IsInt, Min } from 'class-validator';
 
 export class JoinTournamentDto {
   @IsUUID('4')
@@ -7,7 +7,13 @@ export class JoinTournamentDto {
 
 export class JoinGuestDto {
   @IsString()
-  @MinLength(3, { message: 'Guest name must be at least 3 characters long' })
-  @MaxLength(40, { message: 'Guest name cannot exceed 40 characters' })
-  guestName!: string;
+  @MinLength(3, { message: 'Username must be at least 3 characters long' })
+  @MaxLength(40, { message: 'Username cannot exceed 40 characters' })
+  username!: string;
+}
+
+export class UpdateSeedDto {
+  @IsInt()
+  @Min(1)
+  seed!: number;
 }

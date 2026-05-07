@@ -1,7 +1,9 @@
 import {
   IsArray,
+  IsEmail,
   IsEnum,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Length,
   MinLength,
@@ -26,4 +28,57 @@ export class UpdateRolesDto {
   @IsArray()
   @IsEnum(Role, { each: true })
   public roles!: Role[];
+}
+
+export class ConvertGuestDto {
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(3)
+  public username!: string;
+
+  @IsNotEmpty()
+  @IsEmail()
+  public email!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @Length(3, 20)
+  public password!: string;
+}
+
+export class UpdateProfileDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  public username?: string;
+
+  @IsOptional()
+  @IsEmail()
+  public email?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 20)
+  public password?: string;
+}
+
+export class AdminCreateUserDto {
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(3)
+  public username!: string;
+
+  @IsNotEmpty()
+  @IsEmail()
+  public email!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @Length(3, 20)
+  public password!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsEnum(Role, { each: true })
+  public roles?: Role[];
 }
