@@ -17,6 +17,7 @@ import {
   TournamentStatus,
   Match,
 } from '@prisma/client';
+import { resolveConfig } from './format-config.helper';
 
 @Injectable()
 export class FormatsService {
@@ -112,7 +113,7 @@ export class FormatsService {
         key: string;
         label: string;
         placeholder: string;
-        defaultValue?: number | null;
+        defaultValue?: number | string | boolean | null;
         min?: number;
         max?: number;
       }>;
@@ -152,6 +153,32 @@ export class FormatsService {
           defaultValue: 0,
           min: 0,
         },
+        {
+          key: 'bestOf',
+          label: 'Best Of',
+          placeholder: '3',
+          defaultValue: 1,
+          min: 1,
+          max: 15,
+        },
+        {
+          key: 'allowDraw',
+          label: 'Allow Draw',
+          placeholder: 'false',
+          defaultValue: false,
+        },
+        {
+          key: 'tieBreakerOrder',
+          label: 'Tie Breaker Order',
+          placeholder: 'player1,player2',
+          defaultValue: null,
+        },
+        {
+          key: 'progressionType',
+          label: 'Progression Type',
+          placeholder: 'standard',
+          defaultValue: null,
+        },
       ],
     },
     DOUBLE_ELIMINATION: {
@@ -188,6 +215,32 @@ export class FormatsService {
           placeholder: '0',
           defaultValue: 0,
           min: 0,
+        },
+        {
+          key: 'bestOf',
+          label: 'Best Of',
+          placeholder: '3',
+          defaultValue: 1,
+          min: 1,
+          max: 15,
+        },
+        {
+          key: 'allowDraw',
+          label: 'Allow Draw',
+          placeholder: 'false',
+          defaultValue: false,
+        },
+        {
+          key: 'tieBreakerOrder',
+          label: 'Tie Breaker Order',
+          placeholder: 'player1,player2',
+          defaultValue: null,
+        },
+        {
+          key: 'progressionType',
+          label: 'Progression Type',
+          placeholder: 'standard',
+          defaultValue: null,
         },
       ],
     },
@@ -246,6 +299,32 @@ export class FormatsService {
           defaultValue: 0,
           min: 0,
         },
+        {
+          key: 'bestOf',
+          label: 'Best Of',
+          placeholder: '3',
+          defaultValue: 1,
+          min: 1,
+          max: 15,
+        },
+        {
+          key: 'allowDraw',
+          label: 'Allow Draw',
+          placeholder: 'false',
+          defaultValue: false,
+        },
+        {
+          key: 'tieBreakerOrder',
+          label: 'Tie Breaker Order',
+          placeholder: 'player1,player2',
+          defaultValue: null,
+        },
+        {
+          key: 'progressionType',
+          label: 'Progression Type',
+          placeholder: 'standard',
+          defaultValue: null,
+        },
       ],
     },
     ROUND_ROBIN: {
@@ -273,6 +352,32 @@ export class FormatsService {
           placeholder: '0',
           defaultValue: 0,
           min: 0,
+        },
+        {
+          key: 'bestOf',
+          label: 'Best Of',
+          placeholder: '3',
+          defaultValue: 1,
+          min: 1,
+          max: 15,
+        },
+        {
+          key: 'allowDraw',
+          label: 'Allow Draw',
+          placeholder: 'false',
+          defaultValue: false,
+        },
+        {
+          key: 'tieBreakerOrder',
+          label: 'Tie Breaker Order',
+          placeholder: 'player1,player2',
+          defaultValue: null,
+        },
+        {
+          key: 'progressionType',
+          label: 'Progression Type',
+          placeholder: 'standard',
+          defaultValue: null,
         },
       ],
     },
@@ -601,16 +706,13 @@ export class FormatsService {
       where: { id: tournamentId },
       include: {
         participants: true,
-        formatConfig: {
-          select: {
-            swissRounds: true,
-          },
-        },
+        formatConfig: true,
       },
     });
 
     // Use swissRounds from config if set, otherwise auto
-    const maxRounds = tournament?.formatConfig?.swissRounds ?? Math.max(
+    const config = resolveConfig(tournament?.formatConfig ?? null);
+    const maxRounds = config.swissRounds ?? Math.max(
       1,
       Math.ceil(Math.log2(tournament!.participants.length)),
     );

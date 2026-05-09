@@ -94,7 +94,9 @@ export class TournamentService {
     });
     if (existing) throw new BadRequestException('Tournament name exists');
 
-    const formatConfig = this.applyBaseRules(dto.format, dto.formatConfig);
+    const formatConfig = this.normalizeFormatConfig(
+      this.applyBaseRules(dto.format, dto.formatConfig),
+    );
 
     const status = dto.startNow ? TournamentStatus.OPEN : TournamentStatus.UPCOMING;
 
@@ -110,6 +112,7 @@ export class TournamentService {
         isPrivate: dto.isPrivate,
         status: status,
         createdById: dto.createdById,
+        ...(dto.cardGameId && { cardGameId: dto.cardGameId }),
         ...(formatConfig && {
           formatConfig: {
             create: formatConfig,
@@ -130,6 +133,17 @@ export class TournamentService {
             pointsThreshold: true,
             sessionsCount: true,
             pointsPerSession: true,
+            bestOf: true,
+            allowDraw: true,
+            tieBreakerOrder: true,
+            progressionType: true,
+          },
+        },
+        cardGame: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
           },
         },
       },
@@ -154,6 +168,18 @@ export class TournamentService {
         baseRules.swissPointsForLoss = 0;
     }
     return Object.keys(baseRules).length > 0 ? baseRules : undefined;
+  }
+
+  private normalizeFormatConfig(config?: any) {
+    if (!config) return undefined;
+
+    const normalized = Object.entries(config).reduce((acc, [key, value]) => {
+      if (value === null || value === undefined) return acc;
+      acc[key] = value;
+      return acc;
+    }, {} as Record<string, unknown>);
+
+    return Object.keys(normalized).length > 0 ? normalized : undefined;
   }
 
   async generateBracket(tournamentId: string, user: JwtPayload) {
@@ -231,7 +257,11 @@ export class TournamentService {
     if (tournament.status !== TournamentStatus.OPEN)
       throw new BadRequestException('Cannot edit started tournament');
 
-    const { formatConfig, createdById, date, ...rest } = dto;
+    const { formatConfig: rawFormatConfig, createdById, date, ...rest } = dto;
+    const format = dto.format ?? tournament.format;
+    const formatConfig = this.normalizeFormatConfig(
+      this.applyBaseRules(format, rawFormatConfig),
+    );
 
     return this.prisma.tournament.update({
       where: { id },
@@ -258,6 +288,10 @@ export class TournamentService {
             pointsThreshold: true,
             sessionsCount: true,
             pointsPerSession: true,
+            bestOf: true,
+            allowDraw: true,
+            tieBreakerOrder: true,
+            progressionType: true,
           },
         },
       },
@@ -461,6 +495,17 @@ export class TournamentService {
             pointsThreshold: true,
             sessionsCount: true,
             pointsPerSession: true,
+            bestOf: true,
+            allowDraw: true,
+            tieBreakerOrder: true,
+            progressionType: true,
+          },
+        },
+        cardGame: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
           },
         },
         participants: {
@@ -529,6 +574,17 @@ export class TournamentService {
             pointsThreshold: true,
             sessionsCount: true,
             pointsPerSession: true,
+            bestOf: true,
+            allowDraw: true,
+            tieBreakerOrder: true,
+            progressionType: true,
+          },
+        },
+        cardGame: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
           },
         },
         participants: {
@@ -619,6 +675,9 @@ export class TournamentService {
       orderBy: { createdAt: 'desc' },
       include: {
         winner: { select: { username: true, isGuest: true } },
+        cardGame: {
+          select: { id: true, name: true, description: true },
+        },
         rounds: {
           orderBy: { roundNumber: 'desc' },
           take: 1,

@@ -135,6 +135,10 @@ export class CreateTournamentDto {
   @IsUUID('4', { message: 'createdById must be a valid UUID' })
   createdById!: string;
 
+  @IsOptional()
+  @IsString()
+  cardGameId?: string;
+
   // ← NEW: Format Config
   @IsOptional()
   @ValidateNested()

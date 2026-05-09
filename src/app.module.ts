@@ -9,6 +9,7 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { JobsModule } from './jobs/jobs.module';
 import { UserModule } from './user/user.module';
 import { DevModule } from './dev/dev.module';
+import { CardGameModule } from './card-game/card-game.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { DevModule } from './dev/dev.module';
     JobsModule,
     UserModule,
     DevModule,
+    CardGameModule,
   ],
 })
 export class AppModule { }

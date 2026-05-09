@@ -52,6 +52,7 @@ model User {
   matchesAsPlayer1      Match[] @relation("Player1")
   matchesAsPlayer2      Match[] @relation("Player2")
   wonMatches            Match[] @relation("Winner")
+  createdCardGames      CardGame[]
 }
 
 model Tournament {
@@ -80,6 +81,9 @@ model Tournament {
   rounds       Round[]
   formatConfig FormatConfig? 
 
+  cardGameId   String?
+  cardGame     CardGame?  @relation(fields: [cardGameId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
 }
 
@@ -101,11 +105,25 @@ model FormatConfig {
   pointsThreshold       Int?
   sessionsCount         Int?
   pointsPerSession      Int?
+  bestOf                Int?
+  allowDraw             Boolean?
+  tieBreakerOrder       String[]    @default([])
+  progressionType       String?
 
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
 }
 
+model CardGame {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  isBuiltin   Boolean   @default(false)
+  createdById String?
+  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  tournaments Tournament[]
+  createdAt   DateTime  @default(now())
+}
 
 model TournamentParticipant {
   id            String @id @default(uuid())
@@ -143,6 +161,9 @@ model Match {
 
   player1       User? @relation("Player1", fields: [player1Id], references: [id], onDelete: SetNull)
   player2       User? @relation("Player2", fields: [player2Id], references: [id], onDelete: SetNull)
+
+  player1Score  Int @default(0)
+  player2Score  Int @default(0)
 
   // Historical name snapshots — populated when a user is deleted so brackets remain readable
   p1Name        String?

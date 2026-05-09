@@ -51,6 +51,7 @@ describe('FormatsService', () => {
           provide: TournamentService,
           useValue: {
             updateStatusInternal: jest.fn(),
+            completeTournament: jest.fn(),
           },
         },
         {
@@ -184,7 +185,7 @@ describe('FormatsService', () => {
 
         await service.handleMatchCompletion(matchId);
 
-        expect(tournamentService.updateStatusInternal).toHaveBeenCalledWith('t1', TournamentStatus.COMPLETED);
+        expect(tournamentService.completeTournament).toHaveBeenCalledWith('t1');
         expect(prisma.tournament.update).toHaveBeenCalledWith({
             where: { id: 't1' },
             data: { winnerId }

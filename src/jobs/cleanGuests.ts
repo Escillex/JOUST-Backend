@@ -23,7 +23,8 @@ export class CleanGuestsJob {
           not: null,
         },
       },
-      include: {
+      select: {
+        id: true,
         participants: {
           where: {
             user: {
