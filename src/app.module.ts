@@ -9,7 +9,7 @@ import { LeaderboardModule } from './leaderboard/leaderboard.module';
 import { JobsModule } from './jobs/jobs.module';
 import { UserModule } from './user/user.module';
 import { DevModule } from './dev/dev.module';
-import { CardGameModule } from './card-game/card-game.module';
+import { TournamentFormatModule } from './tournament-format/tournament-format.module';
 
 @Module({
   imports: [
@@ -23,7 +23,7 @@ import { CardGameModule } from './card-game/card-game.module';
     JobsModule,
     UserModule,
     DevModule,
-    CardGameModule,
+    TournamentFormatModule,
   ],
 })
 export class AppModule { }

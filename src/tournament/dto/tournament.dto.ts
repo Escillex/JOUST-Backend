@@ -1,7 +1,6 @@
 import {
   IsString,
   IsInt,
-  IsEnum,
   IsUUID,
   Min,
   Max,
@@ -10,83 +9,11 @@ import {
   IsNumber,
   IsOptional,
   IsBoolean,
-  IsArray,
-  IsObject,
-  ValidateNested,
-  IsPositive,
+  IsEnum,
   IsDateString,
 } from 'class-validator';
-import { Prisma, TournamentFormat, TournamentStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { TournamentStatus } from '@prisma/client';
 import { PartialType } from '@nestjs/mapped-types';
-
-// ─── FORMAT CONFIG DTO ────────────────────────────────────────
-
-export class FormatConfigDto {
-  // Single/Double Elimination
-  @IsOptional()
-  @IsInt()
-  @Min(1, { message: 'Wins to advance must be at least 1' })
-  @Max(7, { message: 'Wins to advance cannot exceed 7' })
-  winsToAdvance?: number;
-
-  // Swiss
-  @IsOptional()
-  @IsInt()
-  @Min(1, { message: 'Swiss rounds must be at least 1' })
-  @Max(20, { message: 'Swiss rounds cannot exceed 20' })
-  swissRounds?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0, { message: 'Points for win cannot be negative' })
-  swissPointsForWin?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0, { message: 'Points for draw cannot be negative' })
-  swissPointsForDraw?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0, { message: 'Points for loss cannot be negative' })
-  swissPointsForLoss?: number;
-
-  // Points-based / Best-of
-  @IsOptional()
-  @IsInt()
-  @IsPositive({ message: 'Points threshold must be positive' })
-  pointsThreshold?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1, { message: 'Sessions count must be at least 1' })
-  @Max(10, { message: 'Sessions count cannot exceed 10' })
-  sessionsCount?: number;
-
-  @IsOptional()
-  @IsInt()
-  @IsPositive({ message: 'Points per session must be positive' })
-  pointsPerSession?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(1, { message: 'Best-of must be at least 1' })
-  bestOf?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  allowDraw?: boolean;
-
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tieBreakerOrder?: string[];
-
-  @IsOptional()
-  @IsString()
-  progressionType?: string;
-}
 
 // ─── CREATE TOURNAMENT ───────────────────────────────────────────
 
@@ -96,10 +23,9 @@ export class CreateTournamentDto {
   @MaxLength(60, { message: 'Tournament name must be at most 60 characters' })
   name!: string;
 
-  @IsEnum(TournamentFormat, {
-    message: `Format must be one of: ${Object.values(TournamentFormat).join(', ')}`,
-  })
-  format!: TournamentFormat;
+  /** UUID of a TournamentFormat entity */
+  @IsUUID('4', { message: 'formatId must be a valid UUID' })
+  formatId!: string;
 
   @IsInt()
   @Min(2, { message: 'Tournament needs at least 2 players' })
@@ -134,21 +60,13 @@ export class CreateTournamentDto {
 
   @IsUUID('4', { message: 'createdById must be a valid UUID' })
   createdById!: string;
-
-  @IsOptional()
-  @IsString()
-  cardGameId?: string;
-
-  // ← NEW: Format Config
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => FormatConfigDto)
-  formatConfig?: FormatConfigDto;
 }
 
 // ─── UPDATE TOURNAMENT ───────────────────────────────────────────
 
 export class UpdateTournamentDto extends PartialType(CreateTournamentDto) {}
+
+// ─── STATUS TRANSITION ───────────────────────────────────────────
 
 export class TournamentStatusDto {
   @IsEnum(TournamentStatus, {

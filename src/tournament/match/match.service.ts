@@ -25,6 +25,7 @@ export class MatchService {
     player1Id?: string;
     player2Id?: string;
     isBye: boolean;
+    phase?: number;
   }) {
     return this.prisma.match.create({
       data: {
@@ -32,6 +33,7 @@ export class MatchService {
         player1Id: dto.player1Id ?? null,
         player2Id: dto.player2Id ?? null,
         isBye:     dto.isBye,
+        phase:     dto.phase ?? 1,
       },
     });
   }
@@ -60,9 +62,7 @@ export class MatchService {
         round: {
           include: {
             tournament: {
-              include: {
-                formatConfig: true,
-              },
+              include: { format: true },
             },
           },
         },
@@ -79,7 +79,8 @@ export class MatchService {
         throw new BadRequestException('Winner must be in match');
     }
 
-    const config = resolveConfig(match.round.tournament.formatConfig);
+    const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const config = resolveConfig(rawConfig);
     const {
       sessionsCount,
       pointsThreshold,
@@ -155,7 +156,7 @@ export class MatchService {
           include: {
             tournament: {
               include: {
-                formatConfig: true,
+                format: true,
               },
             },
           },
@@ -176,7 +177,8 @@ export class MatchService {
         'Game winner is not a participant in this match',
       );
 
-    const config = resolveConfig(match.round.tournament.formatConfig);
+    const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const config = resolveConfig(rawConfig);
     const { bestOf } = config;
     const winsReq = winsNeeded(bestOf);
 
@@ -227,7 +229,7 @@ export class MatchService {
 
   /**
    * Completes a match as a draw (no winnerId).
-   * Only permitted when allowDraw is true in the tournament's formatConfig.
+   * Only permitted when allowDraw is true in the tournament's format.
    */
   async reportDraw(matchId: string) {
     const match = await this.prisma.match.findUnique({
@@ -237,7 +239,7 @@ export class MatchService {
           include: {
             tournament: {
               include: {
-                formatConfig: true,
+                format: true,
               },
             },
           },
@@ -251,7 +253,8 @@ export class MatchService {
     if (match.isBye)
       throw new BadRequestException('Cannot draw a bye match');
 
-    const config = resolveConfig(match.round.tournament.formatConfig);
+    const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const config = resolveConfig(rawConfig);
     if (!config.allowDraw)
       throw new BadRequestException(
         'Draws are not allowed in this tournament',

@@ -1,4 +1,5 @@
-import { FormatConfig } from '@prisma/client';
+// Resolves a raw config JSON blob (from TournamentFormat.config)
+// into a typed, defaults-applied config object.
 
 export interface ResolvedConfig {
   bestOf: number;
@@ -15,20 +16,22 @@ export interface ResolvedConfig {
   progressionType: string | null;
 }
 
-export function resolveConfig(config: FormatConfig | null): ResolvedConfig {
+export function resolveConfig(config: Record<string, any> | null): ResolvedConfig {
+  // For HYBRID formats, the root config IS the phase1 Swiss config for scoring purposes
+  const c = config?.phase1 ?? config ?? {};
   return {
-    bestOf:               config?.bestOf            ?? 1,
-    winsToAdvance:        config?.winsToAdvance      ?? 1,
-    allowDraw:            config?.allowDraw           ?? false,
-    swissRounds:          config?.swissRounds        ?? null,
-    swissPointsForWin:    config?.swissPointsForWin  ?? 3,
-    swissPointsForDraw:   config?.swissPointsForDraw ?? 1,
-    swissPointsForLoss:   config?.swissPointsForLoss ?? 0,
-    tieBreakerOrder:      config?.tieBreakerOrder    ?? [],
-    sessionsCount:        config?.sessionsCount       ?? 1,
-    pointsPerSession:     config?.pointsPerSession   ?? 0,
-    pointsThreshold:      config?.pointsThreshold    ?? 0,
-    progressionType:      config?.progressionType    ?? null,
+    bestOf:               c.bestOf               ?? 1,
+    winsToAdvance:        c.winsToAdvance         ?? 1,
+    allowDraw:            c.allowDraw             ?? false,
+    swissRounds:          c.swissRounds           ?? null,
+    swissPointsForWin:    c.swissPointsForWin     ?? 3,
+    swissPointsForDraw:   c.swissPointsForDraw    ?? 1,
+    swissPointsForLoss:   c.swissPointsForLoss    ?? 0,
+    tieBreakerOrder:      c.tieBreakerOrder       ?? [],
+    sessionsCount:        c.sessionsCount          ?? 1,
+    pointsPerSession:     c.pointsPerSession      ?? 0,
+    pointsThreshold:      c.pointsThreshold       ?? 0,
+    progressionType:      c.progressionType       ?? null,
   };
 }
 
