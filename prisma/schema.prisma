@@ -7,6 +7,8 @@ datasource db {
   
 }
 
+// ─── ENUMS ───────────────────────────────────────────────────────
+
 enum Role {
   ADMIN
   ORGANIZER
@@ -21,11 +23,13 @@ enum TournamentStatus {
   COMPLETED
 }
 
-enum TournamentFormat {
+// The underlying bracket engines — hardcoded, never user-defined
+enum TournamentSystem {
   SINGLE_ELIMINATION
   DOUBLE_ELIMINATION
   SWISS
   ROUND_ROBIN
+  HYBRID   // multi-phase: e.g. Swiss → Top Cut Elimination
 }
 
 enum MatchStatus {
@@ -33,6 +37,8 @@ enum MatchStatus {
   ONGOING
   COMPLETED
 }
+
+// ─── MODELS ──────────────────────────────────────────────────────
 
 model User {
   id              String    @id @default(uuid())
@@ -46,27 +52,52 @@ model User {
   createdAt       DateTime  @default(now())
   updateAt        DateTime  @updatedAt()
 
-  tournamentsCreated    Tournament[]
-  wonTournaments        Tournament[] @relation("TournamentWinner")
-  participatedTournaments TournamentParticipant[]
-  matchesAsPlayer1      Match[] @relation("Player1")
-  matchesAsPlayer2      Match[] @relation("Player2")
-  wonMatches            Match[] @relation("Winner")
-  createdCardGames      CardGame[]
+  tournamentsCreated       Tournament[]
+  wonTournaments           Tournament[]        @relation("TournamentWinner")
+  participatedTournaments  TournamentParticipant[]
+  matchesAsPlayer1         Match[]             @relation("Player1")
+  matchesAsPlayer2         Match[]             @relation("Player2")
+  wonMatches               Match[]             @relation("Winner")
+  createdFormats           TournamentFormat[]
 }
+
+// ─── TOURNAMENT FORMAT (Admin-managed named rulesets) ─────────────
+
+model TournamentFormat {
+  id          String           @id @default(uuid())
+  name        String           @unique      // "Beyblade Standard", "Pickleball Open"
+  description String?
+  gameName    String?                       // Dynamic game association (e.g. "Pickleball")
+  system      TournamentSystem             // the engine to run
+  config      Json                         // all rules as JSON blob
+  isBuiltin   Boolean          @default(false) // builtin formats cannot be deleted
+
+  createdById String
+  createdBy   User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  tournaments Tournament[]
+
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+// ─── TOURNAMENT ───────────────────────────────────────────────────
 
 model Tournament {
   id          String   @id @default(uuid())
   name        String
-  format      TournamentFormat @default(SINGLE_ELIMINATION)
   maxPlayers  Int
   prizePool   Float?
   entranceFee Float?
   venue       String?
   date        DateTime?
   inviteToken String   @default(uuid()) @unique
-  isPrivate   Boolean @default(false)
+  isPrivate   Boolean  @default(false)
   status      TournamentStatus @default(OPEN)
+
+  // Format reference — points to admin-defined named ruleset
+  formatId    String?
+  format      TournamentFormat? @relation(fields: [formatId], references: [id], onDelete: SetNull)
 
   createdById String?
   createdBy   User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -79,64 +110,26 @@ model Tournament {
 
   participants TournamentParticipant[]
   rounds       Round[]
-  formatConfig FormatConfig? 
-
-  cardGameId   String?
-  cardGame     CardGame?  @relation(fields: [cardGameId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 }
 
-model FormatConfig {
-  id                    String      @id @default(uuid())
-  tournamentId          String      @unique
-  tournament            Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  
-  // Single/Double Elimination
-  winsToAdvance         Int?        @default(1)
-  
-  // Swiss
-  swissRounds           Int?
-  swissPointsForWin     Int?        @default(3)
-  swissPointsForDraw    Int?        @default(1)
-  swissPointsForLoss    Int?        @default(0)
-  
-  // Points-based / Best-of
-  pointsThreshold       Int?
-  sessionsCount         Int?
-  pointsPerSession      Int?
-  bestOf                Int?
-  allowDraw             Boolean?
-  tieBreakerOrder       String[]    @default([])
-  progressionType       String?
-
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
-}
-
-model CardGame {
-  id          String    @id @default(uuid())
-  name        String    @unique
-  description String?
-  isBuiltin   Boolean   @default(false)
-  createdById String?
-  createdBy   User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  tournaments Tournament[]
-  createdAt   DateTime  @default(now())
-}
+// ─── PARTICIPANTS ─────────────────────────────────────────────────
 
 model TournamentParticipant {
   id            String @id @default(uuid())
   userId        String
   tournamentId  String
 
-  user          User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   tournament    Tournament @relation(fields: [tournamentId], references: [id])
 
-  seed          Int?   // optional (for seeding later)
+  seed          Int?
 
   @@unique([userId, tournamentId])
 }
+
+// ─── ROUNDS & MATCHES ─────────────────────────────────────────────
 
 model Round {
   id            String @id @default(uuid())
@@ -165,7 +158,7 @@ model Match {
   player1Score  Int @default(0)
   player2Score  Int @default(0)
 
-  // Historical name snapshots — populated when a user is deleted so brackets remain readable
+  // Historical name snapshots — populated when a user is deleted
   p1Name        String?
   p2Name        String?
   winnerName    String?
@@ -182,8 +175,10 @@ model Match {
   previousLoserMatches Match[] @relation("LoserNextMatch")
 
   status        MatchStatus @default(PENDING)
-
   isBye         Boolean @default(false)
+
+  // For HYBRID tournaments: which phase this match belongs to
+  phase         Int @default(1)
 
   createdAt     DateTime @default(now())
 }

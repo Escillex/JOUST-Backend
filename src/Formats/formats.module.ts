@@ -1,6 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { FormatsService } from './formats.service';
-import { FormatsController } from './formats.controller';
+
 import { PrismaModule } from 'prisma/prisma.module';
 import { MatchModule } from '../tournament/match/match.module';
 import { TournamentModule } from '../tournament/tournament.module';
@@ -15,7 +15,7 @@ import { AuthModule } from 'src/auth/auth.module';
     LeaderboardModule,
     AuthModule,
   ],
-  controllers: [FormatsController],
+  controllers: [],
   providers: [FormatsService],
   exports: [FormatsService],
 })

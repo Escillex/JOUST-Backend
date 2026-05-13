@@ -12,9 +12,10 @@ import {
   LeaderboardEntry,
 } from '../leaderboard/leaderboard.service';
 import {
-  TournamentFormat,
+  TournamentSystem,
   MatchStatus,
   TournamentStatus,
+  TournamentFormat,
   Match,
 } from '@prisma/client';
 import { resolveConfig } from './format-config.helper';
@@ -32,356 +33,129 @@ export class FormatsService {
 
   async initializeTournamentFormat(
     tournamentId: string,
-    format: TournamentFormat,
+    format: TournamentFormat,   // full entity from prisma
     playerIds: string[],
     activate: boolean = true,
   ) {
-    if (format === TournamentFormat.SINGLE_ELIMINATION) {
+    const system = format.system;
+    const config = format.config as Record<string, any>;
+
+    if (system === TournamentSystem.SINGLE_ELIMINATION) {
       await this.initSingleElimination(tournamentId, playerIds, activate);
-    } else if (format === TournamentFormat.DOUBLE_ELIMINATION) {
+    } else if (system === TournamentSystem.DOUBLE_ELIMINATION) {
       await this.initDoubleElimination(tournamentId, playerIds, activate);
-    } else if (format === TournamentFormat.SWISS) {
+    } else if (system === TournamentSystem.SWISS) {
       await this.initSwiss(tournamentId, playerIds, activate);
-    } else if (format === TournamentFormat.ROUND_ROBIN) {
+    } else if (system === TournamentSystem.ROUND_ROBIN) {
       await this.initRoundRobin(tournamentId, playerIds, activate);
+    } else if (system === TournamentSystem.HYBRID) {
+      await this.initHybrid(tournamentId, config, playerIds, activate);
     } else {
-      throw new BadRequestException(`Format ${format} not supported`);
+      throw new BadRequestException(`System ${system} not supported`);
     }
   }
 
   async handleMatchCompletion(matchId: string) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      include: { round: { include: { tournament: true } } },
+      include: { round: { include: { tournament: { include: { format: true } } } } },
     });
 
     if (!match) return;
 
     const { tournament } = match.round;
+    const system = tournament.format?.system;
 
-    if (tournament.format === TournamentFormat.SINGLE_ELIMINATION) {
+    if (system === TournamentSystem.SINGLE_ELIMINATION) {
       if (match.nextMatchId && match.winnerId) {
-        await this.matchService.advanceWinner(
-          match.winnerId,
-          match.nextMatchId,
-        );
+        await this.matchService.advanceWinner(match.winnerId, match.nextMatchId);
       }
       await this.checkSingleEliminationComplete(tournament.id, match.roundId);
-    } else if (tournament.format === TournamentFormat.DOUBLE_ELIMINATION) {
+    } else if (system === TournamentSystem.DOUBLE_ELIMINATION) {
       if (match.winnerId && match.nextMatchId) {
-        await this.matchService.advanceWinner(
-          match.winnerId,
-          match.nextMatchId,
-        );
+        await this.matchService.advanceWinner(match.winnerId, match.nextMatchId);
       }
       if (match.loserNextMatchId) {
-        const loserId =
-          match.player1Id === match.winnerId
-            ? match.player2Id
-            : match.player1Id;
-        if (loserId) {
-          await this.matchService.advanceLoser(loserId, match.loserNextMatchId);
-        }
+        const loserId = match.player1Id === match.winnerId ? match.player2Id : match.player1Id;
+        if (loserId) await this.matchService.advanceLoser(loserId, match.loserNextMatchId);
       }
       await this.checkTournamentComplete(tournament.id);
-    } else if (tournament.format === TournamentFormat.SWISS) {
+    } else if (system === TournamentSystem.SWISS) {
       await this.checkSwissRoundComplete(tournament.id, match.roundId);
-    } else if (tournament.format === TournamentFormat.ROUND_ROBIN) {
+    } else if (system === TournamentSystem.ROUND_ROBIN) {
       await this.checkTournamentComplete(tournament.id);
+    } else if (system === TournamentSystem.HYBRID) {
+      // phase 1 = Swiss; phase 2 = single elim top cut
+      if (match.phase === 1) {
+        await this.checkHybridPhase1Complete(tournament.id, match.roundId);
+      } else {
+        // phase 2 uses single-elim logic
+        if (match.nextMatchId && match.winnerId) {
+          await this.matchService.advanceWinner(match.winnerId, match.nextMatchId);
+        }
+        await this.checkSingleEliminationComplete(tournament.id, match.roundId);
+      }
     }
   }
 
-  getAvailableFormats(): TournamentFormat[] {
-    return Object.values(TournamentFormat);
+  // ─── HYBRID (Swiss → Top Cut) ────────────────────────────────
+
+  private async initHybrid(
+    tournamentId: string,
+    config: Record<string, any>,
+    playerIds: string[],
+    activate: boolean,
+  ) {
+    // Phase 1: Swiss — matches tagged with phase=1
+    await this.initSwiss(tournamentId, playerIds, activate, 1);
   }
 
-  getFormatDetails() {
-    return Object.values(this.formatDefinitions);
-  }
+  private async checkHybridPhase1Complete(tournamentId: string, roundId: string) {
+    const round = await this.prisma.round.findUnique({
+      where: { id: roundId },
+      include: { matches: true },
+    });
+    if (!round || !round.matches.every((m) => m.status === MatchStatus.COMPLETED)) return;
 
-  getFormatDetailsByFormat(format: TournamentFormat) {
-    return this.formatDefinitions[format];
-  }
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { participants: true, format: true },
+    });
+    if (!tournament?.format) return;
 
-  private readonly formatDefinitions: Record<
-    string,
-    {
-      id: TournamentFormat;
-      label: string;
-      description: string;
-      configFields: Array<{
-        key: string;
-        label: string;
-        placeholder: string;
-        defaultValue?: number | string | boolean | null;
-        min?: number;
-        max?: number;
-      }>;
+    const config = tournament.format.config as Record<string, any>;
+    const phase1Config = config.phase1 ?? {};
+    const maxRounds = phase1Config.swissRounds ??
+      Math.max(1, Math.ceil(Math.log2(tournament.participants.length)));
+
+    if (round.roundNumber < maxRounds) {
+      // Keep running Swiss
+      await this.generateNextSwissRound(tournamentId, round.roundNumber + 1, 1);
+      return;
     }
-  > = {
-    SINGLE_ELIMINATION: {
-      id: TournamentFormat.SINGLE_ELIMINATION,
-      label: 'Single Elimination',
-      description: 'One loss and you are out. Single-elimination bracket play.',
-      configFields: [
-        {
-          key: 'winsToAdvance',
-          label: 'Wins to Advance',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 1,
-          max: 7,
-        },
-        {
-          key: 'sessionsCount',
-          label: 'Sessions / Match',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 1,
-        },
-        {
-          key: 'pointsPerSession',
-          label: 'Pts / Session',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'pointsThreshold',
-          label: 'Pts Threshold',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'bestOf',
-          label: 'Best Of',
-          placeholder: '3',
-          defaultValue: 1,
-          min: 1,
-          max: 15,
-        },
-        {
-          key: 'allowDraw',
-          label: 'Allow Draw',
-          placeholder: 'false',
-          defaultValue: false,
-        },
-        {
-          key: 'tieBreakerOrder',
-          label: 'Tie Breaker Order',
-          placeholder: 'player1,player2',
-          defaultValue: null,
-        },
-        {
-          key: 'progressionType',
-          label: 'Progression Type',
-          placeholder: 'standard',
-          defaultValue: null,
-        },
-      ],
-    },
-    DOUBLE_ELIMINATION: {
-      id: TournamentFormat.DOUBLE_ELIMINATION,
-      label: 'Double Elimination',
-      description:
-        'Two losses before elimination. Winners and losers bracket play.',
-      configFields: [
-        {
-          key: 'winsToAdvance',
-          label: 'Wins to Advance',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 1,
-          max: 7,
-        },
-        {
-          key: 'sessionsCount',
-          label: 'Sessions / Match',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 1,
-        },
-        {
-          key: 'pointsPerSession',
-          label: 'Pts / Session',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'pointsThreshold',
-          label: 'Pts Threshold',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'bestOf',
-          label: 'Best Of',
-          placeholder: '3',
-          defaultValue: 1,
-          min: 1,
-          max: 15,
-        },
-        {
-          key: 'allowDraw',
-          label: 'Allow Draw',
-          placeholder: 'false',
-          defaultValue: false,
-        },
-        {
-          key: 'tieBreakerOrder',
-          label: 'Tie Breaker Order',
-          placeholder: 'player1,player2',
-          defaultValue: null,
-        },
-        {
-          key: 'progressionType',
-          label: 'Progression Type',
-          placeholder: 'standard',
-          defaultValue: null,
-        },
-      ],
-    },
-    SWISS: {
-      id: TournamentFormat.SWISS,
-      label: 'Swiss',
-      description: 'Players face opponents with similar records across rounds.',
-      configFields: [
-        {
-          key: 'swissRounds',
-          label: 'Swiss Rounds',
-          placeholder: 'Auto',
-          defaultValue: null,
-          min: 1,
-          max: 20,
-        },
-        {
-          key: 'swissPointsForWin',
-          label: 'Points · Win',
-          placeholder: '3',
-          defaultValue: 3,
-          min: 0,
-        },
-        {
-          key: 'swissPointsForDraw',
-          label: 'Points · Draw',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 0,
-        },
-        {
-          key: 'swissPointsForLoss',
-          label: 'Points · Loss',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'sessionsCount',
-          label: 'Sessions / Match',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 1,
-        },
-        {
-          key: 'pointsPerSession',
-          label: 'Pts / Session',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'pointsThreshold',
-          label: 'Pts Threshold',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'bestOf',
-          label: 'Best Of',
-          placeholder: '3',
-          defaultValue: 1,
-          min: 1,
-          max: 15,
-        },
-        {
-          key: 'allowDraw',
-          label: 'Allow Draw',
-          placeholder: 'false',
-          defaultValue: false,
-        },
-        {
-          key: 'tieBreakerOrder',
-          label: 'Tie Breaker Order',
-          placeholder: 'player1,player2',
-          defaultValue: null,
-        },
-        {
-          key: 'progressionType',
-          label: 'Progression Type',
-          placeholder: 'standard',
-          defaultValue: null,
-        },
-      ],
-    },
-    ROUND_ROBIN: {
-      id: TournamentFormat.ROUND_ROBIN,
-      label: 'Round Robin',
-      description: 'Everyone plays everyone. Best record wins.',
-      configFields: [
-        {
-          key: 'sessionsCount',
-          label: 'Sessions / Match',
-          placeholder: '1',
-          defaultValue: 1,
-          min: 1,
-        },
-        {
-          key: 'pointsPerSession',
-          label: 'Pts / Session',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'pointsThreshold',
-          label: 'Pts Threshold',
-          placeholder: '0',
-          defaultValue: 0,
-          min: 0,
-        },
-        {
-          key: 'bestOf',
-          label: 'Best Of',
-          placeholder: '3',
-          defaultValue: 1,
-          min: 1,
-          max: 15,
-        },
-        {
-          key: 'allowDraw',
-          label: 'Allow Draw',
-          placeholder: 'false',
-          defaultValue: false,
-        },
-        {
-          key: 'tieBreakerOrder',
-          label: 'Tie Breaker Order',
-          placeholder: 'player1,player2',
-          defaultValue: null,
-        },
-        {
-          key: 'progressionType',
-          label: 'Progression Type',
-          placeholder: 'standard',
-          defaultValue: null,
-        },
-      ],
-    },
-  };
+
+    // Swiss phase complete — begin Top Cut
+    const phase2Config = config.phase2 ?? {};
+    const topCutSize = phase2Config.topCutSize ?? 8;
+    const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+    const topN = leaderboard.slice(0, topCutSize).map((e) => e.userId);
+
+    if (topN.length < 2) {
+      // Fall through to completion
+      await this.tournamentService.completeTournament(tournamentId);
+      return;
+    }
+
+    // Find the highest existing roundNumber and continue from there
+    const rounds = await this.prisma.round.findMany({
+      where: { tournamentId },
+      orderBy: { roundNumber: 'desc' },
+      take: 1,
+    });
+    const nextRoundOffset = (rounds[0]?.roundNumber ?? 0) + 1;
+
+    await this.initSingleElimination(tournamentId, topN, true, nextRoundOffset, 2);
+  }
 
   private async checkTournamentComplete(tournamentId: string) {
     const allMatches = await this.prisma.match.findMany({
@@ -411,6 +185,8 @@ export class FormatsService {
     tournamentId: string,
     playerIds: string[],
     activate: boolean = true,
+    roundOffset: number = 1,
+    phase: number = 1,
   ) {
     const bracketSize = this.nextPowerOfTwo(playerIds.length);
     const padded: (string | null)[] = [
@@ -422,7 +198,7 @@ export class FormatsService {
     let prevMatchIds: string[] = [];
     for (let i = 0; i < rounds.length; i++) {
       const round = await this.prisma.round.create({
-        data: { tournamentId, roundNumber: i + 1 },
+        data: { tournamentId, roundNumber: roundOffset + i },
       });
 
       const currentMatchIds: string[] = [];
@@ -434,23 +210,18 @@ export class FormatsService {
           isBye:
             (m.p1 === null && m.p2 !== null) ||
             (m.p1 !== null && m.p2 === null),
+          phase,
         });
         currentMatchIds.push(created.id);
 
         if (i === 0 && activate) {
           if (created.player1Id && created.player2Id) {
             await this.matchService.activateMatch(created.id);
-          } else if (
-            created.isBye &&
-            (created.player1Id || created.player2Id)
-          ) {
+          } else if (created.isBye && (created.player1Id || created.player2Id)) {
             const winnerId = (created.player1Id || created.player2Id) as string;
             await this.prisma.match.update({
               where: { id: created.id },
-              data: {
-                winnerId: winnerId,
-                status: MatchStatus.COMPLETED,
-              },
+              data: { winnerId, status: MatchStatus.COMPLETED },
             });
           }
         }
@@ -461,9 +232,7 @@ export class FormatsService {
       }
 
       if (i === 0 && activate) {
-        const r1Matches = await this.prisma.match.findMany({
-          where: { roundId: round.id },
-        });
+        const r1Matches = await this.prisma.match.findMany({ where: { roundId: round.id } });
         for (const rm of r1Matches) {
           if (rm.isBye && rm.status === MatchStatus.COMPLETED) {
             await this.handleMatchCompletion(rm.id);
@@ -652,7 +421,7 @@ export class FormatsService {
 
   // ─── SWISS ───────────────────────────────────────────────────
 
-  private async initSwiss(tournamentId: string, playerIds: string[], activate: boolean = true) {
+  private async initSwiss(tournamentId: string, playerIds: string[], activate: boolean = true, phase: number = 1) {
     const shuffledPlayers = this.shuffle(playerIds);
     const round = await this.prisma.round.create({
       data: { tournamentId, roundNumber: 1 },
@@ -667,6 +436,7 @@ export class FormatsService {
         player1Id: p1,
         player2Id: p2 || undefined,
         isBye: p2 === null,
+        phase,
       });
       matchesCreated.push(match);
 
@@ -704,14 +474,11 @@ export class FormatsService {
 
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: {
-        participants: true,
-        formatConfig: true,
-      },
+      include: { participants: true, format: true },
     });
 
-    // Use swissRounds from config if set, otherwise auto
-    const config = resolveConfig(tournament?.formatConfig ?? null);
+    const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
+    const config = resolveConfig(rawConfig);
     const maxRounds = config.swissRounds ?? Math.max(
       1,
       Math.ceil(Math.log2(tournament!.participants.length)),
@@ -720,12 +487,7 @@ export class FormatsService {
     if (round.roundNumber >= maxRounds) {
       const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
       const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
-      
-      await this.prisma.tournament.update({
-        where: { id: tournamentId },
-        data: { winnerId }
-      });
-
+      await this.prisma.tournament.update({ where: { id: tournamentId }, data: { winnerId } });
       await this.tournamentService.completeTournament(tournamentId);
       return;
     }
@@ -736,6 +498,7 @@ export class FormatsService {
   private async generateNextSwissRound(
     tournamentId: string,
     roundNumber: number,
+    phase: number = 1,
   ) {
     const leaderboard =
       await this.leaderboardService.getLeaderboard(tournamentId);

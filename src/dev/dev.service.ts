@@ -45,7 +45,7 @@ export class DevService {
     }
     await this.prisma.round.deleteMany({ where: { tournamentId } });
     await this.prisma.tournamentParticipant.deleteMany({ where: { tournamentId } });
-    await this.prisma.formatConfig.deleteMany({ where: { tournamentId } });
+
     
     await this.prisma.tournament.delete({ where: { id: tournamentId } });
 

@@ -118,12 +118,11 @@ export class LeaderboardService {
 
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: {
-        formatConfig: true,
-      },
+      include: { format: true },
     });
 
-    const config = resolveConfig(tournament?.formatConfig ?? null);
+    const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
+    const config = resolveConfig(rawConfig);
     const {
       swissPointsForWin: pointsForWin,
       swissPointsForDraw: pointsForDraw,
@@ -267,11 +266,9 @@ export class LeaderboardService {
             tournament: {
               select: {
                 id: true,
-                formatConfig: {
+                format: {
                   select: {
-                    swissPointsForWin: true,
-                    swissPointsForDraw: true,
-                    swissPointsForLoss: true,
+                    config: true,
                   },
                 },
               },
@@ -304,7 +301,8 @@ export class LeaderboardService {
     const pointsMap     = new Map<string, number>();
 
     const getTournamentPoints = (tournament: any) => {
-      const config = resolveConfig(tournament?.formatConfig ?? null);
+      const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
+      const config = resolveConfig(rawConfig);
       return {
         pointsForWin:  config.swissPointsForWin,
         pointsForDraw: config.swissPointsForDraw,

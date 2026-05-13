@@ -19,11 +19,11 @@ import {
   UpdateTournamentDto,
   TournamentStatusDto,
 } from './dto/tournament.dto';
-import { Roles } from 'src/guards/decorators/roles.decorator';
-import { RolesGuard } from 'src/guards/roles.guard';
+import { Roles } from '../guards/decorators/roles.decorator';
+import { RolesGuard } from '../guards/roles.guard';
 import { Role } from '@prisma/client';
-import { JwtAuthGuard } from 'src/guards/jwt-auth.guard';
-import type { AuthenticatedRequest } from 'src/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../guards/jwt-auth.guard';
 
 @Controller('tournaments')
 export class TournamentController {
