@@ -61,6 +61,8 @@ model User {
 
   // NEW: global stats back-relation
   globalStats UserGlobalStats?
+
+  avatarUrl String? // path: /uploads/avatars/<uuid>.webp
 }
 
 // ─── TOURNAMENT FORMAT (Admin-managed named rulesets) ─────────────
@@ -112,6 +114,8 @@ model Tournament {
 
   participants TournamentParticipant[]
   rounds       Round[]
+
+  bannerUrl String? // path: /uploads/banners/<uuid>.webp
 
   createdAt DateTime @default(now())
 }
@@ -238,4 +242,13 @@ model Match {
   phase Int @default(1)
 
   createdAt DateTime @default(now())
+}
+
+model SiteAsset {
+  id        String   @id @default(uuid())
+  key       String   @unique // e.g. "hero_slide_1", "home_banner"
+  url       String // served path: /uploads/assets/<uuid>.webp
+  label     String? // human-readable description for admin UI
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

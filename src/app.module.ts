@@ -10,6 +10,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { UserModule } from './user/user.module';
 import { DevModule } from './dev/dev.module';
 import { TournamentFormatModule } from './tournament-format/tournament-format.module';
+import { ImagesModule } from './images/images.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { TournamentFormatModule } from './tournament-format/tournament-format.mo
     UserModule,
     DevModule,
     TournamentFormatModule,
+    ImagesModule,
   ],
 })
 export class AppModule { }
