@@ -8,7 +8,7 @@ import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  app.useStaticAssets(path.join(__dirname, 'images', 'uploads'), {
+  app.useStaticAssets(path.join(process.cwd(), '..', 'images'), {
     prefix: '/uploads',
   });
   app.enableCors({

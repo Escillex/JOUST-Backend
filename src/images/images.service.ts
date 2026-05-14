@@ -7,7 +7,7 @@ import * as path from 'path';
 
 @Injectable()
 export class ImagesService {
-  private readonly uploadRoot = path.join(__dirname, 'uploads');
+  private readonly uploadRoot = path.join(process.cwd(), '..', 'images');
 
   constructor(private prisma: PrismaService) {
     // Ensure upload directories exist on startup
