@@ -98,145 +98,37 @@ export class LeaderboardService {
   // ─── TOURNAMENT LEADERBOARD ──────────────────────────────────
 
   async getLeaderboard(tournamentId: string): Promise<LeaderboardEntry[]> {
-    const matches = await this.prisma.match.findMany({
-      where: {
-        round: { tournamentId },
-        status: MatchStatus.COMPLETED,
-      },
-      select: {
-        player1Id: true,
-        player2Id: true,
-        winnerId: true,
-        isBye: true,
-      },
-    });
-
     const participants = await this.prisma.tournamentParticipant.findMany({
       where: { tournamentId },
-      include: { user: { select: { id: true, username: true } } },
+      include: {
+        stats: true,
+        user: { select: { id: true, username: true } },
+        tournament: { include: { format: true } },
+      },
     });
 
-    const tournament = await this.prisma.tournament.findUnique({
-      where: { id: tournamentId },
-      include: { format: true },
-    });
+    const tournament = participants[0]?.tournament ??
+      (await this.prisma.tournament.findUnique({
+        where: { id: tournamentId },
+        include: { format: true },
+      }));
 
     const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
-    const {
-      swissPointsForWin: pointsForWin,
-      swissPointsForDraw: pointsForDraw,
-      swissPointsForLoss: pointsForLoss,
-      tieBreakerOrder,
-    } = config;
+    const { tieBreakerOrder } = config;
 
-    const playerIds = participants.map((p) => p.userId);
+    const entries: Omit<LeaderboardEntry, 'rank'>[] = participants.map((p) => ({
+      userId:      p.userId,
+      username:    p.user?.username ?? 'Guest',
+      points:      p.stats?.points ?? 0,
+      wins:        p.stats?.wins ?? 0,
+      losses:      p.stats?.losses ?? 0,
+      draws:       p.stats?.draws ?? 0,
+      matchWinPct: p.stats?.winRate ?? 0,
+      omw:         p.stats?.omw ?? 0,
+      oomw:        p.stats?.oomw ?? 0,
+    }));
 
-    const opponentMap   = new Map<string, Set<string>>();
-    const winsMap       = new Map<string, number>();
-    const lossesMap     = new Map<string, number>();
-    const drawsMap      = new Map<string, number>();
-    const matchCountMap = new Map<string, number>();
-
-    for (const id of playerIds) {
-      opponentMap.set(id, new Set());
-      winsMap.set(id, 0);
-      lossesMap.set(id, 0);
-      drawsMap.set(id, 0);
-      matchCountMap.set(id, 0);
-    }
-
-    for (const match of matches) {
-      const { player1Id: p1, player2Id: p2, winnerId, isBye } = match;
-      if (!p1) continue;
-
-      if (isBye) {
-        winsMap.set(p1, (winsMap.get(p1) ?? 0) + 1);
-        continue;
-      }
-
-      if (!p2) continue;
-
-      matchCountMap.set(p1, (matchCountMap.get(p1) ?? 0) + 1);
-      matchCountMap.set(p2, (matchCountMap.get(p2) ?? 0) + 1);
-      opponentMap.get(p1)?.add(p2);
-      opponentMap.get(p2)?.add(p1);
-
-      if (!winnerId) {
-        drawsMap.set(p1, (drawsMap.get(p1) ?? 0) + 1);
-        drawsMap.set(p2, (drawsMap.get(p2) ?? 0) + 1);
-      } else if (winnerId === p1) {
-        winsMap.set(p1, (winsMap.get(p1) ?? 0) + 1);
-        lossesMap.set(p2, (lossesMap.get(p2) ?? 0) + 1);
-      } else {
-        winsMap.set(p2, (winsMap.get(p2) ?? 0) + 1);
-        lossesMap.set(p1, (lossesMap.get(p1) ?? 0) + 1);
-      }
-    }
-
-    // Match win percentage (floored at 0.33)
-    const mwpMap = new Map<string, number>();
-    for (const id of playerIds) {
-      const wins         = winsMap.get(id) ?? 0;
-      const draws        = drawsMap.get(id) ?? 0;
-      const matchesPlayed = matchCountMap.get(id) ?? 0;
-      const byes         = matches.filter((m) => m.isBye && m.player1Id === id).length;
-      const realWins     = wins - byes;
-
-      const possiblePoints = matchesPlayed * pointsForWin;
-      const earnedPoints   = realWins * pointsForWin + draws * pointsForDraw;
-      const raw = possiblePoints === 0 ? 0.33 : earnedPoints / possiblePoints;
-      mwpMap.set(id, Math.max(raw, 0.33));
-    }
-
-    // Opponent match win percentage
-    const omwMap = new Map<string, number>();
-    for (const id of playerIds) {
-      const opponents = [...(opponentMap.get(id) ?? [])];
-      if (opponents.length === 0) { omwMap.set(id, 0.33); continue; }
-      const avg =
-        opponents.reduce((sum, oppId) => sum + (mwpMap.get(oppId) ?? 0.33), 0) /
-        opponents.length;
-      omwMap.set(id, Math.max(avg, 0.33));
-    }
-
-    // Opponent's opponent match win percentage
-    const oomwMap = new Map<string, number>();
-    for (const id of playerIds) {
-      const opponents = [...(opponentMap.get(id) ?? [])];
-      if (opponents.length === 0) { oomwMap.set(id, 0.33); continue; }
-      const avg =
-        opponents.reduce((sum, oppId) => sum + (omwMap.get(oppId) ?? 0.33), 0) /
-        opponents.length;
-      oomwMap.set(id, avg);
-    }
-
-    const entries: Omit<LeaderboardEntry, 'rank'>[] = participants.map((p) => {
-      const id     = p.userId;
-      const wins   = winsMap.get(id)   ?? 0;
-      const losses = lossesMap.get(id) ?? 0;
-      const draws  = drawsMap.get(id)  ?? 0;
-      const byes   = matches.filter((m) => m.isBye && m.player1Id === id).length;
-      const realWins = wins - byes;
-
-      return {
-        userId:      id,
-        username:    p.user.username ?? 'Guest',
-        points:
-          realWins * pointsForWin  +
-          draws    * pointsForDraw +
-          losses   * pointsForLoss +
-          byes     * pointsForWin,
-        wins,
-        losses,
-        draws,
-        matchWinPct: mwpMap.get(id)  ?? 0.33,
-        omw:         omwMap.get(id)  ?? 0.33,
-        oomw:        oomwMap.get(id) ?? 0.33,
-      };
-    });
-
-    // ← dynamic sort driven by tieBreakerOrder
     const sorted = this.sortEntries(entries, tieBreakerOrder);
 
     const ranked: LeaderboardEntry[] = [];
@@ -254,170 +146,28 @@ export class LeaderboardService {
   // ─── GLOBAL LEADERBOARD ──────────────────────────────────────
 
   async getGlobalLeaderboard(): Promise<GlobalLeaderboardEntry[]> {
-    const matches = await this.prisma.match.findMany({
-      where: { status: MatchStatus.COMPLETED },
-      select: {
-        player1Id: true,
-        player2Id: true,
-        winnerId: true,
-        isBye: true,
-        round: {
-          select: {
-            tournament: {
-              select: {
-                id: true,
-                format: {
-                  select: {
-                    config: true,
-                  },
-                },
-              },
-            },
-          },
-        },
+    const globalStats = await this.prisma.userGlobalStats.findMany({
+      where: {
+        user: { isGuest: false },
+      },
+      include: {
+        user: { select: { id: true, username: true } },
       },
     });
 
-    const participants = await this.prisma.tournamentParticipant.findMany({
-      where: { user: { isGuest: false } },
-      include: { user: { select: { id: true, username: true } } },
-    });
-
-    const tournamentSetByUser = new Map<string, Set<string>>();
-    const participantMap      = new Map<string, string>();
-
-    for (const p of participants) {
-      participantMap.set(p.userId, p.user.username ?? 'Guest');
-      const set = tournamentSetByUser.get(p.userId) ?? new Set<string>();
-      set.add(p.tournamentId);
-      tournamentSetByUser.set(p.userId, set);
-    }
-
-    const winsMap       = new Map<string, number>();
-    const lossesMap     = new Map<string, number>();
-    const drawsMap      = new Map<string, number>();
-    const matchCountMap = new Map<string, number>();
-    const opponentMap   = new Map<string, Set<string>>();
-    const pointsMap     = new Map<string, number>();
-
-    const getTournamentPoints = (tournament: any) => {
-      const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
-      const config = resolveConfig(rawConfig);
-      return {
-        pointsForWin:  config.swissPointsForWin,
-        pointsForDraw: config.swissPointsForDraw,
-        pointsForLoss: config.swissPointsForLoss,
-      };
-    };
-
-    const ensurePlayer = (id: string) => {
-      if (!winsMap.has(id)) {
-        winsMap.set(id, 0);
-        lossesMap.set(id, 0);
-        drawsMap.set(id, 0);
-        matchCountMap.set(id, 0);
-        pointsMap.set(id, 0);
-        opponentMap.set(id, new Set());
-      }
-    };
-
-    for (const match of matches) {
-      const { player1Id: p1, player2Id: p2, winnerId, isBye, round } = match;
-      const tournament = round?.tournament;
-      if (!p1 || !tournament) continue;
-
-      const { pointsForWin, pointsForDraw, pointsForLoss } =
-        getTournamentPoints(tournament);
-
-      ensurePlayer(p1);
-      if (p2) ensurePlayer(p2);
-
-      if (isBye) {
-        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForWin);
-        winsMap.set(p1, (winsMap.get(p1) ?? 0) + 1);
-        continue;
-      }
-
-      if (!p2) continue;
-
-      matchCountMap.set(p1, (matchCountMap.get(p1) ?? 0) + 1);
-      matchCountMap.set(p2, (matchCountMap.get(p2) ?? 0) + 1);
-      opponentMap.get(p1)?.add(p2);
-      opponentMap.get(p2)?.add(p1);
-
-      if (!winnerId) {
-        drawsMap.set(p1, (drawsMap.get(p1) ?? 0) + 1);
-        drawsMap.set(p2, (drawsMap.get(p2) ?? 0) + 1);
-        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForDraw);
-        pointsMap.set(p2, (pointsMap.get(p2) ?? 0) + pointsForDraw);
-      } else if (winnerId === p1) {
-        winsMap.set(p1, (winsMap.get(p1) ?? 0) + 1);
-        lossesMap.set(p2, (lossesMap.get(p2) ?? 0) + 1);
-        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForWin);
-        pointsMap.set(p2, (pointsMap.get(p2) ?? 0) + pointsForLoss);
-      } else {
-        winsMap.set(p2, (winsMap.get(p2) ?? 0) + 1);
-        lossesMap.set(p1, (lossesMap.get(p1) ?? 0) + 1);
-        pointsMap.set(p2, (pointsMap.get(p2) ?? 0) + pointsForWin);
-        pointsMap.set(p1, (pointsMap.get(p1) ?? 0) + pointsForLoss);
-      }
-    }
-
-    const playerIds = Array.from(
-      new Set([
-        ...participants.map((p) => p.userId),
-        ...Array.from(pointsMap.keys()),
-      ]),
-    );
-
-    for (const id of playerIds) ensurePlayer(id);
-
-    // MWP (global always uses standard 3/1/0 for percentage denominator)
-    const mwpMap = new Map<string, number>();
-    for (const id of playerIds) {
-      const wins          = winsMap.get(id)       ?? 0;
-      const draws         = drawsMap.get(id)       ?? 0;
-      const matchesPlayed = matchCountMap.get(id)  ?? 0;
-      const possiblePoints = matchesPlayed * 3;
-      const earnedPoints   = wins * 3 + draws * 1;
-      const raw = possiblePoints === 0 ? 0.33 : Math.max(earnedPoints / possiblePoints, 0.33);
-      mwpMap.set(id, raw);
-    }
-
-    const omwMap = new Map<string, number>();
-    for (const id of playerIds) {
-      const opponents = [...(opponentMap.get(id) ?? [])];
-      if (opponents.length === 0) { omwMap.set(id, 0.33); continue; }
-      const avg =
-        opponents.reduce((sum, oppId) => sum + (mwpMap.get(oppId) ?? 0.33), 0) /
-        opponents.length;
-      omwMap.set(id, Math.max(avg, 0.33));
-    }
-
-    const oomwMap = new Map<string, number>();
-    for (const id of playerIds) {
-      const opponents = [...(opponentMap.get(id) ?? [])];
-      if (opponents.length === 0) { oomwMap.set(id, 0.33); continue; }
-      const avg =
-        opponents.reduce((sum, oppId) => sum + (omwMap.get(oppId) ?? 0.33), 0) /
-        opponents.length;
-      oomwMap.set(id, avg);
-    }
-
-    const entries: Omit<GlobalLeaderboardEntry, 'rank'>[] = playerIds.map((id) => ({
-      userId:            id,
-      username:          participantMap.get(id) ?? 'Guest',
-      points:            pointsMap.get(id)      ?? 0,
-      wins:              winsMap.get(id)        ?? 0,
-      losses:            lossesMap.get(id)      ?? 0,
-      draws:             drawsMap.get(id)       ?? 0,
-      matchWinPct:       mwpMap.get(id)         ?? 0.33,
-      omw:               omwMap.get(id)         ?? 0.33,
-      oomw:              oomwMap.get(id)         ?? 0.33,
-      tournamentsPlayed: tournamentSetByUser.get(id)?.size ?? 0,
+    const entries: Omit<GlobalLeaderboardEntry, 'rank'>[] = globalStats.map((stat) => ({
+      userId:            stat.userId,
+      username:          stat.user?.username ?? 'Unknown',
+      points:            stat.wins * 3 + stat.draws,
+      wins:              stat.wins,
+      losses:            stat.losses,
+      draws:             stat.draws,
+      matchWinPct:       stat.winRate,
+      omw:               stat.winRate,
+      oomw:              stat.winRate,
+      tournamentsPlayed: stat.tournamentsPlayed,
     }));
 
-    // Global leaderboard uses default order (no per-tournament config)
     const globalTieBreakerOrder: string[] = [];
     const sorted = this.sortEntries(entries, globalTieBreakerOrder);
 

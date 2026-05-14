@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  
 }
 
 // ─── ENUMS ───────────────────────────────────────────────────────
@@ -29,7 +28,7 @@ enum TournamentSystem {
   DOUBLE_ELIMINATION
   SWISS
   ROUND_ROBIN
-  HYBRID   // multi-phase: e.g. Swiss → Top Cut Elimination
+  HYBRID // multi-phase: e.g. Swiss → Top Cut Elimination
 }
 
 enum MatchStatus {
@@ -41,70 +40,73 @@ enum MatchStatus {
 // ─── MODELS ──────────────────────────────────────────────────────
 
 model User {
-  id              String    @id @default(uuid())
-  email           String?   @unique
-  username        String?   @unique
-  hashedPassword  String?
-  isGuest         Boolean   @default(false)
-  roles           Role[]    @default([PLAYER])
-  expiresAt       DateTime?
-  isExpired       Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  updateAt        DateTime  @updatedAt()
+  id             String    @id @default(uuid())
+  email          String?   @unique
+  username       String?   @unique
+  hashedPassword String?
+  isGuest        Boolean   @default(false)
+  roles          Role[]    @default([PLAYER])
+  expiresAt      DateTime?
+  isExpired      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updateAt       DateTime  @updatedAt()
 
-  tournamentsCreated       Tournament[]
-  wonTournaments           Tournament[]        @relation("TournamentWinner")
-  participatedTournaments  TournamentParticipant[]
-  matchesAsPlayer1         Match[]             @relation("Player1")
-  matchesAsPlayer2         Match[]             @relation("Player2")
-  wonMatches               Match[]             @relation("Winner")
-  createdFormats           TournamentFormat[]
+  tournamentsCreated      Tournament[]
+  wonTournaments          Tournament[]           @relation("TournamentWinner")
+  participatedTournaments TournamentParticipant[]
+  matchesAsPlayer1        Match[]                @relation("Player1")
+  matchesAsPlayer2        Match[]                @relation("Player2")
+  wonMatches              Match[]                @relation("Winner")
+  createdFormats          TournamentFormat[]
+
+  // NEW: global stats back-relation
+  globalStats UserGlobalStats?
 }
 
 // ─── TOURNAMENT FORMAT (Admin-managed named rulesets) ─────────────
 
 model TournamentFormat {
   id          String           @id @default(uuid())
-  name        String           @unique      // "Beyblade Standard", "Pickleball Open"
+  name        String           @unique // "Beyblade Standard", "Pickleball Open"
   description String?
-  gameName    String?                       // Dynamic game association (e.g. "Pickleball")
-  system      TournamentSystem             // the engine to run
-  config      Json                         // all rules as JSON blob
+  gameName    String? // Dynamic game association (e.g. "Pickleball")
+  system      TournamentSystem // the engine to run
+  config      Json // all rules as JSON blob
   isBuiltin   Boolean          @default(false) // builtin formats cannot be deleted
 
   createdById String
-  createdBy   User             @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
 
   tournaments Tournament[]
 
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ─── TOURNAMENT ───────────────────────────────────────────────────
 
 model Tournament {
-  id          String   @id @default(uuid())
+  id          String           @id @default(uuid())
   name        String
   maxPlayers  Int
   prizePool   Float?
   entranceFee Float?
   venue       String?
   date        DateTime?
-  inviteToken String   @default(uuid()) @unique
-  isPrivate   Boolean  @default(false)
+  inviteToken String           @default(uuid()) @unique
+  isPrivate   Boolean          @default(false)
   status      TournamentStatus @default(OPEN)
 
   // Format reference — points to admin-defined named ruleset
-  formatId    String?
-  format      TournamentFormat? @relation(fields: [formatId], references: [id], onDelete: SetNull)
+  formatId String?
+  format   TournamentFormat? @relation(fields: [formatId], references: [id], onDelete: SetNull)
 
   createdById String?
-  createdBy   User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  winnerId    String?
-  winner      User? @relation("TournamentWinner", fields: [winnerId], references: [id], onDelete: SetNull)
-  winnerName  String?
+  winnerId   String?
+  winner     User?   @relation("TournamentWinner", fields: [winnerId], references: [id], onDelete: SetNull)
+  winnerName String?
 
   guestCleanupAt DateTime?
 
@@ -117,68 +119,123 @@ model Tournament {
 // ─── PARTICIPANTS ─────────────────────────────────────────────────
 
 model TournamentParticipant {
-  id            String @id @default(uuid())
-  userId        String
-  tournamentId  String
+  id           String @id @default(uuid())
+  userId       String
+  tournamentId String
 
-  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tournament    Tournament @relation(fields: [tournamentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
 
-  seed          Int?
+  seed Int?
+
+  // NEW: per-tournament stats back-relation
+  stats TournamentParticipantStats?
 
   @@unique([userId, tournamentId])
+}
+
+// ─── PER-TOURNAMENT STATS (guests + registered users) ─────────────
+//
+// Tracks stats scoped to a single tournament.
+// Guests are included because they have User rows (isGuest = true)
+// and therefore have a TournamentParticipant row.
+// Updated on every match completion within the tournament.
+// OMW/OOMW are recomputed after each round resolves.
+
+model TournamentParticipantStats {
+  id            String @id @default(uuid())
+
+  participantId String @unique
+  participant   TournamentParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  gamesPlayed Int   @default(0)
+  wins        Int   @default(0)
+  losses      Int   @default(0)
+  draws       Int   @default(0)
+  points      Float @default(0)
+  winRate     Float @default(0) // denormalized: wins / gamesPlayed, recomputed on update
+
+  // Tiebreakers — recomputed after each round
+  omw  Float @default(0) // Opponent Match Win rate
+  oomw Float @default(0) // Opponent's Opponent Match Win rate
+
+  updatedAt DateTime @updatedAt
+}
+
+// ─── GLOBAL STATS (registered users only, isGuest = false) ────────
+//
+// Aggregate across all tournaments the user has participated in.
+// Never includes guests — filtered at write time (isGuest check).
+// Maintained incrementally: updated after each match completes
+// and after each tournament completes (for tournamentsPlayed/Won).
+
+model UserGlobalStats {
+  id     String @id @default(uuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  tournamentsPlayed Int   @default(0)
+  tournamentsWon    Int   @default(0)
+  gamesPlayed       Int   @default(0)
+  wins              Int   @default(0)
+  losses            Int   @default(0)
+  draws             Int   @default(0)
+  winRate           Float @default(0) // denormalized: wins / gamesPlayed, recomputed on update
+
+  updatedAt DateTime @updatedAt
 }
 
 // ─── ROUNDS & MATCHES ─────────────────────────────────────────────
 
 model Round {
-  id            String @id @default(uuid())
-  tournamentId  String
-  roundNumber   Int
+  id           String @id @default(uuid())
+  tournamentId String
+  roundNumber  Int
 
-  matches       Match[]
+  matches Match[]
 
-  tournament    Tournament @relation(fields: [tournamentId], references: [id])
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
 
   @@unique([tournamentId, roundNumber])
 }
 
 model Match {
-  id            String @id @default(uuid())
+  id String @id @default(uuid())
 
-  roundId       String
-  round         Round @relation(fields: [roundId], references: [id])
+  roundId String
+  round   Round  @relation(fields: [roundId], references: [id])
 
-  player1Id     String?
-  player2Id     String?
+  player1Id String?
+  player2Id String?
 
-  player1       User? @relation("Player1", fields: [player1Id], references: [id], onDelete: SetNull)
-  player2       User? @relation("Player2", fields: [player2Id], references: [id], onDelete: SetNull)
+  player1 User? @relation("Player1", fields: [player1Id], references: [id], onDelete: SetNull)
+  player2 User? @relation("Player2", fields: [player2Id], references: [id], onDelete: SetNull)
 
-  player1Score  Int @default(0)
-  player2Score  Int @default(0)
+  player1Score Int @default(0)
+  player2Score Int @default(0)
 
   // Historical name snapshots — populated when a user is deleted
-  p1Name        String?
-  p2Name        String?
-  winnerName    String?
+  p1Name     String?
+  p2Name     String?
+  winnerName String?
 
-  winnerId      String?
-  winner        User? @relation("Winner", fields: [winnerId], references: [id], onDelete: SetNull)
+  winnerId String?
+  winner   User?   @relation("Winner", fields: [winnerId], references: [id], onDelete: SetNull)
 
-  nextMatchId   String?
-  nextMatch     Match? @relation("NextMatch", fields: [nextMatchId], references: [id])
+  nextMatchId     String?
+  nextMatch       Match?  @relation("NextMatch", fields: [nextMatchId], references: [id])
   previousMatches Match[] @relation("NextMatch")
 
-  loserNextMatchId String?
-  loserNextMatch   Match? @relation("LoserNextMatch", fields: [loserNextMatchId], references: [id])
+  loserNextMatchId     String?
+  loserNextMatch       Match?  @relation("LoserNextMatch", fields: [loserNextMatchId], references: [id])
   previousLoserMatches Match[] @relation("LoserNextMatch")
 
-  status        MatchStatus @default(PENDING)
-  isBye         Boolean @default(false)
+  status MatchStatus @default(PENDING)
+  isBye  Boolean     @default(false)
 
   // For HYBRID tournaments: which phase this match belongs to
-  phase         Int @default(1)
+  phase Int @default(1)
 
-  createdAt     DateTime @default(now())
+  createdAt DateTime @default(now())
 }

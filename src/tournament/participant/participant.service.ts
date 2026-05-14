@@ -58,7 +58,7 @@ export class ParticipantService {
     }
 
     // 5. Create participant record
-    return this.prisma.tournamentParticipant.create({
+    const participant = await this.prisma.tournamentParticipant.create({
       data: {
         tournamentId,
         userId,
@@ -72,6 +72,12 @@ export class ParticipantService {
         },
       },
     });
+
+    await this.prisma.tournamentParticipantStats.create({
+      data: { participantId: participant.id },
+    });
+
+    return participant;
   }
 
   async joinTournamentAsGuest(tournamentId: string, username: string) {
@@ -114,7 +120,7 @@ export class ParticipantService {
       },
     });
 
-    return this.prisma.tournamentParticipant.create({
+    const participant = await this.prisma.tournamentParticipant.create({
       data: {
         tournamentId,
         userId: guestUser.id,
@@ -128,6 +134,12 @@ export class ParticipantService {
         },
       },
     });
+
+    await this.prisma.tournamentParticipantStats.create({
+      data: { participantId: participant.id },
+    });
+
+    return participant;
   }
 
   // ❌ LEAVE TOURNAMENT

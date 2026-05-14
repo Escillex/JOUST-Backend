@@ -189,13 +189,21 @@ export class TournamentService {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
       include: {
-        participants: true,
+        participants: { include: { stats: true } },
         format: true,
         rounds: { where: { roundNumber: 1 }, include: { matches: true } },
       },
     });
 
     if (!tournament) throw new NotFoundException('Tournament not found');
+
+    for (const participant of tournament.participants) {
+      if (!participant.stats) {
+        await this.prisma.tournamentParticipantStats.create({
+          data: { participantId: participant.id },
+        });
+      }
+    }
     if (tournament.status !== TournamentStatus.OPEN)
       throw new BadRequestException('Tournament already started');
     if (tournament.participants.length < 2)
@@ -317,6 +325,51 @@ export class TournamentService {
         where: { id: { in: guestUserIds }, isGuest: true },
         data: { expiresAt: cleanupTime, isExpired: false },
       });
+    }
+
+    const registeredParticipants = tournament.participants.filter(
+      (p) => p.user && !p.user.isGuest,
+    );
+
+    for (const participant of registeredParticipants) {
+      await this.prisma.userGlobalStats.upsert({
+        where: { userId: participant.userId },
+        create: {
+          userId: participant.userId,
+          tournamentsPlayed: 1,
+          tournamentsWon: 0,
+          gamesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          winRate: 0,
+        },
+        update: {
+          tournamentsPlayed: { increment: 1 },
+        },
+      });
+    }
+
+    if (winnerId) {
+      const winner = tournament.participants.find((p) => p.userId === winnerId);
+      if (winner && winner.user && !winner.user.isGuest) {
+        await this.prisma.userGlobalStats.upsert({
+          where: { userId: winnerId },
+          create: {
+            userId: winnerId,
+            tournamentsPlayed: 1,
+            tournamentsWon: 1,
+            gamesPlayed: 0,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            winRate: 0,
+          },
+          update: {
+            tournamentsWon: { increment: 1 },
+          },
+        });
+      }
     }
 
     return { message: 'Tournament data cleaned up. Winner preserved.' };

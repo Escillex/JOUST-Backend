@@ -18,6 +18,209 @@ export class MatchService {
     private formatsService: FormatsService,
   ) {}
 
+  private async updateMatchStats(matchId: string, pointsConfig: {
+    pointsForWin: number;
+    pointsForDraw: number;
+    pointsForLoss: number;
+  }) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        round: { select: { tournamentId: true } },
+        player1: { select: { id: true, isGuest: true } },
+        player2: { select: { id: true, isGuest: true } },
+      },
+    });
+
+    if (!match || !match.round || !match.player1Id) return;
+
+    const participantIds = [match.player1Id, match.player2Id].filter(Boolean) as string[];
+    const participants = await this.prisma.tournamentParticipant.findMany({
+      where: {
+        tournamentId: match.round.tournamentId,
+        userId: { in: participantIds },
+      },
+      include: {
+        stats: true,
+        user: { select: { isGuest: true } },
+      },
+    });
+
+    const participantByUserId = new Map(
+      participants.map((participant) => [participant.userId, participant]),
+    );
+
+    const maybeUpdateGlobalStats = async (
+      userId: string,
+      isGuest: boolean,
+      deltaGames: number,
+      deltaWins: number,
+      deltaLosses: number,
+      deltaDraws: number,
+    ) => {
+      if (isGuest) return;
+
+      const currentGlobal = await this.prisma.userGlobalStats.findUnique({
+        where: { userId },
+      });
+
+      const gamesPlayed = (currentGlobal?.gamesPlayed ?? 0) + deltaGames;
+      const wins = (currentGlobal?.wins ?? 0) + deltaWins;
+      const losses = (currentGlobal?.losses ?? 0) + deltaLosses;
+      const draws = (currentGlobal?.draws ?? 0) + deltaDraws;
+      const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0;
+
+      if (currentGlobal) {
+        await this.prisma.userGlobalStats.update({
+          where: { userId },
+          data: {
+            gamesPlayed,
+            wins,
+            losses,
+            draws,
+            winRate,
+          },
+        });
+      } else {
+        await this.prisma.userGlobalStats.create({
+          data: {
+            userId,
+            tournamentsPlayed: 0,
+            tournamentsWon: 0,
+            gamesPlayed,
+            wins,
+            losses,
+            draws,
+            winRate,
+          },
+        });
+      }
+    };
+
+    const updateParticipant = async (
+      userId: string,
+      deltaGames: number,
+      deltaWins: number,
+      deltaLosses: number,
+      deltaDraws: number,
+      deltaPoints: number,
+    ) => {
+      const participant = participantByUserId.get(userId);
+      if (!participant) return;
+
+      let stats = participant.stats;
+      if (!stats) {
+        stats = await this.prisma.tournamentParticipantStats.create({
+          data: { participantId: participant.id },
+        });
+      }
+
+      const gamesPlayed = stats.gamesPlayed + deltaGames;
+      const wins = stats.wins + deltaWins;
+      const losses = stats.losses + deltaLosses;
+      const draws = stats.draws + deltaDraws;
+      const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0;
+
+      await this.prisma.tournamentParticipantStats.update({
+        where: { id: stats.id },
+        data: {
+          gamesPlayed,
+          wins,
+          losses,
+          draws,
+          points: { increment: deltaPoints },
+          winRate,
+        },
+      });
+
+      await maybeUpdateGlobalStats(
+        userId,
+        participant.user.isGuest,
+        deltaGames,
+        deltaWins,
+        deltaLosses,
+        deltaDraws,
+      );
+    };
+
+    if (match.isBye) {
+      await updateParticipant(
+        match.player1Id,
+        1,
+        1,
+        0,
+        0,
+        pointsConfig.pointsForWin,
+      );
+      return;
+    }
+
+    if (!match.player2Id) return;
+
+    if (!match.winnerId) {
+      await Promise.all([
+        updateParticipant(
+          match.player1Id,
+          1,
+          0,
+          0,
+          1,
+          pointsConfig.pointsForDraw,
+        ),
+        updateParticipant(
+          match.player2Id,
+          1,
+          0,
+          0,
+          1,
+          pointsConfig.pointsForDraw,
+        ),
+      ]);
+      return;
+    }
+
+    if (match.winnerId === match.player1Id) {
+      await Promise.all([
+        updateParticipant(
+          match.player1Id,
+          1,
+          1,
+          0,
+          0,
+          pointsConfig.pointsForWin,
+        ),
+        updateParticipant(
+          match.player2Id,
+          1,
+          0,
+          1,
+          0,
+          pointsConfig.pointsForLoss,
+        ),
+      ]);
+      return;
+    }
+
+    await Promise.all([
+      updateParticipant(
+        match.player1Id,
+        1,
+        0,
+        1,
+        0,
+        pointsConfig.pointsForLoss,
+      ),
+      updateParticipant(
+        match.player2Id,
+        1,
+        1,
+        0,
+        0,
+        pointsConfig.pointsForWin,
+      ),
+    ]);
+  }
+
   // ─── CREATE / LINK ────────────────────────────────────────────
 
   async createMatch(dto: {
@@ -120,6 +323,12 @@ export class MatchService {
       data: { winnerId: winnerId || null, status: MatchStatus.COMPLETED },
     });
 
+    await this.updateMatchStats(matchId, {
+      pointsForWin: config.swissPointsForWin,
+      pointsForDraw: config.swissPointsForDraw,
+      pointsForLoss: config.swissPointsForLoss,
+    });
+
     await this.formatsService.handleMatchCompletion(matchId);
 
     return {
@@ -204,6 +413,12 @@ export class MatchService {
         data: { winnerId: matchWinnerId, status: MatchStatus.COMPLETED },
       });
 
+      await this.updateMatchStats(matchId, {
+        pointsForWin: config.swissPointsForWin,
+        pointsForDraw: config.swissPointsForDraw,
+        pointsForLoss: config.swissPointsForLoss,
+      });
+
       await this.formatsService.handleMatchCompletion(matchId);
 
       return {
@@ -263,6 +478,12 @@ export class MatchService {
     await this.prisma.match.update({
       where: { id: matchId },
       data: { winnerId: null, status: MatchStatus.COMPLETED },
+    });
+
+    await this.updateMatchStats(matchId, {
+      pointsForWin: config.swissPointsForWin,
+      pointsForDraw: config.swissPointsForDraw,
+      pointsForLoss: config.swissPointsForLoss,
     });
 
     await this.formatsService.handleMatchCompletion(matchId);
