@@ -56,7 +56,15 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   getMe(@Req() req: AuthenticatedRequest) {
-    return req.user;
+    const userId = req.user.id || (req.user as any).sub;
+    return this.authService.getMe(userId);
+  }
+
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  updateMe(@Req() req: AuthenticatedRequest, @Body() dto: UpdateProfileDto) {
+    const userId = req.user.id || (req.user as any).sub;
+    return this.authService.updateMe(userId, dto);
   }
 
   // ──────────────────────────────────────────────

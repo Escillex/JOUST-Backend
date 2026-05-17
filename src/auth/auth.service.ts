@@ -170,6 +170,7 @@ export class AuthService {
       foundUser.email,
       foundUser.roles,
       foundUser.username,
+      foundUser.avatarUrl,
     );
 
     res.cookie('token', token, {
@@ -194,6 +195,37 @@ export class AuthService {
     return { message: 'You have Signed Out successfully' };
   }
 
+  async updateMe(userId: string, dto: UpdateProfileDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (dto.email || dto.username) {
+      const conflict = await this.prisma.user.findFirst({
+        where: {
+          id: { not: userId },
+          OR: [
+            ...(dto.email ? [{ email: dto.email }] : []),
+            ...(dto.username ? [{ username: dto.username }] : []),
+          ],
+        },
+      });
+      if (conflict) {
+        throw new BadRequestException('Username or email already taken');
+      }
+    }
+
+    const data: Record<string, any> = {};
+    if (dto.username) data.username = dto.username;
+    if (dto.email) data.email = dto.email;
+    if (dto.password) data.hashedPassword = await this.hashPassword(dto.password);
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data,
+      select: { id: true, username: true, email: true, roles: true, avatarUrl: true },
+    });
+  }
+
   // ──────────────────────────────────────────────
   // HELPERS
   // ──────────────────────────────────────────────
@@ -206,13 +238,31 @@ export class AuthService {
     return bcrypt.compare(password, hashedPassword);
   }
 
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        roles: true,
+        isGuest: true,
+        avatarUrl: true,
+        createdAt: true,
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
   async generateToken(
     userId: string,
     email: string | null,
     roles: Role[],
     username: string | null,
+    avatarUrl?: string | null,
   ) {
-    const payload = { id: userId, email, roles, username };
+    const payload = { id: userId, email, roles, username, avatarUrl };
     return this.jwt.signAsync(payload);
   }
 

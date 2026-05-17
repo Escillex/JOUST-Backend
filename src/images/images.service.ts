@@ -32,7 +32,7 @@ export class ImagesService {
 
     // Context-aware resizing
     if (subdir === 'avatars') {
-      sharpInstance = sharpInstance.resize(256, 256, { fit: 'cover' });
+      sharpInstance = sharpInstance.resize(400, 400, { fit: 'cover' });
     } else if (subdir === 'banners') {
       sharpInstance = sharpInstance.resize(1200, null, { withoutEnlargement: true });
     } else if (subdir === 'assets') {

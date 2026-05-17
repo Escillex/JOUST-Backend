@@ -252,3 +252,19 @@ model SiteAsset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ─── STORE PRODUCTS (Landing Page Shop Carousel) ──────────────────
+
+model StoreProduct {
+  id          String   @id @default(uuid())
+  name        String   // display name e.g. "Hobby+ Hoodie"
+  price       String   // display price e.g. "₱1,299" (string for flexibility)
+  imageUrl    String?  // served path: /uploads/assets/<uuid>.webp
+  category    String?  // e.g. "APPAREL", "GEAR"
+  description String?
+  link        String?  // external purchase link
+  sortOrder   Int      @default(0) // controls carousel order
+  isVisible   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
