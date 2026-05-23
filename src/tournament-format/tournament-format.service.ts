@@ -93,7 +93,6 @@ export class TournamentFormatService {
       include: { _count: { select: { tournaments: true } } },
     });
     if (!fmt) throw new NotFoundException('Format not found');
-    if (fmt.isBuiltin) throw new ForbiddenException('Built-in formats cannot be deleted');
     if (fmt._count.tournaments > 0) {
       throw new BadRequestException(
         `Cannot delete: ${fmt._count.tournaments} tournament(s) are using this format`,

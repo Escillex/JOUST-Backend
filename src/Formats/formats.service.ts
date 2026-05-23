@@ -167,6 +167,17 @@ export class FormatsService {
     if (allDone) {
       const leaderboard =
         await this.leaderboardService.getLeaderboard(tournamentId);
+
+      // --- MANUAL TIE-BREAKER OVERRIDE ---
+      // If there's a tie for 1st place in points, halt auto-completion
+      if (
+        leaderboard.length > 1 &&
+        leaderboard[0].points > 0 &&
+        leaderboard[0].points === leaderboard[1].points
+      ) {
+        return; // Leave ONGOING so organizer can resolve tie
+      }
+
       const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
 
       // Update winnerId first so completeTournament sees it
@@ -202,7 +213,8 @@ export class FormatsService {
       });
 
       const currentMatchIds: string[] = [];
-      for (const m of rounds[i]) {
+      for (let j = 0; j < rounds[i].length; j++) {
+        const m = rounds[i][j];
         const created = await this.matchService.createMatch({
           roundId: round.id,
           player1Id: m.p1 && m.p1 !== 'ALIVE' ? m.p1 : undefined,
@@ -211,6 +223,7 @@ export class FormatsService {
             (m.p1 === null && m.p2 !== null) ||
             (m.p1 !== null && m.p2 === null),
           phase,
+          matchIndex: j,
         });
         currentMatchIds.push(created.id);
 
@@ -297,7 +310,8 @@ export class FormatsService {
         data: { tournamentId, roundNumber: i + 1 },
       });
       const ids: string[] = [];
-      for (const m of winnersMatchesPerRound[i]) {
+      for (let j = 0; j < winnersMatchesPerRound[i].length; j++) {
+        const m = winnersMatchesPerRound[i][j];
         const created = await this.matchService.createMatch({
           roundId: round.id,
           player1Id: m.p1 && m.p1 !== 'ALIVE' ? m.p1 : undefined,
@@ -306,6 +320,7 @@ export class FormatsService {
             i === 0 &&
             ((m.p1 === null && m.p2 !== null) ||
               (m.p1 !== null && m.p2 === null)),
+          matchIndex: j,
         });
         ids.push(created.id);
         if (i === 0 && activate) {
@@ -346,6 +361,7 @@ export class FormatsService {
         const m = await this.matchService.createMatch({
           roundId: round.id,
           isBye: false,
+          matchIndex: j,
         });
         ids.push(m.id);
       }
@@ -354,9 +370,11 @@ export class FormatsService {
 
     // Link Losers matches (nextMatchId)
     for (let r = 0; r < losersMatchIds.length - 1; r++) {
+      const isOneToOne = losersMatchIds[r].length === losersMatchIds[r + 1].length;
       await this.matchService.linkMatches(
         losersMatchIds[r],
         losersMatchIds[r + 1],
+        isOneToOne
       );
     }
 
@@ -386,6 +404,7 @@ export class FormatsService {
     const gfMatch = await this.matchService.createMatch({
       roundId: gfRound.id,
       isBye: false,
+      matchIndex: 0,
     });
 
     const winnersFinalId = winnersMatchIds[winnersMatchIds.length - 1][0];
@@ -399,6 +418,12 @@ export class FormatsService {
       await this.prisma.match.update({
         where: { id: losersFinalId },
         data: { nextMatchId: gfMatch.id },
+      });
+
+      // Fix: The loser of the Winners Final MUST drop down into the Losers Final
+      await this.prisma.match.update({
+        where: { id: winnersFinalId },
+        data: { loserNextMatchId: losersFinalId },
       });
     } else {
       await this.prisma.match.update({
@@ -437,6 +462,7 @@ export class FormatsService {
         player2Id: p2 || undefined,
         isBye: p2 === null,
         phase,
+        matchIndex: i / 2,
       });
       matchesCreated.push(match);
 
@@ -486,6 +512,16 @@ export class FormatsService {
 
     if (round.roundNumber >= maxRounds) {
       const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+
+      // --- MANUAL TIE-BREAKER OVERRIDE ---
+      if (
+        leaderboard.length > 1 &&
+        leaderboard[0].points > 0 &&
+        leaderboard[0].points === leaderboard[1].points
+      ) {
+        return; // Leave ONGOING so organizer can resolve tie
+      }
+
       const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
       await this.prisma.tournament.update({ where: { id: tournamentId }, data: { winnerId } });
       await this.tournamentService.completeTournament(tournamentId);
@@ -533,12 +569,14 @@ export class FormatsService {
 
     const matchesCreated: Match[] = [];
 
-    for (const [p1, p2] of pairings) {
+    for (let i = 0; i < pairings.length; i++) {
+      const [p1, p2] = pairings[i];
       const match = await this.matchService.createMatch({
         roundId: round.id,
         player1Id: p1,
         player2Id: p2,
         isBye: false,
+        matchIndex: i,
       });
       matchesCreated.push(match);
       await this.matchService.activateMatch(match.id);
@@ -550,6 +588,7 @@ export class FormatsService {
         player1Id: byePlayer,
         player2Id: undefined,
         isBye: true,
+        matchIndex: pairings.length,
       });
       matchesCreated.push(byeMatch);
       await this.prisma.match.update({
@@ -655,7 +694,7 @@ export class FormatsService {
 
   // ─── ROUND ROBIN ─────────────────────────────────────────────
 
-  private async initRoundRobin(tournamentId: string, playerIds: string[], activate: boolean = true) {
+  private async initRoundRobin(tournamentId: string, playerIds: string[], activate: boolean = true, roundOffset: number = 1) {
     const n = playerIds.length;
     const players = [...playerIds];
     if (n % 2 !== 0) players.push(null as any);
@@ -664,7 +703,7 @@ export class FormatsService {
 
     for (let r = 0; r < numRounds; r++) {
       const round = await this.prisma.round.create({
-        data: { tournamentId, roundNumber: r + 1 },
+        data: { tournamentId, roundNumber: r + roundOffset },
       });
 
       for (let i = 0; i < half; i++) {
@@ -677,6 +716,7 @@ export class FormatsService {
             player1Id: p1,
             player2Id: p2,
             isBye: false,
+            matchIndex: i,
           });
           if (activate) await this.matchService.activateMatch(match.id);
         } else if (p1 || p2) {
@@ -685,6 +725,7 @@ export class FormatsService {
             roundId: round.id,
             player1Id: p,
             isBye: true,
+            matchIndex: i,
           });
           await this.prisma.match.update({
             where: { id: match.id },
@@ -728,5 +769,48 @@ export class FormatsService {
       );
     }
     return rounds;
+  }
+
+  // ─── TIE BREAKER OVERRIDE ────────────────────────────────────
+
+  async resolveTie(tournamentId: string, action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS') {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { format: true }
+    });
+    if (!tournament) throw new BadRequestException('Tournament not found');
+
+    const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+
+    if (
+      !(leaderboard.length > 1 && leaderboard[0].points > 0 && leaderboard[0].points === leaderboard[1].points)
+    ) {
+      throw new BadRequestException('No point tie for 1st place detected');
+    }
+
+    if (action === 'APPLY_TIEBREAKERS') {
+      const winnerId = leaderboard[0].userId;
+      await this.prisma.tournament.update({ where: { id: tournamentId }, data: { winnerId } });
+      await this.tournamentService.completeTournament(tournamentId);
+      return { message: 'Tie broken automatically via OMW%' };
+    }
+
+    if (action === 'EXTEND_ROUND') {
+      const topPoints = leaderboard[0].points;
+      const tiedPlayers = leaderboard.filter(e => e.points === topPoints).map(e => e.userId);
+
+      const rounds = await this.prisma.round.findMany({
+        where: { tournamentId },
+        orderBy: { roundNumber: 'desc' },
+        take: 1
+      });
+      const nextRoundOffset = (rounds[0]?.roundNumber ?? 0) + 1;
+
+      // Create a round robin match block exclusively for the tied players
+      await this.initRoundRobin(tournamentId, tiedPlayers, true, nextRoundOffset);
+      return { message: 'Tiebreaker round generated successfully' };
+    }
+
+    throw new BadRequestException('Invalid tie-breaker action');
   }
 }

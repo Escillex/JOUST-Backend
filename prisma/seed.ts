@@ -19,7 +19,6 @@ const BUILTIN_FORMATS: {
     description: 'One loss and you are out. Classic bracket play.',
     system: TournamentSystem.SINGLE_ELIMINATION,
     config: {
-      winsToAdvance: 1,
       bestOf: 1,
       allowDraw: false,
       sessionsCount: 1,
@@ -30,7 +29,6 @@ const BUILTIN_FORMATS: {
     description: 'Two losses before elimination. Winners and losers bracket.',
     system: TournamentSystem.DOUBLE_ELIMINATION,
     config: {
-      winsToAdvance: 1,
       bestOf: 1,
       allowDraw: false,
     },
@@ -76,7 +74,7 @@ const BUILTIN_FORMATS: {
       phase2: {
         engine: 'SINGLE_ELIMINATION',
         topCutSize: 8,
-        bestOf: 3,
+        bestOf: 2,
       },
     },
   },

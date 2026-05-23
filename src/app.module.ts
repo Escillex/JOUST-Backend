@@ -12,6 +12,7 @@ import { DevModule } from './dev/dev.module';
 import { TournamentFormatModule } from './tournament-format/tournament-format.module';
 import { ImagesModule } from './images/images.module';
 import { StoreModule } from './store/store.module';
+import { TrackerModule } from './tournament/match/tracker/tracker.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { StoreModule } from './store/store.module';
     TournamentFormatModule,
     ImagesModule,
     StoreModule,
+    TrackerModule,
   ],
 })
 export class AppModule { }

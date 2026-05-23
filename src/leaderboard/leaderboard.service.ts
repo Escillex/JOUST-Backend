@@ -158,7 +158,7 @@ export class LeaderboardService {
     const entries: Omit<GlobalLeaderboardEntry, 'rank'>[] = globalStats.map((stat) => ({
       userId:            stat.userId,
       username:          stat.user?.username ?? 'Unknown',
-      points:            stat.wins * 3 + stat.draws,
+      points:            stat.globalPoints,
       wins:              stat.wins,
       losses:            stat.losses,
       draws:             stat.draws,

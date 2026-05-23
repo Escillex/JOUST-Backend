@@ -9,7 +9,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { MatchService } from './match.service';
-import { SubmitResultDto } from './dto/match.dto';
+import { SubmitResultDto, GameResultDto } from './dto/match.dto';
 
 @Controller('matches')
 export class MatchController {
@@ -23,6 +23,23 @@ export class MatchController {
     @Body() dto: SubmitResultDto,
   ) {
     return this.matchService.submitResult(id, dto.winnerId);
+  }
+
+  // POST /matches/:id/game-result
+  @Post(':id/game-result')
+  @HttpCode(HttpStatus.OK)
+  async reportGameResult(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GameResultDto,
+  ) {
+    return this.matchService.reportGameResult(id, dto.gameWinnerId);
+  }
+
+  // POST /matches/:id/draw
+  @Post(':id/draw')
+  @HttpCode(HttpStatus.OK)
+  async reportDraw(@Param('id', ParseUUIDPipe) id: string) {
+    return this.matchService.reportDraw(id);
   }
 
   // GET /matches/:id

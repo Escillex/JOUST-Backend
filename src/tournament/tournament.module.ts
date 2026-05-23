@@ -7,6 +7,7 @@ import { PrismaModule } from 'prisma/prisma.module';
 import { JwtModule } from '@nestjs/jwt';
 import { FormatsModule } from '../Formats/formats.module';
 import { AuthModule } from '../auth/auth.module';
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 import { forwardRef } from '@nestjs/common';
 
 @Module({
@@ -16,9 +17,11 @@ import { forwardRef } from '@nestjs/common';
     MatchModule,
     forwardRef(() => FormatsModule),
     AuthModule,
+    LeaderboardModule,
   ],
   controllers: [TournamentController],
   providers: [TournamentService],
   exports: [TournamentService],
 })
 export class TournamentModule {}
+

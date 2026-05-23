@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { FormatsService } from 'src/Formats/formats.service';
+import { resolveConfig } from 'src/Formats/format-config.helper';
+import { LeaderboardService } from 'src/leaderboard/leaderboard.service';
 import {
   CreateTournamentDto,
   UpdateTournamentDto,
@@ -25,6 +27,13 @@ import { JwtPayload } from 'src/guards/jwt-auth.guard';
 export class TournamentService {
   public static GUEST_EXPIRY_DAYS = 30;
 
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => FormatsService))
+    private readonly formatsService: FormatsService,
+    private readonly leaderboardService: LeaderboardService,
+  ) {}
+
   private readonly ALLOWED_TRANSITIONS: Record<TournamentStatus, TournamentStatus[]> = {
     [TournamentStatus.UPCOMING]:  [TournamentStatus.OPEN],
     [TournamentStatus.PENDING]:   [TournamentStatus.OPEN],
@@ -33,11 +42,6 @@ export class TournamentService {
     [TournamentStatus.COMPLETED]: [],
   };
 
-  constructor(
-    private prisma: PrismaService,
-    @Inject(forwardRef(() => FormatsService))
-    private formatsService: FormatsService,
-  ) {}
 
   // ─── STATUS ──────────────────────────────────────────────────
 
@@ -88,6 +92,7 @@ export class TournamentService {
     return this.prisma.tournament.create({
       data: {
         name: dto.name,
+        description: dto.description,
         maxPlayers: dto.maxPlayers,
         prizePool: dto.prizePool,
         entranceFee: dto.entranceFee,
@@ -372,6 +377,54 @@ export class TournamentService {
       }
     }
 
+    // ─── Award placement-based global points ─────────────────────────
+    const tournament2 = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { format: true },
+    });
+    const rawConfig = (tournament2?.format?.config as Record<string, any>) ?? {};
+    const config = resolveConfig(rawConfig);
+    const {
+      placementPointsChampion,
+      placementPoints2nd,
+      placementPoints3rd,
+      placementPointsTopCut,
+      placementPointsParticipation,
+    } = config;
+    const isHybrid = tournament2?.format?.system === 'HYBRID';
+
+    const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+
+    for (const entry of leaderboard) {
+      const participant = registeredParticipants.find(p => p.userId === entry.userId);
+      if (!participant) continue; // skip guests
+
+      let pts: number;
+      if (entry.rank === 1)      pts = placementPointsChampion;
+      else if (entry.rank === 2) pts = placementPoints2nd;
+      else if (entry.rank === 3) pts = placementPoints3rd;
+      else if (isHybrid)         pts = placementPointsTopCut;
+      else                       pts = placementPointsParticipation;
+
+      await this.prisma.userGlobalStats.upsert({
+        where: { userId: entry.userId },
+        create: {
+          userId: entry.userId,
+          tournamentsPlayed: 0,
+          tournamentsWon: 0,
+          gamesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          winRate: 0,
+          globalPoints: pts,
+        },
+        update: {
+          globalPoints: { increment: pts },
+        },
+      });
+    }
+
     return { message: 'Tournament data cleaned up. Winner preserved.' };
   }
 
@@ -380,6 +433,10 @@ export class TournamentService {
       where: { id: tournamentId },
       data: { guestCleanupAt: null },
     });
+  }
+
+  async resolveTie(tournamentId: string, action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS') {
+    return this.formatsService.resolveTie(tournamentId, action);
   }
 
   // ─── GET ONE ─────────────────────────────────────────────────

@@ -37,6 +37,11 @@ enum MatchStatus {
   COMPLETED
 }
 
+enum GameTrackingMode {
+  HP
+  POINTS
+}
+
 // ─── MODELS ──────────────────────────────────────────────────────
 
 model User {
@@ -90,6 +95,7 @@ model TournamentFormat {
 model Tournament {
   id          String           @id @default(uuid())
   name        String
+  description String?
   maxPlayers  Int
   prizePool   Float?
   entranceFee Float?
@@ -186,6 +192,7 @@ model UserGlobalStats {
   losses            Int   @default(0)
   draws             Int   @default(0)
   winRate           Float @default(0) // denormalized: wins / gamesPlayed, recomputed on update
+  globalPoints      Int   @default(0) // cumulative placement points earned across all tournaments
 
   updatedAt DateTime @updatedAt
 }
@@ -237,11 +244,34 @@ model Match {
 
   status MatchStatus @default(PENDING)
   isBye  Boolean     @default(false)
+  
+  matchIndex Int @default(0)
 
   // For HYBRID tournaments: which phase this match belongs to
   phase Int @default(1)
 
   createdAt DateTime @default(now())
+  gameLogs  MatchGameLog[]
+}
+
+model MatchGameLog {
+  id      String @id @default(uuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  gameNumber    Int              // 1, 2, 3... (which game in the bestOf series)
+  mode          GameTrackingMode // HP | POINTS
+  startingValue Int              // max HP or points threshold for this game
+
+  player1Value Int @default(0) // HP remaining (HP mode) OR points scored (POINTS mode)
+  player2Value Int @default(0)
+
+  trackerActive Boolean   @default(true) // set to false once organizer submits game result
+  winnerId      String?                  // null until game result is submitted
+  completedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model SiteAsset {

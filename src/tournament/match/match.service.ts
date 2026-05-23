@@ -229,6 +229,7 @@ export class MatchService {
     player2Id?: string;
     isBye: boolean;
     phase?: number;
+    matchIndex?: number;
   }) {
     return this.prisma.match.create({
       data: {
@@ -237,13 +238,14 @@ export class MatchService {
         player2Id: dto.player2Id ?? null,
         isBye:     dto.isBye,
         phase:     dto.phase ?? 1,
+        matchIndex: dto.matchIndex ?? 0,
       },
     });
   }
 
-  async linkMatches(previousIds: string[], nextIds: string[]) {
+  async linkMatches(previousIds: string[], nextIds: string[], isOneToOne: boolean = false) {
     for (let i = 0; i < previousIds.length; i++) {
-      const nextMatchId = nextIds[Math.floor(i / 2)];
+      const nextMatchId = isOneToOne ? nextIds[i] : nextIds[Math.floor(i / 2)];
       await this.prisma.match.update({
         where: { id: previousIds[i] },
         data: { nextMatchId },
@@ -285,7 +287,6 @@ export class MatchService {
     const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
     const {
-      sessionsCount,
       pointsThreshold,
       bestOf,
       allowDraw,
@@ -296,8 +297,6 @@ export class MatchService {
     if (bestOf <= 0)
       throw new BadRequestException('bestOf must be a positive integer');
 
-    if (sessionsCount <= 0)
-      throw new BadRequestException('sessionsCount must be a positive integer');
 
     if (!winnerId && !allowDraw)
       throw new BadRequestException(
@@ -335,7 +334,6 @@ export class MatchService {
       message: 'Result submitted',
       match: completed,
       formatApplied: {
-        sessionsCount,
         pointsThreshold,
         bestOf,
         allowDraw,

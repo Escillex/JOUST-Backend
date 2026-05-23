@@ -23,6 +23,11 @@ export class CreateTournamentDto {
   @MaxLength(60, { message: 'Tournament name must be at most 60 characters' })
   name!: string;
 
+  @IsString()
+  @IsOptional()
+  @MaxLength(500, { message: 'Description must be at most 500 characters' })
+  description?: string;
+
   /** UUID of a TournamentFormat entity */
   @IsUUID('4', { message: 'formatId must be a valid UUID' })
   formatId!: string;

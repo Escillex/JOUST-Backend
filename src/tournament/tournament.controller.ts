@@ -87,6 +87,16 @@ export class TournamentController {
     return this.tournamentService.completeTournament(id);
   }
 
+  @Post(':id/resolve-tie')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  resolveTie(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('action') action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS'
+  ) {
+    return this.tournamentService.resolveTie(id, action);
+  }
+
   @Patch(':id/cancel-cleanup')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
