@@ -9,4 +9,9 @@ export class UserController {
   async getUserStats(@Param('id') id: string) {
     return this.userService.getUserStats(id);
   }
+
+  @Get(':id/matches')
+  async getUserMatches(@Param('id') id: string) {
+    return this.userService.getUserMatches(id);
+  }
 }

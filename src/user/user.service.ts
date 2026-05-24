@@ -97,4 +97,68 @@ export class UserService {
       rank,
     };
   }
+
+  async getUserMatches(userId: string) {
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(userId)) {
+      throw new BadRequestException('Invalid user ID format');
+    }
+
+    const matches = await this.prisma.match.findMany({
+      where: {
+        status: MatchStatus.COMPLETED,
+        OR: [{ player1Id: userId }, { player2Id: userId }],
+        NOT: { isBye: true },
+      },
+      include: {
+        round: { include: { tournament: true } },
+        player1: { select: { id: true, username: true, avatarUrl: true } },
+        player2: { select: { id: true, username: true, avatarUrl: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 15,
+    });
+
+    return matches.map((match) => {
+      let type = 'entry';
+      if (match.winnerId === userId) {
+        type = 'win';
+      } else if (match.winnerId === null) {
+        type = 'draw';
+      } else {
+        type = 'loss';
+      }
+
+      const isPlayer1 = match.player1Id === userId;
+      const opponent = isPlayer1
+        ? match.player2?.username || match.p2Name || 'TBD'
+        : match.player1?.username || match.p1Name || 'TBD';
+
+      const myScore = isPlayer1 ? match.player1Score : match.player2Score;
+      const oppScore = isPlayer1 ? match.player2Score : match.player1Score;
+
+      return {
+        id: match.id,
+        type,
+        title: `${type.toUpperCase()} VS ${opponent}`,
+        subtitle: match.round?.tournament?.name || 'Unknown Tournament',
+        time: match.createdAt.toISOString().split('T')[0],
+        value: `${myScore} - ${oppScore}`,
+        player1: {
+          id: match.player1Id,
+          name: match.player1?.username || match.p1Name || 'TBD',
+          avatarUrl: match.player1?.avatarUrl || null,
+          score: match.player1Score,
+        },
+        player2: {
+          id: match.player2Id,
+          name: match.player2?.username || match.p2Name || 'TBD',
+          avatarUrl: match.player2?.avatarUrl || null,
+          score: match.player2Score,
+        },
+        isPlayer1,
+      };
+    });
+  }
 }

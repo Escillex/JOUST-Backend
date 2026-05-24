@@ -14,6 +14,7 @@ export interface LeaderboardEntry {
   matchWinPct: number;
   omw: number;
   oomw: number;
+  avatarUrl?: string | null;
 }
 
 export interface GlobalLeaderboardEntry extends LeaderboardEntry {
@@ -102,7 +103,7 @@ export class LeaderboardService {
       where: { tournamentId },
       include: {
         stats: true,
-        user: { select: { id: true, username: true } },
+        user: { select: { id: true, username: true, avatarUrl: true } },
         tournament: { include: { format: true } },
       },
     });
@@ -127,6 +128,7 @@ export class LeaderboardService {
       matchWinPct: p.stats?.winRate ?? 0,
       omw:         p.stats?.omw ?? 0,
       oomw:        p.stats?.oomw ?? 0,
+      avatarUrl:   p.user?.avatarUrl ?? null,
     }));
 
     const sorted = this.sortEntries(entries, tieBreakerOrder);
@@ -151,7 +153,7 @@ export class LeaderboardService {
         user: { isGuest: false },
       },
       include: {
-        user: { select: { id: true, username: true } },
+        user: { select: { id: true, username: true, avatarUrl: true } },
       },
     });
 
@@ -166,6 +168,7 @@ export class LeaderboardService {
       omw:               stat.winRate,
       oomw:              stat.winRate,
       tournamentsPlayed: stat.tournamentsPlayed,
+      avatarUrl:         stat.user?.avatarUrl ?? null,
     }));
 
     const globalTieBreakerOrder: string[] = [];
