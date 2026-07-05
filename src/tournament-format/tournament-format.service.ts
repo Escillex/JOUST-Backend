@@ -41,7 +41,8 @@ export class TournamentFormatService {
     const existing = await this.prisma.tournamentFormat.findUnique({
       where: { name: dto.name },
     });
-    if (existing) throw new BadRequestException('A format with that name already exists');
+    if (existing)
+      throw new BadRequestException('A format with that name already exists');
 
     return this.prisma.tournamentFormat.create({
       data: {
@@ -60,15 +61,25 @@ export class TournamentFormatService {
   }
 
   /** Update a non-builtin format — ADMIN only */
-  async update(id: string, dto: Partial<CreateTournamentFormatDto>, userRoles: Role[]) {
-    const fmt = await this.prisma.tournamentFormat.findUnique({ where: { id } });
+  async update(
+    id: string,
+    dto: Partial<CreateTournamentFormatDto>,
+    userRoles: Role[],
+  ) {
+    const fmt = await this.prisma.tournamentFormat.findUnique({
+      where: { id },
+    });
     if (!fmt) throw new NotFoundException('Format not found');
-    if (fmt.isBuiltin) throw new ForbiddenException('Built-in formats cannot be modified');
+    if (fmt.isBuiltin)
+      throw new ForbiddenException('Built-in formats cannot be modified');
 
     // Check for name collision if renaming
     if (dto.name && dto.name !== fmt.name) {
-      const conflict = await this.prisma.tournamentFormat.findUnique({ where: { name: dto.name } });
-      if (conflict) throw new BadRequestException('A format with that name already exists');
+      const conflict = await this.prisma.tournamentFormat.findUnique({
+        where: { name: dto.name },
+      });
+      if (conflict)
+        throw new BadRequestException('A format with that name already exists');
     }
 
     return this.prisma.tournamentFormat.update({

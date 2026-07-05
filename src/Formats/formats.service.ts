@@ -33,7 +33,7 @@ export class FormatsService {
 
   async initializeTournamentFormat(
     tournamentId: string,
-    format: TournamentFormat,   // full entity from prisma
+    format: TournamentFormat, // full entity from prisma
     playerIds: string[],
     activate: boolean = true,
   ) {
@@ -58,7 +58,9 @@ export class FormatsService {
   async handleMatchCompletion(matchId: string) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      include: { round: { include: { tournament: { include: { format: true } } } } },
+      include: {
+        round: { include: { tournament: { include: { format: true } } } },
+      },
     });
 
     if (!match) return;
@@ -68,16 +70,26 @@ export class FormatsService {
 
     if (system === TournamentSystem.SINGLE_ELIMINATION) {
       if (match.nextMatchId && match.winnerId) {
-        await this.matchService.advanceWinner(match.winnerId, match.nextMatchId);
+        await this.matchService.advanceWinner(
+          match.winnerId,
+          match.nextMatchId,
+        );
       }
       await this.checkSingleEliminationComplete(tournament.id, match.roundId);
     } else if (system === TournamentSystem.DOUBLE_ELIMINATION) {
       if (match.winnerId && match.nextMatchId) {
-        await this.matchService.advanceWinner(match.winnerId, match.nextMatchId);
+        await this.matchService.advanceWinner(
+          match.winnerId,
+          match.nextMatchId,
+        );
       }
       if (match.loserNextMatchId) {
-        const loserId = match.player1Id === match.winnerId ? match.player2Id : match.player1Id;
-        if (loserId) await this.matchService.advanceLoser(loserId, match.loserNextMatchId);
+        const loserId =
+          match.player1Id === match.winnerId
+            ? match.player2Id
+            : match.player1Id;
+        if (loserId)
+          await this.matchService.advanceLoser(loserId, match.loserNextMatchId);
       }
       await this.checkTournamentComplete(tournament.id);
     } else if (system === TournamentSystem.SWISS) {
@@ -91,7 +103,10 @@ export class FormatsService {
       } else {
         // phase 2 uses single-elim logic
         if (match.nextMatchId && match.winnerId) {
-          await this.matchService.advanceWinner(match.winnerId, match.nextMatchId);
+          await this.matchService.advanceWinner(
+            match.winnerId,
+            match.nextMatchId,
+          );
         }
         await this.checkSingleEliminationComplete(tournament.id, match.roundId);
       }
@@ -110,12 +125,19 @@ export class FormatsService {
     await this.initSwiss(tournamentId, playerIds, activate, 1);
   }
 
-  private async checkHybridPhase1Complete(tournamentId: string, roundId: string) {
+  private async checkHybridPhase1Complete(
+    tournamentId: string,
+    roundId: string,
+  ) {
     const round = await this.prisma.round.findUnique({
       where: { id: roundId },
       include: { matches: true },
     });
-    if (!round || !round.matches.every((m) => m.status === MatchStatus.COMPLETED)) return;
+    if (
+      !round ||
+      !round.matches.every((m) => m.status === MatchStatus.COMPLETED)
+    )
+      return;
 
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -125,7 +147,8 @@ export class FormatsService {
 
     const config = tournament.format.config as Record<string, any>;
     const phase1Config = config.phase1 ?? {};
-    const maxRounds = phase1Config.swissRounds ??
+    const maxRounds =
+      phase1Config.swissRounds ??
       Math.max(1, Math.ceil(Math.log2(tournament.participants.length)));
 
     if (round.roundNumber < maxRounds) {
@@ -137,7 +160,8 @@ export class FormatsService {
     // Swiss phase complete — begin Top Cut
     const phase2Config = config.phase2 ?? {};
     const topCutSize = phase2Config.topCutSize ?? 8;
-    const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+    const leaderboard =
+      await this.leaderboardService.getLeaderboard(tournamentId);
     const topN = leaderboard.slice(0, topCutSize).map((e) => e.userId);
 
     if (topN.length < 2) {
@@ -154,7 +178,13 @@ export class FormatsService {
     });
     const nextRoundOffset = (rounds[0]?.roundNumber ?? 0) + 1;
 
-    await this.initSingleElimination(tournamentId, topN, true, nextRoundOffset, 2);
+    await this.initSingleElimination(
+      tournamentId,
+      topN,
+      true,
+      nextRoundOffset,
+      2,
+    );
   }
 
   private async checkTournamentComplete(tournamentId: string) {
@@ -230,7 +260,10 @@ export class FormatsService {
         if (i === 0 && activate) {
           if (created.player1Id && created.player2Id) {
             await this.matchService.activateMatch(created.id);
-          } else if (created.isBye && (created.player1Id || created.player2Id)) {
+          } else if (
+            created.isBye &&
+            (created.player1Id || created.player2Id)
+          ) {
             const winnerId = (created.player1Id || created.player2Id) as string;
             await this.prisma.match.update({
               where: { id: created.id },
@@ -245,7 +278,9 @@ export class FormatsService {
       }
 
       if (i === 0 && activate) {
-        const r1Matches = await this.prisma.match.findMany({ where: { roundId: round.id } });
+        const r1Matches = await this.prisma.match.findMany({
+          where: { roundId: round.id },
+        });
         for (const rm of r1Matches) {
           if (rm.isBye && rm.status === MatchStatus.COMPLETED) {
             await this.handleMatchCompletion(rm.id);
@@ -370,11 +405,12 @@ export class FormatsService {
 
     // Link Losers matches (nextMatchId)
     for (let r = 0; r < losersMatchIds.length - 1; r++) {
-      const isOneToOne = losersMatchIds[r].length === losersMatchIds[r + 1].length;
+      const isOneToOne =
+        losersMatchIds[r].length === losersMatchIds[r + 1].length;
       await this.matchService.linkMatches(
         losersMatchIds[r],
         losersMatchIds[r + 1],
-        isOneToOne
+        isOneToOne,
       );
     }
 
@@ -388,7 +424,7 @@ export class FormatsService {
 
     for (let i = 1; i < winnersMatchIds.length - 1; i++) {
       const wrMatches = winnersMatchIds[i];
-      const lrMatches = losersMatchIds[2 * i - 1]; 
+      const lrMatches = losersMatchIds[2 * i - 1];
       for (let j = 0; j < wrMatches.length; j++) {
         await this.prisma.match.update({
           where: { id: wrMatches[j] },
@@ -446,7 +482,12 @@ export class FormatsService {
 
   // ─── SWISS ───────────────────────────────────────────────────
 
-  private async initSwiss(tournamentId: string, playerIds: string[], activate: boolean = true, phase: number = 1) {
+  private async initSwiss(
+    tournamentId: string,
+    playerIds: string[],
+    activate: boolean = true,
+    phase: number = 1,
+  ) {
     const shuffledPlayers = this.shuffle(playerIds);
     const round = await this.prisma.round.create({
       data: { tournamentId, roundNumber: 1 },
@@ -505,13 +546,13 @@ export class FormatsService {
 
     const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
-    const maxRounds = config.swissRounds ?? Math.max(
-      1,
-      Math.ceil(Math.log2(tournament!.participants.length)),
-    );
+    const maxRounds =
+      config.swissRounds ??
+      Math.max(1, Math.ceil(Math.log2(tournament!.participants.length)));
 
     if (round.roundNumber >= maxRounds) {
-      const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+      const leaderboard =
+        await this.leaderboardService.getLeaderboard(tournamentId);
 
       // --- MANUAL TIE-BREAKER OVERRIDE ---
       if (
@@ -523,7 +564,10 @@ export class FormatsService {
       }
 
       const winnerId = leaderboard.length > 0 ? leaderboard[0].userId : null;
-      await this.prisma.tournament.update({ where: { id: tournamentId }, data: { winnerId } });
+      await this.prisma.tournament.update({
+        where: { id: tournamentId },
+        data: { winnerId },
+      });
       await this.tournamentService.completeTournament(tournamentId);
       return;
     }
@@ -694,7 +738,12 @@ export class FormatsService {
 
   // ─── ROUND ROBIN ─────────────────────────────────────────────
 
-  private async initRoundRobin(tournamentId: string, playerIds: string[], activate: boolean = true, roundOffset: number = 1) {
+  private async initRoundRobin(
+    tournamentId: string,
+    playerIds: string[],
+    activate: boolean = true,
+    roundOffset: number = 1,
+  ) {
     const n = playerIds.length;
     const players = [...playerIds];
     if (n % 2 !== 0) players.push(null as any);
@@ -773,41 +822,59 @@ export class FormatsService {
 
   // ─── TIE BREAKER OVERRIDE ────────────────────────────────────
 
-  async resolveTie(tournamentId: string, action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS') {
+  async resolveTie(
+    tournamentId: string,
+    action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS',
+  ) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: { format: true }
+      include: { format: true },
     });
     if (!tournament) throw new BadRequestException('Tournament not found');
 
-    const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+    const leaderboard =
+      await this.leaderboardService.getLeaderboard(tournamentId);
 
     if (
-      !(leaderboard.length > 1 && leaderboard[0].points > 0 && leaderboard[0].points === leaderboard[1].points)
+      !(
+        leaderboard.length > 1 &&
+        leaderboard[0].points > 0 &&
+        leaderboard[0].points === leaderboard[1].points
+      )
     ) {
       throw new BadRequestException('No point tie for 1st place detected');
     }
 
     if (action === 'APPLY_TIEBREAKERS') {
       const winnerId = leaderboard[0].userId;
-      await this.prisma.tournament.update({ where: { id: tournamentId }, data: { winnerId } });
+      await this.prisma.tournament.update({
+        where: { id: tournamentId },
+        data: { winnerId },
+      });
       await this.tournamentService.completeTournament(tournamentId);
       return { message: 'Tie broken automatically via OMW%' };
     }
 
     if (action === 'EXTEND_ROUND') {
       const topPoints = leaderboard[0].points;
-      const tiedPlayers = leaderboard.filter(e => e.points === topPoints).map(e => e.userId);
+      const tiedPlayers = leaderboard
+        .filter((e) => e.points === topPoints)
+        .map((e) => e.userId);
 
       const rounds = await this.prisma.round.findMany({
         where: { tournamentId },
         orderBy: { roundNumber: 'desc' },
-        take: 1
+        take: 1,
       });
       const nextRoundOffset = (rounds[0]?.roundNumber ?? 0) + 1;
 
       // Create a round robin match block exclusively for the tied players
-      await this.initRoundRobin(tournamentId, tiedPlayers, true, nextRoundOffset);
+      await this.initRoundRobin(
+        tournamentId,
+        tiedPlayers,
+        true,
+        nextRoundOffset,
+      );
       return { message: 'Tiebreaker round generated successfully' };
     }
 

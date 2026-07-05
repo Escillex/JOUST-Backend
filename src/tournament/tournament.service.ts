@@ -34,23 +34,36 @@ export class TournamentService {
     private readonly leaderboardService: LeaderboardService,
   ) {}
 
-  private readonly ALLOWED_TRANSITIONS: Record<TournamentStatus, TournamentStatus[]> = {
-    [TournamentStatus.UPCOMING]:  [TournamentStatus.OPEN],
-    [TournamentStatus.PENDING]:   [TournamentStatus.OPEN],
-    [TournamentStatus.OPEN]:      [TournamentStatus.ONGOING],
-    [TournamentStatus.ONGOING]:   [TournamentStatus.COMPLETED],
+  private readonly ALLOWED_TRANSITIONS: Record<
+    TournamentStatus,
+    TournamentStatus[]
+  > = {
+    [TournamentStatus.UPCOMING]: [TournamentStatus.OPEN],
+    [TournamentStatus.PENDING]: [TournamentStatus.OPEN],
+    [TournamentStatus.OPEN]: [TournamentStatus.ONGOING],
+    [TournamentStatus.ONGOING]: [TournamentStatus.COMPLETED],
     [TournamentStatus.COMPLETED]: [],
   };
 
-
   // ─── STATUS ──────────────────────────────────────────────────
 
-  async updateStatus(tournamentId: string, dto: TournamentStatusDto, user: JwtPayload) {
-    const tournament = await this.prisma.tournament.findUnique({ where: { id: tournamentId } });
+  async updateStatus(
+    tournamentId: string,
+    dto: TournamentStatusDto,
+    user: JwtPayload,
+  ) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    if (tournament.createdById !== user.id && !user.roles.includes(Role.ADMIN)) {
-      throw new ForbiddenException('Only the tournament organizer can update the status');
+    if (
+      tournament.createdById !== user.id &&
+      !user.roles.includes(Role.ADMIN)
+    ) {
+      throw new ForbiddenException(
+        'Only the tournament organizer can update the status',
+      );
     }
 
     const currentStatus = tournament.status;
@@ -68,7 +81,10 @@ export class TournamentService {
     });
   }
 
-  async updateStatusInternal(tournamentId: string, targetStatus: TournamentStatus) {
+  async updateStatusInternal(
+    tournamentId: string,
+    targetStatus: TournamentStatus,
+  ) {
     return this.prisma.tournament.update({
       where: { id: tournamentId },
       data: { status: targetStatus },
@@ -84,10 +100,15 @@ export class TournamentService {
     if (existing) throw new BadRequestException('Tournament name exists');
 
     // Validate the format exists
-    const fmt = await this.prisma.tournamentFormat.findUnique({ where: { id: dto.formatId } });
-    if (!fmt) throw new BadRequestException('Invalid formatId — format not found');
+    const fmt = await this.prisma.tournamentFormat.findUnique({
+      where: { id: dto.formatId },
+    });
+    if (!fmt)
+      throw new BadRequestException('Invalid formatId — format not found');
 
-    const status = dto.startNow ? TournamentStatus.OPEN : TournamentStatus.UPCOMING;
+    const status = dto.startNow
+      ? TournamentStatus.OPEN
+      : TournamentStatus.UPCOMING;
 
     return this.prisma.tournament.create({
       data: {
@@ -104,7 +125,9 @@ export class TournamentService {
         formatId: dto.formatId,
       },
       include: {
-        createdBy: { select: { id: true, username: true, roles: true, email: true } },
+        createdBy: {
+          select: { id: true, username: true, roles: true, email: true },
+        },
         format: true,
       },
     });
@@ -113,14 +136,19 @@ export class TournamentService {
   // ─── UPDATE ──────────────────────────────────────────────────
 
   async updateTournament(id: string, dto: UpdateTournamentDto) {
-    const tournament = await this.prisma.tournament.findUnique({ where: { id } });
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id },
+    });
     if (!tournament) throw new NotFoundException('Tournament not found');
     if (tournament.status !== TournamentStatus.OPEN)
       throw new BadRequestException('Cannot edit started tournament');
 
     if (dto.formatId) {
-      const fmt = await this.prisma.tournamentFormat.findUnique({ where: { id: dto.formatId } });
-      if (!fmt) throw new BadRequestException('Invalid formatId — format not found');
+      const fmt = await this.prisma.tournamentFormat.findUnique({
+        where: { id: dto.formatId },
+      });
+      if (!fmt)
+        throw new BadRequestException('Invalid formatId — format not found');
     }
 
     const { createdById, date, ...rest } = dto;
@@ -144,7 +172,9 @@ export class TournamentService {
       where: { id: tournamentId },
       include: {
         participants: {
-          include: { user: { select: { id: true, username: true, isGuest: true } } },
+          include: {
+            user: { select: { id: true, username: true, isGuest: true } },
+          },
           orderBy: [{ seed: 'asc' }, { id: 'asc' }],
         },
       },
@@ -156,12 +186,19 @@ export class TournamentService {
       tournament.status !== TournamentStatus.OPEN &&
       tournament.status !== TournamentStatus.UPCOMING
     ) {
-      throw new BadRequestException('Tournament must be PENDING, UPCOMING, or OPEN to generate bracket');
+      throw new BadRequestException(
+        'Tournament must be PENDING, UPCOMING, or OPEN to generate bracket',
+      );
     }
     if (tournament.participants.length < 2)
       throw new BadRequestException('Need at least 2 players');
-    if (tournament.createdById !== user.id && !user.roles.includes(Role.ADMIN)) {
-      throw new ForbiddenException('Only the tournament organizer can generate the bracket');
+    if (
+      tournament.createdById !== user.id &&
+      !user.roles.includes(Role.ADMIN)
+    ) {
+      throw new ForbiddenException(
+        'Only the tournament organizer can generate the bracket',
+      );
     }
 
     const participants = tournament.participants
@@ -169,7 +206,11 @@ export class TournamentService {
       .map((p) => ({ id: p.user.id, name: p.user.username }));
 
     const bracketSize = this.nextPowerOfTwo(participants.length);
-    const matchups: { matchIndex: number; player1: (typeof participants)[0] | null; player2: (typeof participants)[0] | null }[] = [];
+    const matchups: {
+      matchIndex: number;
+      player1: (typeof participants)[0] | null;
+      player2: (typeof participants)[0] | null;
+    }[] = [];
 
     for (let i = 0; i < bracketSize / 2; i++) {
       matchups.push({
@@ -229,11 +270,14 @@ export class TournamentService {
 
       const updated = await this.prisma.tournament.findUnique({
         where: { id: tournamentId },
-        include: { rounds: { where: { roundNumber: 1 }, include: { matches: true } } },
+        include: {
+          rounds: { where: { roundNumber: 1 }, include: { matches: true } },
+        },
       });
 
       const newFirstRound = updated?.rounds[0];
-      if (!newFirstRound) throw new BadRequestException('Failed to generate bracket');
+      if (!newFirstRound)
+        throw new BadRequestException('Failed to generate bracket');
 
       for (const match of newFirstRound.matches) {
         if (match.player1Id && match.player2Id) {
@@ -279,7 +323,13 @@ export class TournamentService {
       where: { id: tournamentId },
       include: {
         participants: { include: { user: true } },
-        rounds: { include: { matches: { include: { player1: true, player2: true, winner: true } } } },
+        rounds: {
+          include: {
+            matches: {
+              include: { player1: true, player2: true, winner: true },
+            },
+          },
+        },
       },
     });
 
@@ -310,7 +360,9 @@ export class TournamentService {
 
     // Snapshot tournament winner name
     if (winnerId) {
-      const winner = tournament.participants.find((p) => p.userId === winnerId)?.user;
+      const winner = tournament.participants.find(
+        (p) => p.userId === winnerId,
+      )?.user;
       await this.prisma.tournament.update({
         where: { id: tournamentId },
         data: { winnerName: winner?.username || 'Unknown Champion' } as any,
@@ -319,7 +371,9 @@ export class TournamentService {
 
     // Schedule guest cleanup
     const cleanupTime = new Date();
-    cleanupTime.setDate(cleanupTime.getDate() + TournamentService.GUEST_EXPIRY_DAYS);
+    cleanupTime.setDate(
+      cleanupTime.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
+    );
     await this.prisma.tournament.update({
       where: { id: tournamentId },
       data: { guestCleanupAt: cleanupTime },
@@ -335,6 +389,13 @@ export class TournamentService {
     const registeredParticipants = tournament.participants.filter(
       (p) => p.user && !p.user.isGuest,
     );
+
+    // Format drives both placement config and the per-game stats bucket
+    const tournamentWithFormat = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { format: true },
+    });
+    const gameName = tournamentWithFormat?.format?.gameName ?? null;
 
     for (const participant of registeredParticipants) {
       await this.prisma.userGlobalStats.upsert({
@@ -353,6 +414,20 @@ export class TournamentService {
           tournamentsPlayed: { increment: 1 },
         },
       });
+
+      if (gameName) {
+        await this.prisma.userGameStats.upsert({
+          where: { userId_gameName: { userId: participant.userId, gameName } },
+          create: {
+            userId: participant.userId,
+            gameName,
+            tournamentsPlayed: 1,
+          },
+          update: {
+            tournamentsPlayed: { increment: 1 },
+          },
+        });
+      }
     }
 
     if (winnerId) {
@@ -374,15 +449,27 @@ export class TournamentService {
             tournamentsWon: { increment: 1 },
           },
         });
+
+        if (gameName) {
+          await this.prisma.userGameStats.upsert({
+            where: { userId_gameName: { userId: winnerId, gameName } },
+            create: {
+              userId: winnerId,
+              gameName,
+              tournamentsPlayed: 1,
+              tournamentsWon: 1,
+            },
+            update: {
+              tournamentsWon: { increment: 1 },
+            },
+          });
+        }
       }
     }
 
     // ─── Award placement-based global points ─────────────────────────
-    const tournament2 = await this.prisma.tournament.findUnique({
-      where: { id: tournamentId },
-      include: { format: true },
-    });
-    const rawConfig = (tournament2?.format?.config as Record<string, any>) ?? {};
+    const rawConfig =
+      (tournamentWithFormat?.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
     const {
       placementPointsChampion,
@@ -391,20 +478,23 @@ export class TournamentService {
       placementPointsTopCut,
       placementPointsParticipation,
     } = config;
-    const isHybrid = tournament2?.format?.system === 'HYBRID';
+    const isHybrid = tournamentWithFormat?.format?.system === 'HYBRID';
 
-    const leaderboard = await this.leaderboardService.getLeaderboard(tournamentId);
+    const leaderboard =
+      await this.leaderboardService.getLeaderboard(tournamentId);
 
     for (const entry of leaderboard) {
-      const participant = registeredParticipants.find(p => p.userId === entry.userId);
+      const participant = registeredParticipants.find(
+        (p) => p.userId === entry.userId,
+      );
       if (!participant) continue; // skip guests
 
       let pts: number;
-      if (entry.rank === 1)      pts = placementPointsChampion;
+      if (entry.rank === 1) pts = placementPointsChampion;
       else if (entry.rank === 2) pts = placementPoints2nd;
       else if (entry.rank === 3) pts = placementPoints3rd;
-      else if (isHybrid)         pts = placementPointsTopCut;
-      else                       pts = placementPointsParticipation;
+      else if (isHybrid) pts = placementPointsTopCut;
+      else pts = placementPointsParticipation;
 
       await this.prisma.userGlobalStats.upsert({
         where: { userId: entry.userId },
@@ -423,6 +513,20 @@ export class TournamentService {
           globalPoints: { increment: pts },
         },
       });
+
+      if (gameName) {
+        await this.prisma.userGameStats.upsert({
+          where: { userId_gameName: { userId: entry.userId, gameName } },
+          create: {
+            userId: entry.userId,
+            gameName,
+            globalPoints: pts,
+          },
+          update: {
+            globalPoints: { increment: pts },
+          },
+        });
+      }
     }
 
     return { message: 'Tournament data cleaned up. Winner preserved.' };
@@ -435,7 +539,10 @@ export class TournamentService {
     });
   }
 
-  async resolveTie(tournamentId: string, action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS') {
+  async resolveTie(
+    tournamentId: string,
+    action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS',
+  ) {
     return this.formatsService.resolveTie(tournamentId, action);
   }
 
@@ -450,7 +557,9 @@ export class TournamentService {
         format: true,
         participants: {
           include: {
-            user: { select: { id: true, username: true, email: true, isGuest: true } },
+            user: {
+              select: { id: true, username: true, email: true, isGuest: true },
+            },
           },
         },
         rounds: {
@@ -458,8 +567,12 @@ export class TournamentService {
           include: {
             matches: {
               include: {
-                player1: { select: { id: true, username: true, isGuest: true } },
-                player2: { select: { id: true, username: true, isGuest: true } },
+                player1: {
+                  select: { id: true, username: true, isGuest: true },
+                },
+                player2: {
+                  select: { id: true, username: true, isGuest: true },
+                },
                 winner: { select: { id: true, username: true, isGuest: true } },
               },
             },
@@ -480,7 +593,9 @@ export class TournamentService {
         format: true,
         participants: {
           include: {
-            user: { select: { id: true, username: true, email: true, isGuest: true } },
+            user: {
+              select: { id: true, username: true, email: true, isGuest: true },
+            },
           },
         },
         rounds: {
@@ -488,8 +603,12 @@ export class TournamentService {
           include: {
             matches: {
               include: {
-                player1: { select: { id: true, username: true, isGuest: true } },
-                player2: { select: { id: true, username: true, isGuest: true } },
+                player1: {
+                  select: { id: true, username: true, isGuest: true },
+                },
+                player2: {
+                  select: { id: true, username: true, isGuest: true },
+                },
                 winner: { select: { id: true, username: true, isGuest: true } },
               },
             },
@@ -507,7 +626,10 @@ export class TournamentService {
     // Auto-purge expired guests
     const now = new Date();
     const expired = await this.prisma.user.findMany({
-      where: { isGuest: true, OR: [{ isExpired: true }, { expiresAt: { lte: now } }] },
+      where: {
+        isGuest: true,
+        OR: [{ isExpired: true }, { expiresAt: { lte: now } }],
+      },
       select: { id: true },
     });
     if (expired.length > 0) {
@@ -533,7 +655,11 @@ export class TournamentService {
           orderBy: { roundNumber: 'desc' },
           take: 1,
           include: {
-            matches: { include: { winner: { select: { username: true, isGuest: true } } } },
+            matches: {
+              include: {
+                winner: { select: { username: true, isGuest: true } },
+              },
+            },
           },
         },
       },

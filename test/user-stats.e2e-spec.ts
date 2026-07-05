@@ -42,8 +42,11 @@ describe('UserController (e2e) - User Stats', () => {
 
   it('Returns correct wins/losses for a user with match history', async () => {
     const userId = mockUuid;
-    jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({ id: userId } as any);
-    jest.spyOn(prisma.match, 'count')
+    jest
+      .spyOn(prisma.user, 'findUnique')
+      .mockResolvedValue({ id: userId } as any);
+    jest
+      .spyOn(prisma.match, 'count')
       .mockResolvedValueOnce(10) // wins
       .mockResolvedValueOnce(5); // losses
     jest.spyOn(prisma.tournamentParticipant, 'count').mockResolvedValue(3);
@@ -65,8 +68,11 @@ describe('UserController (e2e) - User Stats', () => {
 
   it('winRate is 0 when user has no matches', async () => {
     const userId = mockUuid;
-    jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({ id: userId } as any);
-    jest.spyOn(prisma.match, 'count')
+    jest
+      .spyOn(prisma.user, 'findUnique')
+      .mockResolvedValue({ id: userId } as any);
+    jest
+      .spyOn(prisma.match, 'count')
       .mockResolvedValueOnce(0) // wins
       .mockResolvedValueOnce(0); // losses
     jest.spyOn(prisma.tournamentParticipant, 'count').mockResolvedValue(0);
@@ -82,8 +88,11 @@ describe('UserController (e2e) - User Stats', () => {
 
   it('rank is 1 for the user with the most wins', async () => {
     const userId = mockUuid;
-    jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({ id: userId } as any);
-    jest.spyOn(prisma.match, 'count')
+    jest
+      .spyOn(prisma.user, 'findUnique')
+      .mockResolvedValue({ id: userId } as any);
+    jest
+      .spyOn(prisma.match, 'count')
       .mockResolvedValueOnce(100) // wins
       .mockResolvedValueOnce(0); // losses
     jest.spyOn(prisma.tournamentParticipant, 'count').mockResolvedValue(10);
@@ -98,15 +107,18 @@ describe('UserController (e2e) - User Stats', () => {
 
   it('rank is computed correctly based on other users wins', async () => {
     const userId = mockUuid;
-    jest.spyOn(prisma.user, 'findUnique').mockResolvedValue({ id: userId } as any);
-    jest.spyOn(prisma.match, 'count')
+    jest
+      .spyOn(prisma.user, 'findUnique')
+      .mockResolvedValue({ id: userId } as any);
+    jest
+      .spyOn(prisma.match, 'count')
       .mockResolvedValueOnce(5) // wins
       .mockResolvedValueOnce(5); // losses
     jest.spyOn(prisma.tournamentParticipant, 'count').mockResolvedValue(2);
     // 2 users have more than 5 wins
     jest.spyOn(prisma.match, 'groupBy').mockResolvedValue([
-        { winnerId: 'userA', _count: { winnerId: 10 } },
-        { winnerId: 'userB', _count: { winnerId: 8 } }
+      { winnerId: 'userA', _count: { winnerId: 10 } },
+      { winnerId: 'userB', _count: { winnerId: 8 } },
     ] as any);
 
     const response = await request(app.getHttpServer())

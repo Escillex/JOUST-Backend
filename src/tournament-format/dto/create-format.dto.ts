@@ -1,4 +1,12 @@
-import { IsString, IsEnum, IsOptional, IsBoolean, IsObject, MinLength, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsBoolean,
+  IsObject,
+  MinLength,
+  MaxLength,
+} from 'class-validator';
 import { TournamentSystem } from '@prisma/client';
 
 export class CreateTournamentFormatDto {

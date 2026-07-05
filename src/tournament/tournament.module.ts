@@ -24,4 +24,3 @@ import { forwardRef } from '@nestjs/common';
   exports: [TournamentService],
 })
 export class TournamentModule {}
-

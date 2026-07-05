@@ -19,14 +19,16 @@ export interface ResolvedConfig {
   defaultStartingValue: number | null; // null = auto-derive from bestOf
 
   // Placement-based global points awarded at tournament completion
-  placementPointsChampion: number;      // 1st place
-  placementPoints2nd: number;           // 2nd place
-  placementPoints3rd: number;           // 3rd place
-  placementPointsTopCut: number;        // 4th+ in HYBRID top-cut formats
+  placementPointsChampion: number; // 1st place
+  placementPoints2nd: number; // 2nd place
+  placementPoints3rd: number; // 3rd place
+  placementPointsTopCut: number; // 4th+ in HYBRID top-cut formats
   placementPointsParticipation: number; // all other finishers
 }
 
-export function resolveConfig(config: Record<string, any> | null): ResolvedConfig {
+export function resolveConfig(
+  config: Record<string, any> | null,
+): ResolvedConfig {
   // For HYBRID formats, the root config IS the phase1 Swiss config for scoring purposes
   const c = config?.phase1 ?? config ?? {};
 
@@ -39,27 +41,31 @@ export function resolveConfig(config: Record<string, any> | null): ResolvedConfi
   const hasPoints = pointsThreshold > 0;
 
   return {
-    bestOf:               wins,
-    winsToAdvance:        wins,
-    allowDraw:            c.allowDraw             ?? false,
-    swissRounds:          c.swissRounds           ?? null,
-    swissPointsForWin:    c.swissPointsForWin     ?? 3,
-    swissPointsForDraw:   c.swissPointsForDraw    ?? 1,
-    swissPointsForLoss:   c.swissPointsForLoss    ?? 0,
-    tieBreakerOrder:      c.tieBreakerOrder       ?? [],
+    bestOf: wins,
+    winsToAdvance: wins,
+    allowDraw: c.allowDraw ?? false,
+    swissRounds: c.swissRounds ?? null,
+    swissPointsForWin: c.swissPointsForWin ?? 3,
+    swissPointsForDraw: c.swissPointsForDraw ?? 1,
+    swissPointsForLoss: c.swissPointsForLoss ?? 0,
+    tieBreakerOrder: c.tieBreakerOrder ?? [],
 
     pointsThreshold,
     startingHp,
-    progressionType:      c.progressionType       ?? null,
-    useTracker:           hasHp || hasPoints,
-    trackingMode:         hasHp ? 'HP' : 'POINTS',
-    defaultStartingValue: hasHp ? startingHp : (hasPoints ? pointsThreshold : null),
+    progressionType: c.progressionType ?? null,
+    useTracker: hasHp || hasPoints,
+    trackingMode: hasHp ? 'HP' : 'POINTS',
+    defaultStartingValue: hasHp
+      ? startingHp
+      : hasPoints
+        ? pointsThreshold
+        : null,
 
     // Placement points — awarded at tournament completion
-    placementPointsChampion:      c.placementPointsChampion      ?? 10,
-    placementPoints2nd:           c.placementPoints2nd           ?? 7,
-    placementPoints3rd:           c.placementPoints3rd           ?? 5,
-    placementPointsTopCut:        c.placementPointsTopCut        ?? 3,
+    placementPointsChampion: c.placementPointsChampion ?? 10,
+    placementPoints2nd: c.placementPoints2nd ?? 7,
+    placementPoints3rd: c.placementPoints3rd ?? 5,
+    placementPointsTopCut: c.placementPointsTopCut ?? 3,
     placementPointsParticipation: c.placementPointsParticipation ?? 1,
   };
 }

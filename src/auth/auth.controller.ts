@@ -131,10 +131,7 @@ export class AuthController {
   @Patch('users/:id/profile')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
-  updateProfile(
-    @Param('id') targetId: string,
-    @Body() dto: UpdateProfileDto,
-  ) {
+  updateProfile(@Param('id') targetId: string, @Body() dto: UpdateProfileDto) {
     return this.authService.updateProfile(targetId, dto);
   }
 

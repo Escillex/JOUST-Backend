@@ -109,7 +109,9 @@ export class ParticipantService {
     }
 
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + TournamentService.GUEST_EXPIRY_DAYS);
+    expiresAt.setDate(
+      expiresAt.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
+    );
 
     const guestUser = await this.prisma.user.create({
       data: {
@@ -234,4 +236,3 @@ export class ParticipantService {
     });
   }
 }
-

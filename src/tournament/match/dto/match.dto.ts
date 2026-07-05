@@ -9,5 +9,5 @@ export class SubmitResultDto {
 export class GameResultDto {
   @IsUUID('4')
   @IsNotEmpty()
-  gameWinnerId!: string;  // ID of the player who won this single game/set
+  gameWinnerId!: string; // ID of the player who won this single game/set
 }

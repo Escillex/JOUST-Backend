@@ -8,7 +8,11 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { MatchService } from '../match.service';
 import { resolveConfig } from '../../../Formats/format-config.helper';
-import { OpenTrackerDto, UpdateTrackerDto, SubmitGameDto } from './dto/tracker.dto';
+import {
+  OpenTrackerDto,
+  UpdateTrackerDto,
+  SubmitGameDto,
+} from './dto/tracker.dto';
 import { GameTrackingMode } from '@prisma/client';
 
 @Injectable()
@@ -34,7 +38,9 @@ export class TrackerService {
 
     if (!match) throw new NotFoundException('Match not found');
     if (match.status !== 'ONGOING')
-      throw new BadRequestException('Tracker can only be opened on an ONGOING match');
+      throw new BadRequestException(
+        'Tracker can only be opened on an ONGOING match',
+      );
     if (match.isBye)
       throw new BadRequestException('Cannot open tracker on a bye match');
 
@@ -49,13 +55,14 @@ export class TrackerService {
     );
 
     // Resolve mode — dto > format config > default 'POINTS'
-    const mode: GameTrackingMode = dto.mode ?? (config.trackingMode as GameTrackingMode) ?? GameTrackingMode.POINTS;
+    const mode: GameTrackingMode =
+      dto.mode ??
+      (config.trackingMode as GameTrackingMode) ??
+      GameTrackingMode.POINTS;
 
     // Resolve startingValue — dto > format config > auto-derive from bestOf
     const startingValue =
-      dto.startingValue ??
-      config.defaultStartingValue ??
-      config.bestOf;
+      dto.startingValue ?? config.defaultStartingValue ?? config.bestOf;
 
     const gameNumber = match.gameLogs.length + 1;
 
@@ -83,8 +90,12 @@ export class TrackerService {
     return this.prisma.matchGameLog.update({
       where: { id: activeLog.id },
       data: {
-        ...(dto.player1Value !== undefined && { player1Value: dto.player1Value }),
-        ...(dto.player2Value !== undefined && { player2Value: dto.player2Value }),
+        ...(dto.player1Value !== undefined && {
+          player1Value: dto.player1Value,
+        }),
+        ...(dto.player2Value !== undefined && {
+          player2Value: dto.player2Value,
+        }),
       },
     });
   }
@@ -111,7 +122,10 @@ export class TrackerService {
     // and auto-completes the match when winsNeeded is reached
     let matchResult: any = null;
     if (dto.winnerId) {
-      matchResult = await this.matchService.reportGameResult(matchId, dto.winnerId);
+      matchResult = await this.matchService.reportGameResult(
+        matchId,
+        dto.winnerId,
+      );
     } else {
       matchResult = await this.matchService.reportDraw(matchId);
     }

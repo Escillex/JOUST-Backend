@@ -35,7 +35,9 @@ export class StoreService {
     const relativePath = url.replace('/uploads/', '');
     const absolutePath = path.join(this.uploadRoot, relativePath);
     if (fs.existsSync(absolutePath)) {
-      try { fs.unlinkSync(absolutePath); } catch {}
+      try {
+        fs.unlinkSync(absolutePath);
+      } catch {}
     }
   }
 
@@ -53,13 +55,17 @@ export class StoreService {
   }
 
   async findOne(id: string) {
-    const product = await this.prisma.storeProduct.findUnique({ where: { id } });
+    const product = await this.prisma.storeProduct.findUnique({
+      where: { id },
+    });
     if (!product) throw new NotFoundException('Product not found');
     return product;
   }
 
   async create(dto: CreateStoreProductDto) {
-    const maxOrder = await this.prisma.storeProduct.aggregate({ _max: { sortOrder: true } });
+    const maxOrder = await this.prisma.storeProduct.aggregate({
+      _max: { sortOrder: true },
+    });
     const nextOrder = (maxOrder._max.sortOrder ?? -1) + 1;
     return this.prisma.storeProduct.create({
       data: {
@@ -78,13 +84,19 @@ export class StoreService {
     const product = await this.findOne(id);
     this.deleteImage(product.imageUrl);
     const imageUrl = await this.saveImage(file);
-    return this.prisma.storeProduct.update({ where: { id }, data: { imageUrl } });
+    return this.prisma.storeProduct.update({
+      where: { id },
+      data: { imageUrl },
+    });
   }
 
   async removeImage(id: string) {
     const product = await this.findOne(id);
     this.deleteImage(product.imageUrl);
-    return this.prisma.storeProduct.update({ where: { id }, data: { imageUrl: null } });
+    return this.prisma.storeProduct.update({
+      where: { id },
+      data: { imageUrl: null },
+    });
   }
 
   async remove(id: string) {
@@ -95,7 +107,10 @@ export class StoreService {
 
   async reorder(orderedIds: string[]) {
     const updates = orderedIds.map((id, i) =>
-      this.prisma.storeProduct.update({ where: { id }, data: { sortOrder: i } }),
+      this.prisma.storeProduct.update({
+        where: { id },
+        data: { sortOrder: i },
+      }),
     );
     return this.prisma.$transaction(updates);
   }

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { MatchStatus } from '@prisma/client';
 
@@ -63,10 +67,10 @@ export class UserService {
     if (wins + losses > 0) {
       // Optimization: Count how many unique users have more wins than this user
       // This is a simplified ranking as per requirements (by wins DESC)
-      
+
       // Since Prisma doesn't have a direct "rank" window function in a simple way without raw SQL,
       // we can use a group by or count unique users with more wins.
-      
+
       const usersWithMoreWins = await this.prisma.match.groupBy({
         by: ['winnerId'],
         where: {

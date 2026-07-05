@@ -32,4 +32,4 @@ import { TrackerModule } from './tournament/match/tracker/tracker.module';
     TrackerModule,
   ],
 })
-export class AppModule { }
+export class AppModule {}

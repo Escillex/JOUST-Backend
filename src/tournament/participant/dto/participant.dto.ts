@@ -1,4 +1,11 @@
-import { IsUUID, IsString, MinLength, MaxLength, IsInt, Min } from 'class-validator';
+import {
+  IsUUID,
+  IsString,
+  MinLength,
+  MaxLength,
+  IsInt,
+  Min,
+} from 'class-validator';
 
 export class JoinTournamentDto {
   @IsUUID('4')

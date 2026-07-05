@@ -16,15 +16,22 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ParticipantService } from './participant.service';
-import { JoinTournamentDto, JoinGuestDto, UpdateSeedDto } from './dto/participant.dto';
-import { JwtAuthGuard, type AuthenticatedRequest } from 'src/guards/jwt-auth.guard';
+import {
+  JoinTournamentDto,
+  JoinGuestDto,
+  UpdateSeedDto,
+} from './dto/participant.dto';
+import {
+  JwtAuthGuard,
+  type AuthenticatedRequest,
+} from 'src/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/guards/roles.guard';
 import { Roles } from 'src/guards/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 
 @Controller('tournaments/:tournamentId/participants')
 export class ParticipantController {
-  constructor(private readonly participantService: ParticipantService) { }
+  constructor(private readonly participantService: ParticipantService) {}
 
   // POST /tournaments/:tournamentId/participants/join
   @Post('join')
@@ -36,7 +43,8 @@ export class ParticipantController {
     @Req() req: AuthenticatedRequest,
   ) {
     const roles = req.user.roles || [];
-    const isAuthorized = roles.includes(Role.ADMIN) || roles.includes(Role.ORGANIZER);
+    const isAuthorized =
+      roles.includes(Role.ADMIN) || roles.includes(Role.ORGANIZER);
 
     if (req.user.id !== dto.userId && !isAuthorized) {
       throw new UnauthorizedException('Cannot join as another user');
@@ -51,7 +59,10 @@ export class ParticipantController {
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
     @Body() dto: JoinGuestDto,
   ) {
-    return this.participantService.joinTournamentAsGuest(tournamentId, dto.username);
+    return this.participantService.joinTournamentAsGuest(
+      tournamentId,
+      dto.username,
+    );
   }
 
   // DELETE /tournaments/:tournamentId/participants/leave

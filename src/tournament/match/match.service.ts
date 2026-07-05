@@ -18,11 +18,14 @@ export class MatchService {
     private formatsService: FormatsService,
   ) {}
 
-  private async updateMatchStats(matchId: string, pointsConfig: {
-    pointsForWin: number;
-    pointsForDraw: number;
-    pointsForLoss: number;
-  }) {
+  private async updateMatchStats(
+    matchId: string,
+    pointsConfig: {
+      pointsForWin: number;
+      pointsForDraw: number;
+      pointsForLoss: number;
+    },
+  ) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
@@ -34,7 +37,9 @@ export class MatchService {
 
     if (!match || !match.round || !match.player1Id) return;
 
-    const participantIds = [match.player1Id, match.player2Id].filter(Boolean) as string[];
+    const participantIds = [match.player1Id, match.player2Id].filter(
+      Boolean,
+    ) as string[];
     const participants = await this.prisma.tournamentParticipant.findMany({
       where: {
         tournamentId: match.round.tournamentId,
@@ -49,6 +54,13 @@ export class MatchService {
     const participantByUserId = new Map(
       participants.map((participant) => [participant.userId, participant]),
     );
+
+    // Game bucket for per-game stats — null when the format has no designation
+    const tournamentMeta = await this.prisma.tournament.findUnique({
+      where: { id: match.round.tournamentId },
+      select: { format: { select: { gameName: true } } },
+    });
+    const gameName = tournamentMeta?.format?.gameName ?? null;
 
     const maybeUpdateGlobalStats = async (
       userId: string,
@@ -95,6 +107,36 @@ export class MatchService {
           },
         });
       }
+
+      if (!gameName) return;
+
+      const currentGame = await this.prisma.userGameStats.findUnique({
+        where: { userId_gameName: { userId, gameName } },
+      });
+
+      const gameGamesPlayed = (currentGame?.gamesPlayed ?? 0) + deltaGames;
+      const gameWins = (currentGame?.wins ?? 0) + deltaWins;
+      const gameWinRate = gameGamesPlayed > 0 ? gameWins / gameGamesPlayed : 0;
+
+      await this.prisma.userGameStats.upsert({
+        where: { userId_gameName: { userId, gameName } },
+        create: {
+          userId,
+          gameName,
+          gamesPlayed: gameGamesPlayed,
+          wins: gameWins,
+          losses: deltaLosses,
+          draws: deltaDraws,
+          winRate: gameWinRate,
+        },
+        update: {
+          gamesPlayed: gameGamesPlayed,
+          wins: gameWins,
+          losses: { increment: deltaLosses },
+          draws: { increment: deltaDraws },
+          winRate: gameWinRate,
+        },
+      });
     };
 
     const updateParticipant = async (
@@ -210,14 +252,7 @@ export class MatchService {
         0,
         pointsConfig.pointsForLoss,
       ),
-      updateParticipant(
-        match.player2Id,
-        1,
-        1,
-        0,
-        0,
-        pointsConfig.pointsForWin,
-      ),
+      updateParticipant(match.player2Id, 1, 1, 0, 0, pointsConfig.pointsForWin),
     ]);
   }
 
@@ -233,17 +268,21 @@ export class MatchService {
   }) {
     return this.prisma.match.create({
       data: {
-        roundId:   dto.roundId,
+        roundId: dto.roundId,
         player1Id: dto.player1Id ?? null,
         player2Id: dto.player2Id ?? null,
-        isBye:     dto.isBye,
-        phase:     dto.phase ?? 1,
+        isBye: dto.isBye,
+        phase: dto.phase ?? 1,
         matchIndex: dto.matchIndex ?? 0,
       },
     });
   }
 
-  async linkMatches(previousIds: string[], nextIds: string[], isOneToOne: boolean = false) {
+  async linkMatches(
+    previousIds: string[],
+    nextIds: string[],
+    isOneToOne: boolean = false,
+  ) {
     for (let i = 0; i < previousIds.length; i++) {
       const nextMatchId = isOneToOne ? nextIds[i] : nextIds[Math.floor(i / 2)];
       await this.prisma.match.update({
@@ -284,7 +323,8 @@ export class MatchService {
         throw new BadRequestException('Winner must be in match');
     }
 
-    const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const rawConfig =
+      (match.round.tournament.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
     const {
       pointsThreshold,
@@ -296,7 +336,6 @@ export class MatchService {
 
     if (bestOf <= 0)
       throw new BadRequestException('bestOf must be a positive integer');
-
 
     if (!winnerId && !allowDraw)
       throw new BadRequestException(
@@ -313,7 +352,7 @@ export class MatchService {
     if (bestOf > 1 && !winnerId) {
       throw new BadRequestException(
         `This match is Best of ${bestOf}. Use POST /match/${matchId}/game-result ` +
-        `to report game-by-game, or provide a winnerId to force-complete.`,
+          `to report game-by-game, or provide a winnerId to force-complete.`,
       );
     }
 
@@ -375,7 +414,9 @@ export class MatchService {
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
     if (match.isBye)
-      throw new BadRequestException('Cannot report game results for a bye match');
+      throw new BadRequestException(
+        'Cannot report game results for a bye match',
+      );
 
     const isP1 = gameWinnerId === match.player1Id;
     const isP2 = gameWinnerId === match.player2Id;
@@ -384,7 +425,8 @@ export class MatchService {
         'Game winner is not a participant in this match',
       );
 
-    const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const rawConfig =
+      (match.round.tournament.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
     const { bestOf } = config;
     const winsReq = winsNeeded(bestOf);
@@ -421,20 +463,20 @@ export class MatchService {
 
       return {
         matchComplete: true,
-        winnerId:      matchWinnerId,
-        score:         { player1: p1Wins, player2: p2Wins },
+        winnerId: matchWinnerId,
+        score: { player1: p1Wins, player2: p2Wins },
         bestOf,
-        winsNeeded:    winsReq,
+        winsNeeded: winsReq,
       };
     }
 
     // Match still ongoing — return current state
     return {
       matchComplete: false,
-      score:         { player1: p1Wins, player2: p2Wins },
+      score: { player1: p1Wins, player2: p2Wins },
       bestOf,
-      winsNeeded:    winsReq,
-      remaining:     winsReq - Math.max(p1Wins, p2Wins),
+      winsNeeded: winsReq,
+      remaining: winsReq - Math.max(p1Wins, p2Wins),
     };
   }
 
@@ -463,15 +505,13 @@ export class MatchService {
     if (!match) throw new NotFoundException('Match not found');
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
-    if (match.isBye)
-      throw new BadRequestException('Cannot draw a bye match');
+    if (match.isBye) throw new BadRequestException('Cannot draw a bye match');
 
-    const rawConfig = (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const rawConfig =
+      (match.round.tournament.format?.config as Record<string, any>) ?? {};
     const config = resolveConfig(rawConfig);
     if (!config.allowDraw)
-      throw new BadRequestException(
-        'Draws are not allowed in this tournament',
-      );
+      throw new BadRequestException('Draws are not allowed in this tournament');
 
     await this.prisma.match.update({
       where: { id: matchId },
@@ -488,7 +528,7 @@ export class MatchService {
 
     return {
       matchComplete: true,
-      draw:          true,
+      draw: true,
       score: {
         player1: match.player1Score,
         player2: match.player2Score,
@@ -551,7 +591,7 @@ export class MatchService {
       include: {
         player1: { select: { id: true, username: true, isGuest: true } },
         player2: { select: { id: true, username: true, isGuest: true } },
-        winner:  { select: { id: true, username: true, isGuest: true } },
+        winner: { select: { id: true, username: true, isGuest: true } },
       },
     });
   }
@@ -562,7 +602,7 @@ export class MatchService {
       include: {
         player1: { select: { id: true, username: true, isGuest: true } },
         player2: { select: { id: true, username: true, isGuest: true } },
-        winner:  { select: { id: true, username: true, isGuest: true } },
+        winner: { select: { id: true, username: true, isGuest: true } },
       },
     });
   }

@@ -66,6 +66,7 @@ model User {
 
   // NEW: global stats back-relation
   globalStats UserGlobalStats?
+  gameStats   UserGameStats[]
 
   avatarUrl String? // path: /uploads/avatars/<uuid>.webp
 }
@@ -195,6 +196,35 @@ model UserGlobalStats {
   globalPoints      Int   @default(0) // cumulative placement points earned across all tournaments
 
   updatedAt DateTime @updatedAt
+}
+
+// ─── PER-GAME STATS (registered users only) ────────────────────────
+//
+// Same aggregation as UserGlobalStats, but bucketed by the game the
+// tournament's format designates (TournamentFormat.gameName).
+// Tournaments whose format has no gameName only feed UserGlobalStats.
+// Updated at the same write sites as UserGlobalStats.
+
+model UserGameStats {
+  id     String @id @default(uuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  gameName String // matches TournamentFormat.gameName
+
+  tournamentsPlayed Int   @default(0)
+  tournamentsWon    Int   @default(0)
+  gamesPlayed       Int   @default(0)
+  wins              Int   @default(0)
+  losses            Int   @default(0)
+  draws             Int   @default(0)
+  winRate           Float @default(0)
+  globalPoints      Int   @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, gameName])
 }
 
 // ─── ROUNDS & MATCHES ─────────────────────────────────────────────

@@ -92,7 +92,7 @@ export class TournamentController {
   @Roles(Role.ORGANIZER, Role.ADMIN)
   resolveTie(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body('action') action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS'
+    @Body('action') action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS',
   ) {
     return this.tournamentService.resolveTie(id, action);
   }

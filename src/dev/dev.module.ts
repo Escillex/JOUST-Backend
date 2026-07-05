@@ -4,9 +4,10 @@ import { DevController } from './dev.controller';
 import { TournamentModule } from '../tournament/tournament.module';
 import { ParticipantModule } from '../tournament/participant/participant.module';
 import { AuthModule } from '../auth/auth.module';
+import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 
 @Module({
-  imports: [TournamentModule, ParticipantModule, AuthModule],
+  imports: [TournamentModule, ParticipantModule, AuthModule, LeaderboardModule],
   providers: [DevService],
   controllers: [DevController],
 })

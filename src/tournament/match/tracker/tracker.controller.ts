@@ -1,10 +1,21 @@
 import {
-  Controller, Post, Patch, Get,
-  Param, Body, ParseUUIDPipe,
-  HttpCode, HttpStatus, UseGuards,
+  Controller,
+  Post,
+  Patch,
+  Get,
+  Param,
+  Body,
+  ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { TrackerService } from './tracker.service';
-import { OpenTrackerDto, UpdateTrackerDto, SubmitGameDto } from './dto/tracker.dto';
+import {
+  OpenTrackerDto,
+  UpdateTrackerDto,
+  SubmitGameDto,
+} from './dto/tracker.dto';
 import { JwtAuthGuard } from '../../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../../guards/roles.guard';
 import { Roles } from '../../../guards/decorators/roles.decorator';

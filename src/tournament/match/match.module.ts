@@ -6,7 +6,11 @@ import { FormatsModule } from '../../Formats/formats.module';
 import { TrackerModule } from './tracker/tracker.module';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => FormatsModule), forwardRef(() => TrackerModule)],
+  imports: [
+    PrismaModule,
+    forwardRef(() => FormatsModule),
+    forwardRef(() => TrackerModule),
+  ],
   controllers: [MatchController],
   providers: [MatchService],
   exports: [MatchService],

@@ -1,4 +1,12 @@
-import { Controller, Post, Delete, Patch, Param, Body, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Delete,
+  Patch,
+  Param,
+  Body,
+  UseGuards,
+} from '@nestjs/common';
 import { DevService } from './dev.service';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
@@ -27,5 +35,10 @@ export class DevController {
   @Delete('tournament/:id')
   async deleteTournament(@Param('id') id: string) {
     return this.devService.deleteTournament(id);
+  }
+
+  @Post('backfill-game-stats')
+  async backfillGameStats() {
+    return this.devService.backfillGameStats();
   }
 }

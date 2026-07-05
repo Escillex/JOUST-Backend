@@ -5,6 +5,7 @@ import { TournamentController } from '../src/tournament/tournament.controller';
 import { TournamentService } from '../src/tournament/tournament.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FormatsService } from '../src/Formats/formats.service';
+import { LeaderboardService } from '../src/leaderboard/leaderboard.service';
 import { JwtAuthGuard } from '../src/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/guards/roles.guard';
 import { TournamentStatus, Role } from '@prisma/client';
@@ -34,6 +35,10 @@ describe('TournamentController (generate-bracket)', () => {
         },
         {
           provide: FormatsService,
+          useValue: {},
+        },
+        {
+          provide: LeaderboardService,
           useValue: {},
         },
       ],
@@ -104,10 +109,10 @@ describe('TournamentController (generate-bracket)', () => {
 
     expect(response.body).toHaveLength(2);
     expect(response.body[0]).toEqual({
-        matchIndex: 1,
-        player1: { id: 'p1', name: 'Player 1' },
-        player2: { id: 'p2', name: 'Player 2' },
-      });
+      matchIndex: 1,
+      player1: { id: 'p1', name: 'Player 1' },
+      player2: { id: 'p2', name: 'Player 2' },
+    });
     expect(response.body[1]).toEqual({
       matchIndex: 2,
       player1: { id: 'p3', name: 'Player 3' },

@@ -34,14 +34,16 @@ export class ImagesService {
     if (subdir === 'avatars') {
       sharpInstance = sharpInstance.resize(400, 400, { fit: 'cover' });
     } else if (subdir === 'banners') {
-      sharpInstance = sharpInstance.resize(1200, null, { withoutEnlargement: true });
+      sharpInstance = sharpInstance.resize(1200, null, {
+        withoutEnlargement: true,
+      });
     } else if (subdir === 'assets') {
-      sharpInstance = sharpInstance.resize(1920, null, { withoutEnlargement: true });
+      sharpInstance = sharpInstance.resize(1920, null, {
+        withoutEnlargement: true,
+      });
     }
 
-    await sharpInstance
-      .webp({ quality: 80 })
-      .toFile(outPath);
+    await sharpInstance.webp({ quality: 80 }).toFile(outPath);
 
     return `/uploads/${subdir}/${fileName}`;
   }
@@ -100,7 +102,9 @@ export class ImagesService {
   // ─── TOURNAMENT BANNER ──────────────────────────────────────────
 
   async updateBanner(tournamentId: string, file: Express.Multer.File) {
-    const tournament = await this.prisma.tournament.findUnique({ where: { id: tournamentId } });
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     if (tournament.bannerUrl) {
@@ -116,7 +120,9 @@ export class ImagesService {
   }
 
   async deleteBanner(tournamentId: string) {
-    const tournament = await this.prisma.tournament.findUnique({ where: { id: tournamentId } });
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
     if (!tournament) throw new NotFoundException('Tournament not found');
 
     if (tournament.bannerUrl) {

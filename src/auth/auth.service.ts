@@ -31,7 +31,7 @@ export class AuthService {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async handleGuestCleanup() {
     const now = new Date();
-    
+
     // Mark expired guests
     await this.prisma.user.updateMany({
       where: {
@@ -87,12 +87,9 @@ export class AuthService {
     const expired = await this.prisma.user.findMany({
       where: {
         isGuest: true,
-        OR: [
-          { isExpired: true },
-          { expiresAt: { lt: now } }
-        ]
+        OR: [{ isExpired: true }, { expiresAt: { lt: now } }],
       },
-      select: { id: true }
+      select: { id: true },
     });
 
     for (const user of expired) {
@@ -217,12 +214,19 @@ export class AuthService {
     const data: Record<string, any> = {};
     if (dto.username) data.username = dto.username;
     if (dto.email) data.email = dto.email;
-    if (dto.password) data.hashedPassword = await this.hashPassword(dto.password);
+    if (dto.password)
+      data.hashedPassword = await this.hashPassword(dto.password);
 
     return this.prisma.user.update({
       where: { id: userId },
       data,
-      select: { id: true, username: true, email: true, roles: true, avatarUrl: true },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        roles: true,
+        avatarUrl: true,
+      },
     });
   }
 
@@ -428,7 +432,10 @@ export class AuthService {
       select: { id: true, username: true, email: true, roles: true },
     });
 
-    return { message: 'Guest successfully converted to registered pilot', user: upgraded };
+    return {
+      message: 'Guest successfully converted to registered pilot',
+      user: upgraded,
+    };
   }
 
   // ──────────────────────────────────────────────
@@ -457,7 +464,8 @@ export class AuthService {
     const data: Record<string, unknown> = {};
     if (dto.username) data.username = dto.username;
     if (dto.email) data.email = dto.email;
-    if (dto.password) data.hashedPassword = await this.hashPassword(dto.password);
+    if (dto.password)
+      data.hashedPassword = await this.hashPassword(dto.password);
 
     const updated = await this.prisma.user.update({
       where: { id: targetId },
@@ -477,7 +485,8 @@ export class AuthService {
         OR: [{ email: dto.email }, { username: dto.username }],
       },
     });
-    if (conflict) throw new BadRequestException('Username or email already exists');
+    if (conflict)
+      throw new BadRequestException('Username or email already exists');
 
     const hashedPassword = await this.hashPassword(dto.password);
 
@@ -495,4 +504,3 @@ export class AuthService {
     return { message: 'Pilot account created', user: created };
   }
 }
-

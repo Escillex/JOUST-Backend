@@ -26,7 +26,9 @@ describe('CleanGuestsJob', () => {
   });
 
   it('Deletes guest users with no participant records', async () => {
-    const deleteManySpy = jest.spyOn(prisma.user, 'deleteMany').mockResolvedValue({ count: 5 } as any);
+    const deleteManySpy = jest
+      .spyOn(prisma.user, 'deleteMany')
+      .mockResolvedValue({ count: 5 } as any);
 
     const result = await job.cleanOrphanedGuests();
 
@@ -42,7 +44,8 @@ describe('CleanGuestsJob', () => {
   });
 
   it('Running twice produces the same result (idempotency)', async () => {
-    jest.spyOn(prisma.user, 'deleteMany')
+    jest
+      .spyOn(prisma.user, 'deleteMany')
       .mockResolvedValueOnce({ count: 5 } as any)
       .mockResolvedValueOnce({ count: 0 } as any);
 

@@ -37,7 +37,7 @@ export class CleanGuestsJob {
     });
 
     for (const t of tournaments) {
-      const guestIds = t.participants.map(p => p.userId);
+      const guestIds = t.participants.map((p) => p.userId);
       if (guestIds.length > 0) {
         // Re-check each user is still a guest (could have been upgraded)
         const stillGuests = await this.prisma.user.findMany({
@@ -45,15 +45,17 @@ export class CleanGuestsJob {
             id: { in: guestIds },
             isGuest: true,
           },
-          select: { id: true }
+          select: { id: true },
         });
-        const toDelete = stillGuests.map(g => g.id);
+        const toDelete = stillGuests.map((g) => g.id);
 
         if (toDelete.length > 0) {
           await this.prisma.user.deleteMany({
             where: { id: { in: toDelete } },
           });
-          this.logger.log(`Tournament ${t.id}: Purged ${toDelete.length} guests.`);
+          this.logger.log(
+            `Tournament ${t.id}: Purged ${toDelete.length} guests.`,
+          );
         }
       }
 
@@ -78,7 +80,9 @@ export class CleanGuestsJob {
       },
     });
 
-    this.logger.log(`Cleanup complete. Deleted ${deleted.count} orphaned guest accounts.`);
+    this.logger.log(
+      `Cleanup complete. Deleted ${deleted.count} orphaned guest accounts.`,
+    );
 
     return deleted.count;
   }

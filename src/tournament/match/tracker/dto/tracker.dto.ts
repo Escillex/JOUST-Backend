@@ -1,6 +1,4 @@
-import {
-  IsEnum, IsInt, IsOptional, IsUUID, Min,
-} from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
 import { GameTrackingMode } from '@prisma/client';
 
 /** Organizer opens a tracker for the next game in a match series. */

@@ -5,6 +5,7 @@ import { TournamentController } from '../src/tournament/tournament.controller';
 import { TournamentService } from '../src/tournament/tournament.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FormatsService } from '../src/Formats/formats.service';
+import { LeaderboardService } from '../src/leaderboard/leaderboard.service';
 import { JwtAuthGuard } from '../src/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/guards/roles.guard';
 import { TournamentStatus, Role } from '@prisma/client';
@@ -35,6 +36,10 @@ describe('TournamentController (status transitions)', () => {
         },
         {
           provide: FormatsService,
+          useValue: {},
+        },
+        {
+          provide: LeaderboardService,
           useValue: {},
         },
       ],
