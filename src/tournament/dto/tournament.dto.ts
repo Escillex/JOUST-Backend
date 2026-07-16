@@ -11,6 +11,7 @@ import {
   IsBoolean,
   IsEnum,
   IsDateString,
+  IsObject,
 } from 'class-validator';
 import { TournamentStatus } from '@prisma/client';
 import { PartialType } from '@nestjs/mapped-types';
@@ -65,6 +66,12 @@ export class CreateTournamentDto {
 
   @IsUUID('4', { message: 'createdById must be a valid UUID' })
   createdById!: string;
+
+  /** Per-tournament rules override; fully replaces the format preset's config.
+   *  Explicit null (on update) clears the override. */
+  @IsObject()
+  @IsOptional()
+  config?: Record<string, any> | null;
 }
 
 // ─── UPDATE TOURNAMENT ───────────────────────────────────────────

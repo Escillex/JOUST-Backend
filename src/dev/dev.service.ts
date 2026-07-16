@@ -3,7 +3,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { ParticipantService } from '../tournament/participant/participant.service';
 import { TournamentService } from '../tournament/tournament.service';
 import { LeaderboardService } from '../leaderboard/leaderboard.service';
-import { resolveConfig } from '../Formats/format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+} from '../Formats/format-config.helper';
 import { TournamentStatus } from '@prisma/client';
 
 @Injectable()
@@ -89,9 +92,7 @@ export class DevService {
         aggFor(t.winnerId, gameName).tournamentsWon += 1;
       }
 
-      const config = resolveConfig(
-        (t.format?.config as Record<string, any>) ?? {},
-      );
+      const config = resolveConfig(effectiveRawConfig(t));
       const isHybrid = t.format?.system === 'HYBRID';
       const leaderboard = await this.leaderboardService.getLeaderboard(t.id);
       for (const entry of leaderboard) {

@@ -26,6 +26,24 @@ export interface ResolvedConfig {
   placementPointsParticipation: number; // all other finishers
 }
 
+/** Effective raw config for a tournament: the per-tournament override
+ *  (Tournament.config) fully replaces the format preset's config when set. */
+export function effectiveRawConfig(
+  tournament:
+    | {
+        config?: unknown;
+        format?: { config?: unknown } | null;
+      }
+    | null
+    | undefined,
+): Record<string, any> {
+  return (
+    (tournament?.config as Record<string, any>) ??
+    (tournament?.format?.config as Record<string, any>) ??
+    {}
+  );
+}
+
 export function resolveConfig(
   config: Record<string, any> | null,
 ): ResolvedConfig {

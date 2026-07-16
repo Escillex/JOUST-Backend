@@ -8,7 +8,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { FormatsService } from 'src/Formats/formats.service';
-import { resolveConfig } from 'src/Formats/format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+} from 'src/Formats/format-config.helper';
 import { LeaderboardService } from 'src/leaderboard/leaderboard.service';
 import {
   CreateTournamentDto,
@@ -20,6 +23,7 @@ import {
   TournamentStatus,
   MatchStatus,
   Role,
+  Prisma,
 } from '@prisma/client';
 import { JwtPayload } from 'src/guards/jwt-auth.guard';
 
@@ -123,6 +127,10 @@ export class TournamentService {
         status,
         createdById: dto.createdById,
         formatId: dto.formatId,
+        // A null config on create simply means "no override", so store
+        // nothing. Prisma's create input does not accept a plain null
+        // for JSON columns, which is why null is mapped to undefined.
+        config: dto.config ?? undefined,
       },
       include: {
         createdBy: {
@@ -151,12 +159,14 @@ export class TournamentService {
         throw new BadRequestException('Invalid formatId — format not found');
     }
 
-    const { createdById, date, ...rest } = dto;
+    const { createdById, date, startNow, config, ...rest } = dto;
 
     return this.prisma.tournament.update({
       where: { id },
       data: {
         ...rest,
+        // config: null clears the per-tournament override (falls back to the preset)
+        ...(config !== undefined && { config: config ?? Prisma.DbNull }),
         ...(date !== undefined && { date: date ? new Date(date) : null }),
       },
       include: {
@@ -468,8 +478,7 @@ export class TournamentService {
     }
 
     // ─── Award placement-based global points ─────────────────────────
-    const rawConfig =
-      (tournamentWithFormat?.format?.config as Record<string, any>) ?? {};
+    const rawConfig = effectiveRawConfig(tournamentWithFormat);
     const config = resolveConfig(rawConfig);
     const {
       placementPointsChampion,

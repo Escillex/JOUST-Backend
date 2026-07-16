@@ -8,7 +8,11 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { FormatsService } from '../../Formats/formats.service';
 import { MatchStatus } from '@prisma/client';
-import { resolveConfig, winsNeeded } from '../../Formats/format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+  winsNeeded,
+} from '../../Formats/format-config.helper';
 
 @Injectable()
 export class MatchService {
@@ -323,8 +327,7 @@ export class MatchService {
         throw new BadRequestException('Winner must be in match');
     }
 
-    const rawConfig =
-      (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const rawConfig = effectiveRawConfig(match.round.tournament);
     const config = resolveConfig(rawConfig);
     const {
       pointsThreshold,
@@ -425,8 +428,7 @@ export class MatchService {
         'Game winner is not a participant in this match',
       );
 
-    const rawConfig =
-      (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const rawConfig = effectiveRawConfig(match.round.tournament);
     const config = resolveConfig(rawConfig);
     const { bestOf } = config;
     const winsReq = winsNeeded(bestOf);
@@ -507,8 +509,7 @@ export class MatchService {
       throw new BadRequestException('Match already completed');
     if (match.isBye) throw new BadRequestException('Cannot draw a bye match');
 
-    const rawConfig =
-      (match.round.tournament.format?.config as Record<string, any>) ?? {};
+    const rawConfig = effectiveRawConfig(match.round.tournament);
     const config = resolveConfig(rawConfig);
     if (!config.allowDraw)
       throw new BadRequestException('Draws are not allowed in this tournament');

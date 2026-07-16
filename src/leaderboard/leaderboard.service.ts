@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { resolveConfig } from '../Formats/format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+} from '../Formats/format-config.helper';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -114,7 +117,7 @@ export class LeaderboardService {
         include: { format: true },
       }));
 
-    const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
+    const rawConfig = effectiveRawConfig(tournament);
     const config = resolveConfig(rawConfig);
     const { tieBreakerOrder } = config;
 

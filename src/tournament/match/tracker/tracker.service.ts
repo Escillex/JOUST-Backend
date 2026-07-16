@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { MatchService } from '../match.service';
-import { resolveConfig } from '../../../Formats/format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+} from '../../../Formats/format-config.helper';
 import {
   OpenTrackerDto,
   UpdateTrackerDto,
@@ -50,9 +53,7 @@ export class TrackerService {
         `Game ${activeLog.gameNumber} tracker is already active. Submit it before opening the next.`,
       );
 
-    const config = resolveConfig(
-      (match.round.tournament.format?.config as Record<string, any>) ?? {},
-    );
+    const config = resolveConfig(effectiveRawConfig(match.round.tournament));
 
     // Resolve mode — dto > format config > default 'POINTS'
     const mode: GameTrackingMode =

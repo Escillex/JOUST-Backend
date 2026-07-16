@@ -18,7 +18,7 @@ import {
   TournamentFormat,
   Match,
 } from '@prisma/client';
-import { resolveConfig } from './format-config.helper';
+import { effectiveRawConfig, resolveConfig } from './format-config.helper';
 
 @Injectable()
 export class FormatsService {
@@ -38,7 +38,11 @@ export class FormatsService {
     activate: boolean = true,
   ) {
     const system = format.system;
-    const config = format.config as Record<string, any>;
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      select: { config: true },
+    });
+    const config = effectiveRawConfig({ config: tournament?.config, format });
 
     if (system === TournamentSystem.SINGLE_ELIMINATION) {
       await this.initSingleElimination(tournamentId, playerIds, activate);
@@ -145,7 +149,7 @@ export class FormatsService {
     });
     if (!tournament?.format) return;
 
-    const config = tournament.format.config as Record<string, any>;
+    const config = effectiveRawConfig(tournament);
     const phase1Config = config.phase1 ?? {};
     const maxRounds =
       phase1Config.swissRounds ??
@@ -544,7 +548,7 @@ export class FormatsService {
       include: { participants: true, format: true },
     });
 
-    const rawConfig = (tournament?.format?.config as Record<string, any>) ?? {};
+    const rawConfig = effectiveRawConfig(tournament);
     const config = resolveConfig(rawConfig);
     const maxRounds =
       config.swissRounds ??
