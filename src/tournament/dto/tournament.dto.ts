@@ -12,6 +12,7 @@ import {
   IsEnum,
   IsDateString,
   IsObject,
+  Matches,
 } from 'class-validator';
 import { TournamentStatus } from '@prisma/client';
 import { PartialType } from '@nestjs/mapped-types';
@@ -72,6 +73,21 @@ export class CreateTournamentDto {
   @IsObject()
   @IsOptional()
   config?: Record<string, any> | null;
+
+  /** Short invite-link name (e.g. "summer-cup"). Only lowercase letters,
+   *  numbers, and dashes are allowed so the value is always safe to put in
+   *  a URL. When omitted on create, one is generated from the tournament
+   *  name. An empty string on update clears the custom name. */
+  @IsString()
+  @IsOptional()
+  @Matches(/^[a-z0-9-]*$/, {
+    message:
+      'Invite link name can only contain lowercase letters, numbers, and dashes',
+  })
+  @MaxLength(40, {
+    message: 'Invite link name must be at most 40 characters',
+  })
+  slug?: string;
 }
 
 // ─── UPDATE TOURNAMENT ───────────────────────────────────────────

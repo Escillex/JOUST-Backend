@@ -1,5 +1,9 @@
 {
-  "moduleFileExtensions": ["js", "json", "ts"],
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
@@ -7,7 +11,13 @@
     "^.+\\.(t|j)s$": "ts-jest"
   },
   "moduleNameMapper": {
-    "^prisma/(.*)$": "<rootDir>/../prisma/$1"
+    "^prisma/(.*)$": "<rootDir>/../prisma/$1",
+    "^uuid$": "<rootDir>/uuid-esm-stub.js"
   },
-  "modulePaths": ["<rootDir>/../"]
+  "modulePaths": [
+    "<rootDir>/../"
+  ],
+  "setupFiles": [
+    "<rootDir>/jest-setup-env.js"
+  ]
 }

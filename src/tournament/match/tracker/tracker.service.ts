@@ -17,6 +17,7 @@ import {
   SubmitGameDto,
 } from './dto/tracker.dto';
 import { GameTrackingMode } from '@prisma/client';
+import { RealtimeGateway } from '../../../realtime/realtime.gateway';
 
 @Injectable()
 export class TrackerService {
@@ -24,7 +25,21 @@ export class TrackerService {
     private prisma: PrismaService,
     @Inject(forwardRef(() => MatchService))
     private matchService: MatchService,
+    private realtime: RealtimeGateway,
   ) {}
+
+  /** Finds which tournament a match belongs to so live updates can be sent to
+   *  that tournament's room. Used by the update/submit paths, which otherwise
+   *  only know the match id. */
+  private async resolveTournamentId(
+    matchId: string,
+  ): Promise<string | undefined> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { round: { select: { tournamentId: true } } },
+    });
+    return match?.round.tournamentId;
+  }
 
   async openTracker(matchId: string, dto: OpenTrackerDto) {
     const match = await this.prisma.match.findUnique({
@@ -67,7 +82,7 @@ export class TrackerService {
 
     const gameNumber = match.gameLogs.length + 1;
 
-    return this.prisma.matchGameLog.create({
+    const created = await this.prisma.matchGameLog.create({
       data: {
         matchId,
         gameNumber,
@@ -78,6 +93,12 @@ export class TrackerService {
         trackerActive: true,
       },
     });
+
+    // A new game log started. Signal the tournament room so any open tracker
+    // panel refetches its log list and shows the new game.
+    this.realtime.emitTournamentUpdated(match.round.tournament.id);
+
+    return created;
   }
 
   async updateTracker(matchId: string, dto: UpdateTrackerDto) {
@@ -88,7 +109,7 @@ export class TrackerService {
     if (!activeLog)
       throw new BadRequestException('No active tracker for this match');
 
-    return this.prisma.matchGameLog.update({
+    const updated = await this.prisma.matchGameLog.update({
       where: { id: activeLog.id },
       data: {
         ...(dto.player1Value !== undefined && {
@@ -99,6 +120,20 @@ export class TrackerService {
         }),
       },
     });
+
+    // High-frequency live values: broadcast the new numbers directly so open
+    // tracker panels move their HP/points bars without a full refetch.
+    const tournamentId = await this.resolveTournamentId(matchId);
+    if (tournamentId) {
+      this.realtime.emitTrackerUpdate(tournamentId, {
+        matchId,
+        player1Value: updated.player1Value,
+        player2Value: updated.player2Value,
+        gameNumber: updated.gameNumber,
+      });
+    }
+
+    return updated;
   }
 
   async submitGame(matchId: string, dto: SubmitGameDto) {
@@ -129,6 +164,16 @@ export class TrackerService {
       );
     } else {
       matchResult = await this.matchService.reportDraw(matchId);
+    }
+
+    // The game closed and the series score changed (and the match may have
+    // completed, which advances the bracket). Signal the tournament room so
+    // tracker panels and bracket views refresh. Note: when this game finishes
+    // the whole match, match completion also emits its own update, which is a
+    // harmless duplicate refresh nudge.
+    const tournamentId = await this.resolveTournamentId(matchId);
+    if (tournamentId) {
+      this.realtime.emitTournamentUpdated(tournamentId);
     }
 
     return { log, matchResult };

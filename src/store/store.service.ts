@@ -104,14 +104,4 @@ export class StoreService {
     this.deleteImage(product.imageUrl);
     return this.prisma.storeProduct.delete({ where: { id } });
   }
-
-  async reorder(orderedIds: string[]) {
-    const updates = orderedIds.map((id, i) =>
-      this.prisma.storeProduct.update({
-        where: { id },
-        data: { sortOrder: i },
-      }),
-    );
-    return this.prisma.$transaction(updates);
-  }
 }

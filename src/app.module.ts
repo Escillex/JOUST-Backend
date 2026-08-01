@@ -13,6 +13,9 @@ import { TournamentFormatModule } from './tournament-format/tournament-format.mo
 import { ImagesModule } from './images/images.module';
 import { StoreModule } from './store/store.module';
 import { TrackerModule } from './tournament/match/tracker/tracker.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { NotificationModule } from './notification/notification.module';
+import { OrganizerModule } from './organizer/organizer.module';
 
 @Module({
   imports: [
@@ -30,6 +33,9 @@ import { TrackerModule } from './tournament/match/tracker/tracker.module';
     ImagesModule,
     StoreModule,
     TrackerModule,
+    RealtimeModule,
+    NotificationModule,
+    OrganizerModule,
   ],
 })
 export class AppModule {}

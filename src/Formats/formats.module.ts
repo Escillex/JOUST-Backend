@@ -6,6 +6,7 @@ import { MatchModule } from '../tournament/match/match.module';
 import { TournamentModule } from '../tournament/tournament.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 import { AuthModule } from 'src/auth/auth.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AuthModule } from 'src/auth/auth.module';
     forwardRef(() => TournamentModule),
     LeaderboardModule,
     AuthModule,
+    RealtimeModule,
   ],
   controllers: [],
   providers: [FormatsService],

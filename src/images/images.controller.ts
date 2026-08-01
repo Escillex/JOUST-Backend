@@ -15,6 +15,8 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
+import { TournamentAccessGuard } from '../guards/tournament-access.guard';
+import { TournamentAccess } from '../guards/decorators/tournament-access.decorator';
 import { Role } from '@prisma/client';
 import { ImagesService } from './images.service';
 
@@ -58,21 +60,21 @@ export class ImagesController {
   // ─── TOURNAMENT BANNER ──────────────────────────────────────────
 
   @Post('banner/:tournamentId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
   @UseInterceptors(FileInterceptor('file'))
   async uploadBanner(
     @Param('tournamentId') tournamentId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    // Note: We could add a check here to ensure the ORGANIZER owns the tournament,
-    // but in JOUST organizers are generally trusted with management.
     return this.imagesService.updateBanner(tournamentId, file);
   }
 
   @Delete('banner/:tournamentId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
   async deleteBanner(@Param('tournamentId') tournamentId: string) {
     return this.imagesService.deleteBanner(tournamentId);
   }

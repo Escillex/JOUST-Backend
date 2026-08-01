@@ -8,6 +8,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { FormatsModule } from '../Formats/formats.module';
 import { AuthModule } from '../auth/auth.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
+import { RealtimeModule } from '../realtime/realtime.module';
+import { NotificationModule } from '../notification/notification.module';
 import { forwardRef } from '@nestjs/common';
 
 @Module({
@@ -18,6 +20,8 @@ import { forwardRef } from '@nestjs/common';
     forwardRef(() => FormatsModule),
     AuthModule,
     LeaderboardModule,
+    RealtimeModule,
+    NotificationModule,
   ],
   controllers: [TournamentController],
   providers: [TournamentService],

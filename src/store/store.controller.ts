@@ -82,10 +82,9 @@ export class StoreController {
     return this.storeService.remove(id);
   }
 
-  @Patch('reorder/bulk')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  reorder(@Body('ids') ids: string[]) {
-    return this.storeService.reorder(ids);
-  }
+  // PATCH /store/reorder/bulk was REMOVED (plan 7.5, 2026-07-31). No frontend
+  // path ever existed for product ordering, so it was untested, unreachable
+  // API surface. `StoreProduct.sortOrder` remains in the schema and is still
+  // honoured when listing, so building the drag-to-order UI later only needs
+  // the endpoint back — no data migration.
 }

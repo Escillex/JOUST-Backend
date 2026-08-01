@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CleanGuestsJob } from './cleanGuests';
 import { PrismaService } from 'prisma/prisma.service';
+import { AuthService } from '../auth/auth.service';
 
 describe('CleanGuestsJob', () => {
   let job: CleanGuestsJob;
@@ -17,6 +18,13 @@ describe('CleanGuestsJob', () => {
               deleteMany: jest.fn(),
             },
           },
+        },
+        {
+          // The job now routes stale-guest deletion through AuthService so player
+          // names are burned into match records first. This suite only exercises
+          // cleanOrphanedGuests, so the service is stubbed.
+          provide: AuthService,
+          useValue: { deleteUser: jest.fn() },
         },
       ],
     }).compile();

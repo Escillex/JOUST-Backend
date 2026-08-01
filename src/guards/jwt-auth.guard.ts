@@ -1,3 +1,4 @@
+import { requireJwtSecret } from '../config/security.config';
 import {
   CanActivate,
   ExecutionContext,
@@ -45,7 +46,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload: JwtPayload = await this.jwtService.verifyAsync(token, {
-        secret: process.env.JWT_SECRET,
+        secret: requireJwtSecret(),
       });
       request.user = payload;
     } catch {

@@ -17,8 +17,11 @@ import {
   TournamentStatus,
   TournamentFormat,
   Match,
+  ParticipantStatus,
 } from '@prisma/client';
 import { effectiveRawConfig, resolveConfig } from './format-config.helper';
+import { seedBracketSlots, shuffled } from './bracket-seeding.helper';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 
 @Injectable()
 export class FormatsService {
@@ -29,6 +32,7 @@ export class FormatsService {
     @Inject(forwardRef(() => TournamentService))
     private tournamentService: TournamentService,
     private leaderboardService: LeaderboardService,
+    private realtime: RealtimeGateway,
   ) {}
 
   async initializeTournamentFormat(
@@ -95,7 +99,15 @@ export class FormatsService {
         if (loserId)
           await this.matchService.advanceLoser(loserId, match.loserNextMatchId);
       }
-      await this.checkTournamentComplete(tournament.id);
+      // Plan 7.11. This used to call checkTournamentComplete — the ROUND ROBIN
+      // checker — which decided the winner from the points leaderboard and
+      // applied the 1st-place points-tie halt. In a bracket that is simply the
+      // wrong question: the grand final decides the tournament, not a points
+      // total. Worse, it reliably halted: every match awards swissPointsForWin,
+      // so in an 8-player bracket the winners-bracket champion and the player
+      // who reached the grand final through the losers bracket both finish on
+      // 4 wins — an exact points tie with the person who just beat them.
+      await this.checkDoubleEliminationComplete(tournament.id);
     } else if (system === TournamentSystem.SWISS) {
       await this.checkSwissRoundComplete(tournament.id, match.roundId);
     } else if (system === TournamentSystem.ROUND_ROBIN) {
@@ -115,6 +127,12 @@ export class FormatsService {
         await this.checkSingleEliminationComplete(tournament.id, match.roundId);
       }
     }
+
+    // A match finished and the bracket may have advanced (new pairings, a new
+    // Swiss round, or a completed tournament). Tell every viewer of this
+    // tournament to refresh. This is a coarse signal, so emitting once here
+    // covers all the branches above regardless of which system ran.
+    this.realtime.emitTournamentUpdated(tournament.id);
   }
 
   // ─── HYBRID (Swiss → Top Cut) ────────────────────────────────
@@ -192,6 +210,16 @@ export class FormatsService {
   }
 
   private async checkTournamentComplete(tournamentId: string) {
+    // An already-completed tournament must not be re-completed: completeTournament
+    // awards lifetime points and counters that cannot be undone. Checked here as
+    // well as inside completeTournament so the winnerId write below is skipped too,
+    // which would otherwise overwrite a manually resolved winner.
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      select: { status: true },
+    });
+    if (!tournament || tournament.status === TournamentStatus.COMPLETED) return;
+
     const allMatches = await this.prisma.match.findMany({
       where: { round: { tournamentId } },
     });
@@ -234,10 +262,11 @@ export class FormatsService {
     phase: number = 1,
   ) {
     const bracketSize = this.nextPowerOfTwo(playerIds.length);
-    const padded: (string | null)[] = [
-      ...playerIds,
-      ...Array<string | null>(bracketSize - playerIds.length).fill(null),
-    ];
+    // Standard seeded placement. This used to pad with nulls at the end and pair
+    // adjacently, which gave byes to the worst seeds, sat seeds 1 and 2 against
+    // each other in round one, and produced unplayable both-slots-empty matches.
+    // See bracket-seeding.helper.ts.
+    const padded = seedBracketSlots(playerIds, bracketSize);
     const rounds = this.generateBracket(padded);
 
     let prevMatchIds: string[] = [];
@@ -296,6 +325,37 @@ export class FormatsService {
     }
   }
 
+  /**
+   * Completion for double elimination: the grand final decides it.
+   *
+   * Deliberately separate from checkTournamentComplete (plan 7.11). That
+   * function ranks by accumulated match points and halts on a 1st-place points
+   * tie, which is correct for standings-based systems (Swiss, round robin,
+   * hybrid phase 1) and wrong for a bracket — where two players on equal points
+   * is the normal outcome of a grand final, not an unresolved tie.
+   *
+   * No tie halt here: a bracket cannot tie. Whoever wins round 200 wins.
+   */
+  private async checkDoubleEliminationComplete(tournamentId: string) {
+    const grandFinal = await this.prisma.round.findFirst({
+      where: { tournamentId, roundNumber: 200 },
+      include: { matches: true },
+    });
+    if (!grandFinal) return;
+
+    const decider = grandFinal.matches.find(
+      (m) => m.status === MatchStatus.COMPLETED && m.winnerId,
+    );
+    if (!decider?.winnerId) return;
+
+    await this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { winnerId: decider.winnerId },
+    });
+
+    await this.tournamentService.completeTournament(tournamentId);
+  }
+
   private async checkSingleEliminationComplete(
     tournamentId: string,
     roundId: string,
@@ -334,10 +394,9 @@ export class FormatsService {
     activate: boolean = true,
   ) {
     const bracketSize = this.nextPowerOfTwo(playerIds.length);
-    const padded = [
-      ...playerIds,
-      ...Array(bracketSize - playerIds.length).fill(null),
-    ];
+    // Same seeded placement as single elimination — the winners bracket has the
+    // same shape and the same reasons for wanting it.
+    const padded = seedBracketSlots(playerIds, bracketSize);
     const k = Math.log2(bracketSize);
 
     // 1. Winners Bracket (Rounds 1 to k)
@@ -418,22 +477,30 @@ export class FormatsService {
       );
     }
 
-    // Link Winners Losers (loserNextMatchId)
-    for (let i = 0; i < winnersMatchIds[0].length; i++) {
-      await this.prisma.match.update({
-        where: { id: winnersMatchIds[0][i] },
-        data: { loserNextMatchId: losersMatchIds[0][Math.floor(i / 2)] },
-      });
-    }
-
-    for (let i = 1; i < winnersMatchIds.length - 1; i++) {
-      const wrMatches = winnersMatchIds[i];
-      const lrMatches = losersMatchIds[2 * i - 1];
-      for (let j = 0; j < wrMatches.length; j++) {
+    // Link Winners -> Losers (loserNextMatchId).
+    // A two-player bracket has no losers rounds at all: k is 1, so the loop above
+    // runs `r <= 2k-2` = 0 times and losersMatchIds is empty. Without this guard
+    // the next line reads losersMatchIds[0][...] and throws, which took down every
+    // 2-player double-elimination tournament. The grand-finals block below already
+    // handles that case by dropping the winners-final loser straight into the
+    // grand final, which is the correct shape for two players.
+    if (losersMatchIds.length > 0) {
+      for (let i = 0; i < winnersMatchIds[0].length; i++) {
         await this.prisma.match.update({
-          where: { id: wrMatches[j] },
-          data: { loserNextMatchId: lrMatches[j] },
+          where: { id: winnersMatchIds[0][i] },
+          data: { loserNextMatchId: losersMatchIds[0][Math.floor(i / 2)] },
         });
+      }
+
+      for (let i = 1; i < winnersMatchIds.length - 1; i++) {
+        const wrMatches = winnersMatchIds[i];
+        const lrMatches = losersMatchIds[2 * i - 1];
+        for (let j = 0; j < wrMatches.length; j++) {
+          await this.prisma.match.update({
+            where: { id: wrMatches[j] },
+            data: { loserNextMatchId: lrMatches[j] },
+          });
+        }
       }
     }
 
@@ -590,17 +657,26 @@ export class FormatsService {
       await this.buildSwissMatchHistory(tournamentId);
 
     const sortedIds = leaderboard.map((s) => s.userId);
-    const pairableIds = [...sortedIds];
+
+    // Skip players the organizer forfeited: they must not be paired in later rounds.
+    const forfeited = await this.prisma.tournamentParticipant.findMany({
+      where: { tournamentId, status: ParticipantStatus.FORFEITED },
+      select: { userId: true },
+    });
+    const forfeitedIds = new Set(forfeited.map((p) => p.userId));
+    const activeSortedIds = sortedIds.filter((id) => !forfeitedIds.has(id));
+
+    const pairableIds = [...activeSortedIds];
     let byePlayer: string | null = null;
 
     if (pairableIds.length % 2 !== 0) {
-      const eligibleByePlayers = sortedIds.filter(
+      const eligibleByePlayers = activeSortedIds.filter(
         (playerId) => (byeCount.get(playerId) ?? 0) === 0,
       );
       byePlayer =
         eligibleByePlayers.length > 0
           ? eligibleByePlayers[eligibleByePlayers.length - 1]
-          : sortedIds[sortedIds.length - 1];
+          : activeSortedIds[activeSortedIds.length - 1];
       const byeIndex = pairableIds.indexOf(byePlayer);
       if (byeIndex >= 0) pairableIds.splice(byeIndex, 1);
     }
@@ -791,13 +867,10 @@ export class FormatsService {
     }
   }
 
+  /** Delegates to the shared implementation so there is only one shuffle in the
+   *  codebase. Kept as a method because callers here read better for it. */
   private shuffle(array: string[]): string[] {
-    const arr = [...array];
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
+    return shuffled(array);
   }
 
   private nextPowerOfTwo(n: number): number {
@@ -850,21 +923,36 @@ export class FormatsService {
     }
 
     if (action === 'APPLY_TIEBREAKERS') {
+      // Report the criterion that actually separated the top two. The old fixed
+      // "via OMW%" message was wrong whenever a different tiebreaker decided it,
+      // and outright misleading when none did and the order was simply whatever
+      // the sort happened to produce.
+      const rawConfig = effectiveRawConfig(tournament);
+      const { tieBreakerOrder } = resolveConfig(rawConfig);
+      const criterion = this.leaderboardService.tiebreakCriterion(
+        leaderboard[0],
+        leaderboard[1],
+        tieBreakerOrder,
+      );
+
       const winnerId = leaderboard[0].userId;
       await this.prisma.tournament.update({
         where: { id: tournamentId },
         data: { winnerId },
       });
       await this.tournamentService.completeTournament(tournamentId);
-      return { message: 'Tie broken automatically via OMW%' };
+
+      return {
+        message: criterion
+          ? `Tie broken on ${criterion}.`
+          : 'The configured tiebreakers could not separate these players. ' +
+            'The winner was set to the current top of the standings — extend the ' +
+            'round instead if you need this decided on results.',
+        tiebreaker: criterion,
+      };
     }
 
     if (action === 'EXTEND_ROUND') {
-      const topPoints = leaderboard[0].points;
-      const tiedPlayers = leaderboard
-        .filter((e) => e.points === topPoints)
-        .map((e) => e.userId);
-
       const rounds = await this.prisma.round.findMany({
         where: { tournamentId },
         orderBy: { roundNumber: 'desc' },
@@ -872,14 +960,29 @@ export class FormatsService {
       });
       const nextRoundOffset = (rounds[0]?.roundNumber ?? 0) + 1;
 
-      // Create a round robin match block exclusively for the tied players
-      await this.initRoundRobin(
-        tournamentId,
-        tiedPlayers,
-        true,
-        nextRoundOffset,
-      );
-      return { message: 'Tiebreaker round generated successfully' };
+      // Plan 7.10. This used to call initRoundRobin with only the tied players,
+      // which was wrong three ways: it paired ONLY the tied players instead of
+      // the whole field, it emitted a full round-robin cycle of n-1 rounds
+      // (3 tied players produced 2 rounds, 4 produced 3) instead of the single
+      // round an organizer asks for, and it used round-robin pairing even in a
+      // Swiss event.
+      //
+      // generateNextSwissRound is what an extra round actually is: it pairs the
+      // full active field by standings, skips FORFEITED players, assigns a bye
+      // on an odd count preferring someone who has not had one, and falls back
+      // to the closest-score repeat opponent when no-rematch cannot be
+      // satisfied. The tie resolves because the leaders keep playing.
+      //
+      // Re-entry is already handled: the extra round sits above maxRounds, so
+      // checkSwissRoundComplete takes its >= branch and re-checks the tie —
+      // halting again for a further extension, or completing. Organizers can
+      // extend repeatedly until it breaks.
+      await this.generateNextSwissRound(tournamentId, nextRoundOffset);
+      return {
+        message:
+          'Tiebreaker round generated. The full field has been paired by ' +
+          'standings for one additional round.',
+      };
     }
 
     throw new BadRequestException('Invalid tie-breaker action');

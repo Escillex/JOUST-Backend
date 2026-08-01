@@ -19,6 +19,8 @@ import {
 import { JwtAuthGuard } from '../../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../../guards/roles.guard';
 import { Roles } from '../../../guards/decorators/roles.decorator';
+import { TournamentAccessGuard } from '../../../guards/tournament-access.guard';
+import { TournamentAccess } from '../../../guards/decorators/tournament-access.decorator';
 import { Role } from '@prisma/client';
 
 @Controller('matches')
@@ -27,12 +29,13 @@ export class TrackerController {
 
   /**
    * POST /matches/:id/tracker/open
-   * Auth: ORGANIZER or ADMIN
+   * Auth: staff of this match's tournament (creator or ADMIN)
    * Opens a new game tracker for the next game in the match series.
    */
   @Post(':id/tracker/open')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('match:id')
   @HttpCode(HttpStatus.CREATED)
   openTracker(
     @Param('id', ParseUUIDPipe) id: string,
@@ -43,10 +46,17 @@ export class TrackerController {
 
   /**
    * PATCH /matches/:id/tracker/update
-   * Auth: Public (players update from phone; organizer has full override)
+   * Auth: staff of this match's tournament (creator or ADMIN)
    * Updates player HP or points values on the active game log.
+   * Previously public, on the assumption that players would drive it from their
+   * phones. No player-facing UI ever called it, so it is now scoped like every
+   * other write. Reintroducing player self-scoring would need a per-match player
+   * token, since guests have no credential to check.
    */
   @Patch(':id/tracker/update')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('match:id')
   @HttpCode(HttpStatus.OK)
   updateTracker(
     @Param('id', ParseUUIDPipe) id: string,
@@ -57,12 +67,13 @@ export class TrackerController {
 
   /**
    * POST /matches/:id/tracker/submit-game
-   * Auth: ORGANIZER or ADMIN
+   * Auth: staff of this match's tournament (creator or ADMIN)
    * Confirms result of current game → closes log → calls reportGameResult().
    */
   @Post(':id/tracker/submit-game')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('match:id')
   @HttpCode(HttpStatus.OK)
   submitGame(
     @Param('id', ParseUUIDPipe) id: string,

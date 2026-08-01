@@ -42,6 +42,34 @@ enum GameTrackingMode {
   POINTS
 }
 
+// FORFEITED means the organizer removed the participant from a live
+// tournament (see the participant-management spec).
+enum ParticipantStatus {
+  ACTIVE
+  FORFEITED
+}
+
+enum OrganizerInviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+// One entry per thing that happened to a specific user. The type drives the icon
+// and styling on the frontend, so it is an enum rather than a free string.
+enum NotificationType {
+  MATCH_READY
+  MATCH_RESULT
+  TOURNAMENT_OPENED
+  TOURNAMENT_STARTED
+  TOURNAMENT_PLACEMENT
+  PARTICIPANT_ADDED
+  PARTICIPANT_REMOVED
+  PARTICIPANT_FORFEITED
+  ORGANIZER_INVITED
+  GUEST_CLEANUP_SCHEDULED
+}
+
 // ─── MODELS ──────────────────────────────────────────────────────
 
 model User {
@@ -68,7 +96,34 @@ model User {
   globalStats UserGlobalStats?
   gameStats   UserGameStats[]
 
+  notifications Notification[]
+
+  organizerRoles   TournamentOrganizer[] @relation("TournamentOrganizerUser")
+  organizerInvites TournamentOrganizer[] @relation("TournamentOrganizerInviter")
+
   avatarUrl String? // path: /uploads/avatars/<uuid>.webp
+}
+
+// In-app inbox. Rows cascade with the user, so guest cleanup needs no special
+// case. title/body are rendered text composed at write time: a notification is a
+// historical record and must not change meaning when the tournament it refers to
+// is later renamed or deleted.
+model Notification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type  NotificationType
+  title String
+  body  String?
+  link  String? // in-app path, e.g. /tournaments/<id>/lobby
+
+  tournamentId String? // for grouping only; deliberately no foreign key
+  read         Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([userId, createdAt])
 }
 
 // ─── TOURNAMENT FORMAT (Admin-managed named rulesets) ─────────────
@@ -103,6 +158,9 @@ model Tournament {
   venue       String?
   date        DateTime?
   inviteToken String           @default(uuid()) @unique
+  // Short human-readable invite name (e.g. "summer-cup"). The long
+  // inviteToken UUID keeps working as a fallback, so old links never break.
+  slug        String?          @unique
   isPrivate   Boolean          @default(false)
   status      TournamentStatus @default(OPEN)
 
@@ -123,11 +181,15 @@ model Tournament {
   guestCleanupAt DateTime?
 
   participants TournamentParticipant[]
+  organizers   TournamentOrganizer[]
   rounds       Round[]
 
   bannerUrl String? // path: /uploads/banners/<uuid>.webp
 
   createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([createdById])
 }
 
 // ─── PARTICIPANTS ─────────────────────────────────────────────────
@@ -142,10 +204,18 @@ model TournamentParticipant {
 
   seed Int?
 
+  // ACTIVE by default. FORFEITED means the organizer removed the player from a
+  // live tournament: their pending matches are awarded to opponents and they are
+  // skipped in future Swiss/hybrid pairings. See the participant-management spec.
+  status ParticipantStatus @default(ACTIVE)
+
   // NEW: per-tournament stats back-relation
   stats TournamentParticipantStats?
 
   @@unique([userId, tournamentId])
+  // The unique above leads with userId, so it cannot serve a tournamentId-only
+  // filter - which is how nearly every read of this table is shaped.
+  @@index([tournamentId])
 }
 
 // ─── PER-TOURNAMENT STATS (guests + registered users) ─────────────
@@ -285,6 +355,14 @@ model Match {
 
   createdAt DateTime @default(now())
   gameLogs  MatchGameLog[]
+
+  // Postgres does not index foreign keys automatically. Every bracket read walks
+  // matches by round, and forfeit/participant lookups filter on the two player
+  // columns, so all three were sequential scans before these.
+  @@index([roundId])
+  @@index([player1Id])
+  @@index([player2Id])
+  @@index([winnerId])
 }
 
 model MatchGameLog {
@@ -305,6 +383,8 @@ model MatchGameLog {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([matchId, trackerActive])
 }
 
 model SiteAsset {
@@ -330,4 +410,28 @@ model StoreProduct {
   isVisible   Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// Staff invited to co-manage one tournament. Only an ACCEPTED row grants access,
+// which is checked in checkTournamentAccess and nowhere else.
+model TournamentOrganizer {
+  id           String     @id @default(uuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation("TournamentOrganizerUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  status OrganizerInviteStatus @default(PENDING)
+  // SetNull like Tournament.createdById: deleting the inviter must never destroy
+  // the staff list.
+  invitedById String?
+  invitedBy   User?   @relation("TournamentOrganizerInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime  @default(now())
+  respondedAt DateTime?
+
+  // Re-inviting an existing invitee is an update, not a duplicate row.
+  @@unique([tournamentId, userId])
+  // Serves "my pending invitations".
+  @@index([userId, status])
 }

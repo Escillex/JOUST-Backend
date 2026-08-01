@@ -21,6 +21,7 @@ const BUILTIN_FORMATS: {
     config: {
       bestOf: 1,
       allowDraw: false,
+      seedingMode: 'RANDOM',
       sessionsCount: 1,
     },
   },
@@ -31,6 +32,7 @@ const BUILTIN_FORMATS: {
     config: {
       bestOf: 1,
       allowDraw: false,
+      seedingMode: 'RANDOM',
     },
   },
   {
@@ -44,6 +46,7 @@ const BUILTIN_FORMATS: {
       swissPointsForLoss: 0,
       bestOf: 1,
       allowDraw: false,
+      seedingMode: 'RANDOM',
     },
   },
   {
@@ -53,6 +56,7 @@ const BUILTIN_FORMATS: {
     config: {
       bestOf: 1,
       allowDraw: false,
+      seedingMode: 'RANDOM',
       sessionsCount: 1,
     },
   },
@@ -62,6 +66,9 @@ const BUILTIN_FORMATS: {
       'Swiss rounds to determine standings, followed by a single-elimination top cut.',
     system: TournamentSystem.HYBRID,
     config: {
+      // seedingMode sits at the root, not inside a phase: how the field is
+      // drawn belongs to the event, not to the Swiss phase.
+      seedingMode: 'RANDOM',
       phase1: {
         engine: 'SWISS',
         swissRounds: 4,
@@ -86,13 +93,25 @@ async function main() {
   // ── 1. Preserve or create admin user ─────────────────────────────
   const adminUsername = process.env.ADMIN_USERNAME ?? 'admin';
   const adminEmail = process.env.ADMIN_EMAIL ?? `${adminUsername}@joust.local`;
-  const adminPassword = process.env.ADMIN_PASSWORD ?? 'admin123';
+  // No default password. This file is committed, so any fallback here would be a
+  // published credential for the first admin of every fresh database.
+  const adminPassword = process.env.ADMIN_PASSWORD;
 
   let admin = await prisma.user.findFirst({
     where: { roles: { has: Role.ADMIN } },
   });
 
   if (!admin) {
+    // Checked here rather than at the top of main(): a database that already has
+    // an admin does not need the variable at all, and the rest of the seed
+    // (built-in formats) should still run without it.
+    if (!adminPassword) {
+      throw new Error(
+        'ADMIN_PASSWORD is not set, and this database has no admin account. ' +
+          'Set ADMIN_PASSWORD before seeding — the seed will not fall back to a ' +
+          'default password.',
+      );
+    }
     console.log('  Creating admin user...');
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
     admin = await prisma.user.create({

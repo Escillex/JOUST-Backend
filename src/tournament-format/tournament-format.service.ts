@@ -7,20 +7,33 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { CreateTournamentFormatDto } from './dto/create-format.dto';
 import { Role } from '@prisma/client';
+import { configFieldsForSystem } from '../Formats/config-fields.helper';
 
 @Injectable()
 export class TournamentFormatService {
   constructor(private prisma: PrismaService) {}
 
-  /** List all formats — public, ordered builtin first */
+  /** List all formats — public, ordered builtin first.
+   *
+   *  Each row carries `configFields`: the catalog of rules that are editable
+   *  for its system. Plan item 7.9 — the frontend rules editor has always been
+   *  written to render this, but nothing produced it, so the editor rendered
+   *  nothing. Computed rather than stored so it cannot drift out of step with
+   *  what `resolveConfig` actually reads. */
   async list() {
-    return this.prisma.tournamentFormat.findMany({
+    const formats = await this.prisma.tournamentFormat.findMany({
       orderBy: [{ isBuiltin: 'desc' }, { createdAt: 'asc' }],
       include: {
         createdBy: { select: { id: true, username: true } },
         _count: { select: { tournaments: true } },
       },
     });
+    return formats.map((fmt) => this.withConfigFields(fmt));
+  }
+
+  /** Attaches the editable-rule catalog for a format's system. */
+  private withConfigFields<T extends { system: string }>(fmt: T) {
+    return { ...fmt, configFields: configFieldsForSystem(fmt.system) };
   }
 
   /** Get a single format by ID */
@@ -33,7 +46,7 @@ export class TournamentFormatService {
       },
     });
     if (!fmt) throw new NotFoundException('Format not found');
-    return fmt;
+    return this.withConfigFields(fmt);
   }
 
   /** Create a new named format — ADMIN only */
@@ -44,7 +57,7 @@ export class TournamentFormatService {
     if (existing)
       throw new BadRequestException('A format with that name already exists');
 
-    return this.prisma.tournamentFormat.create({
+    const created = await this.prisma.tournamentFormat.create({
       data: {
         name: dto.name,
         description: dto.description ?? null,
@@ -58,6 +71,7 @@ export class TournamentFormatService {
         createdBy: { select: { id: true, username: true } },
       },
     });
+    return this.withConfigFields(created);
   }
 
   /** Update a non-builtin format — ADMIN only */
@@ -82,7 +96,7 @@ export class TournamentFormatService {
         throw new BadRequestException('A format with that name already exists');
     }
 
-    return this.prisma.tournamentFormat.update({
+    const updated = await this.prisma.tournamentFormat.update({
       where: { id },
       data: {
         ...(dto.name && { name: dto.name }),
@@ -95,6 +109,7 @@ export class TournamentFormatService {
         createdBy: { select: { id: true, username: true } },
       },
     });
+    return this.withConfigFields(updated);
   }
 
   /** Delete a non-builtin format that has no active tournaments — ADMIN only */

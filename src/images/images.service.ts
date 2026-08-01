@@ -71,17 +71,22 @@ export class ImagesService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    // Clean up old avatar
-    if (user.avatarUrl) {
-      await this.deleteFile(user.avatarUrl);
-    }
-
+    // Write the replacement before removing what it replaces. Deleting first
+    // means a failure in processAndSave (unsupported format, sharp error, full
+    // disk) leaves the record pointing at a file that no longer exists, with
+    // nothing to fall back to.
     const newUrl = await this.processAndSave(file, 'avatars');
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { avatarUrl: newUrl },
       select: { id: true, avatarUrl: true },
     });
+
+    if (user.avatarUrl && user.avatarUrl !== newUrl) {
+      await this.deleteFile(user.avatarUrl);
+    }
+
+    return updated;
   }
 
   async deleteAvatar(userId: string) {
@@ -107,16 +112,21 @@ export class ImagesService {
     });
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    if (tournament.bannerUrl) {
-      await this.deleteFile(tournament.bannerUrl);
-    }
-
+    // Same ordering rule as avatars: save the new file and commit the record
+    // before deleting the old one, so a failed upload cannot destroy the
+    // existing banner.
     const newUrl = await this.processAndSave(file, 'banners');
-    return this.prisma.tournament.update({
+    const updated = await this.prisma.tournament.update({
       where: { id: tournamentId },
       data: { bannerUrl: newUrl },
       select: { id: true, bannerUrl: true },
     });
+
+    if (tournament.bannerUrl && tournament.bannerUrl !== newUrl) {
+      await this.deleteFile(tournament.bannerUrl);
+    }
+
+    return updated;
   }
 
   async deleteBanner(tournamentId: string) {
@@ -141,17 +151,21 @@ export class ImagesService {
   async upsertAsset(key: string, file: Express.Multer.File, label?: string) {
     const existing = await this.prisma.siteAsset.findUnique({ where: { key } });
 
-    if (existing) {
-      await this.deleteFile(existing.url);
-    }
-
+    // Same ordering rule as avatars and banners: the old asset is only removed
+    // once its replacement is on disk and committed.
     const newUrl = await this.processAndSave(file, 'assets');
 
-    return this.prisma.siteAsset.upsert({
+    const saved = await this.prisma.siteAsset.upsert({
       where: { key },
       create: { key, url: newUrl, label },
       update: { url: newUrl, label },
     });
+
+    if (existing?.url && existing.url !== newUrl) {
+      await this.deleteFile(existing.url);
+    }
+
+    return saved;
   }
 
   async deleteAsset(key: string) {

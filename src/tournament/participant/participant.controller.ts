@@ -13,13 +13,15 @@ import {
   HttpStatus,
   Req,
   UseGuards,
-  UnauthorizedException,
+  ForbiddenException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ParticipantService } from './participant.service';
 import {
   JoinTournamentDto,
   JoinGuestDto,
   UpdateSeedDto,
+  ReplaceParticipantDto,
 } from './dto/participant.dto';
 import {
   JwtAuthGuard,
@@ -27,11 +29,19 @@ import {
 } from 'src/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/guards/roles.guard';
 import { Roles } from 'src/guards/decorators/roles.decorator';
+import { OptionalJwtAuthGuard } from 'src/guards/optional-jwt-auth.guard';
+import { TournamentAccessGuard } from 'src/guards/tournament-access.guard';
+import { TournamentAccess } from 'src/guards/decorators/tournament-access.decorator';
+import { checkTournamentAccess } from 'src/guards/tournament-access.util';
+import { PrismaService } from 'prisma/prisma.service';
 import { Role } from '@prisma/client';
 
 @Controller('tournaments/:tournamentId/participants')
 export class ParticipantController {
-  constructor(private readonly participantService: ParticipantService) {}
+  constructor(
+    private readonly participantService: ParticipantService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   // POST /tournaments/:tournamentId/participants/join
   @Post('join')
@@ -42,12 +52,24 @@ export class ParticipantController {
     @Body() dto: JoinTournamentDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    const roles = req.user.roles || [];
-    const isAuthorized =
-      roles.includes(Role.ADMIN) || roles.includes(Role.ORGANIZER);
-
-    if (req.user.id !== dto.userId && !isAuthorized) {
-      throw new UnauthorizedException('Cannot join as another user');
+    // Joining yourself is always allowed, which is why this route cannot take
+    // TournamentAccessGuard. Adding somebody else is a management action, so it
+    // requires access to this specific tournament rather than merely holding the
+    // ORGANIZER role.
+    if (req.user.id !== dto.userId) {
+      const access = await checkTournamentAccess(
+        this.prisma,
+        tournamentId,
+        req.user,
+      );
+      if (access === 'NOT_FOUND') {
+        throw new NotFoundException('Tournament not found');
+      }
+      if (access !== 'ALLOWED') {
+        throw new ForbiddenException(
+          'You do not have permission to manage this tournament',
+        );
+      }
     }
     return this.participantService.joinTournament(tournamentId, dto.userId);
   }
@@ -66,13 +88,22 @@ export class ParticipantController {
   }
 
   // DELETE /tournaments/:tournamentId/participants/leave
+  // Stays reachable without a login so guests can be removed at the registration
+  // desk, but the token is read when present so the service can tell a player
+  // removing themselves from a stranger removing them.
   @Delete('leave')
+  @UseGuards(OptionalJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   async leave(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
     @Body() dto: JoinTournamentDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.participantService.leaveTournament(tournamentId, dto.userId);
+    return this.participantService.leaveTournament(
+      tournamentId,
+      dto.userId,
+      req.user,
+    );
   }
 
   // GET /tournaments/:tournamentId/participants
@@ -85,13 +116,45 @@ export class ParticipantController {
 
   // PATCH /tournaments/:tournamentId/participants/:userId/seed
   @Patch(':userId/seed')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
   async updateSeed(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() dto: UpdateSeedDto,
   ) {
     return this.participantService.updateSeed(tournamentId, userId, dto.seed);
+  }
+
+  // POST /tournaments/:tournamentId/participants/:userId/forfeit
+  // The RolesGuard only proves the caller is an organizer at all; the service
+  // additionally checks that they own this specific tournament (or are ADMIN).
+  @Post(':userId/forfeit')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
+  @HttpCode(HttpStatus.OK)
+  async forfeit(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
+    await this.participantService.forfeitParticipant(tournamentId, userId);
+    return { success: true };
+  }
+
+  // POST /tournaments/:tournamentId/participants/:userId/replace
+  @Post(':userId/replace')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
+  @HttpCode(HttpStatus.OK)
+  async replace(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: ReplaceParticipantDto,
+  ) {
+    await this.participantService.replaceParticipant(tournamentId, userId, dto);
+    return { success: true };
   }
 }

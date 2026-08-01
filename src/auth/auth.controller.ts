@@ -96,7 +96,7 @@ export class AuthController {
     return this.authService.CreateGuestUser(username);
   }
 
-  // ITEM 2: Convert a guest to a registered pilot
+  // ITEM 2: Convert a guest to a registered account
   @Patch('convert-guest/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

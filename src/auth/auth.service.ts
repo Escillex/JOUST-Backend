@@ -1,3 +1,4 @@
+import { sessionCookieOptions } from '../config/security.config';
 import {
   BadRequestException,
   Injectable,
@@ -25,59 +26,10 @@ export class AuthService {
     private jwt: JwtService,
   ) {}
 
-  // ──────────────────────────────────────────────
-  // CRON: Cleanup orphaned guests every midnight
-  // ──────────────────────────────────────────────
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-  async handleGuestCleanup() {
-    const now = new Date();
-
-    // Mark expired guests
-    await this.prisma.user.updateMany({
-      where: {
-        isGuest: true,
-        isExpired: false,
-        expiresAt: { lt: now },
-      },
-      data: { isExpired: true },
-    });
-
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    // Find guests older than 7 days who only have participations in COMPLETED tournaments
-    const staleGuests = await this.prisma.user.findMany({
-      where: {
-        isGuest: true,
-        createdAt: { lt: sevenDaysAgo },
-        participatedTournaments: {
-          every: {
-            tournament: { status: 'COMPLETED' },
-          },
-        },
-      },
-      select: { id: true },
-    });
-
-    if (staleGuests.length > 0) {
-      for (const guest of staleGuests) {
-        await this.deleteUser(guest.id);
-      }
-    }
-  }
-
-  @Cron(CronExpression.EVERY_HOUR)
-  async handleHourlyExpiryCheck() {
-    const now = new Date();
-    await this.prisma.user.updateMany({
-      where: {
-        isGuest: true,
-        isExpired: false,
-        expiresAt: { lt: now },
-      },
-      data: { isExpired: true },
-    });
-  }
+  // Scheduled guest cleanup used to live here as two crons (midnight + hourly),
+  // duplicating two more in jobs/cleanGuests.ts. All four were consolidated into
+  // the single hourly CleanGuestsJob, which calls deleteUser() below for the
+  // stale-guest phase so name-burning still happens.
 
   // ──────────────────────────────────────────────
   // PURGE EXPIRED GUESTS (Triggered by Admin/Organizer actions)
@@ -170,12 +122,10 @@ export class AuthService {
       foundUser.avatarUrl,
     );
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: false,
-      maxAge: 3600000,
-    });
+    // `secure` is env-driven (7.6): hardcoding false shipped the session cookie
+    // over plain http in production. sameSite stays 'lax' — it is what stops a
+    // cross-site socket handshake carrying this cookie (see realtime.gateway).
+    res.cookie('token', token, sessionCookieOptions(3600000));
 
     return {
       message: 'You have Signed In successfully',
@@ -354,51 +304,59 @@ export class AuthService {
     });
     if (!user) throw new NotFoundException('User not found');
 
-    const displayName = user.username ?? 'Unknown Pilot';
+    const displayName = user.username ?? 'Deleted player';
 
-    // Step 1: Burn name into any match where they were player1
-    await this.prisma.match.updateMany({
-      where: { player1Id: targetId },
-      data: { p1Name: displayName, player1Id: null },
+    // All seven steps run as one transaction. The whole point of the ordering is
+    // that steps 1-6 preserve this player's name in finished brackets before
+    // step 7 destroys the account it came from. Half-applied, it produces
+    // matches showing a name with a null player id while the account still
+    // exists - a user who is a ghost in their own match history. Every step is a
+    // plain database write, so there is nothing that needs to happen outside.
+    await this.prisma.$transaction(async (tx) => {
+      // Step 1: Burn name into any match where they were player1
+      await tx.match.updateMany({
+        where: { player1Id: targetId },
+        data: { p1Name: displayName, player1Id: null },
+      });
+
+      // Step 2: Burn name into any match where they were player2
+      await tx.match.updateMany({
+        where: { player2Id: targetId },
+        data: { p2Name: displayName, player2Id: null },
+      });
+
+      // Step 3: Burn name into any match where they were the winner
+      await tx.match.updateMany({
+        where: { winnerId: targetId },
+        data: { winnerName: displayName, winnerId: null },
+      });
+
+      // Step 4: Burn name into any tournament where they were the winner
+      await tx.tournament.updateMany({
+        where: { winnerId: targetId },
+        data: { winnerName: displayName, winnerId: null } as any,
+      });
+
+      // Step 5: Handle tournaments they created (if any)
+      await tx.tournament.updateMany({
+        where: { createdById: targetId },
+        data: { createdById: null } as any,
+      });
+
+      // Step 6: Remove all tournament participations
+      await tx.tournamentParticipant.deleteMany({
+        where: { userId: targetId },
+      });
+
+      // Step 7: Delete the user
+      await tx.user.delete({ where: { id: targetId } });
     });
 
-    // Step 2: Burn name into any match where they were player2
-    await this.prisma.match.updateMany({
-      where: { player2Id: targetId },
-      data: { p2Name: displayName, player2Id: null },
-    });
-
-    // Step 3: Burn name into any match where they were the winner
-    await this.prisma.match.updateMany({
-      where: { winnerId: targetId },
-      data: { winnerName: displayName, winnerId: null },
-    });
-
-    // Step 4: Burn name into any tournament where they were the winner
-    await this.prisma.tournament.updateMany({
-      where: { winnerId: targetId },
-      data: { winnerName: displayName, winnerId: null } as any,
-    });
-
-    // Step 5: Handle tournaments they created (if any)
-    await this.prisma.tournament.updateMany({
-      where: { createdById: targetId },
-      data: { createdById: null } as any,
-    });
-
-    // Step 6: Remove all tournament participations
-    await this.prisma.tournamentParticipant.deleteMany({
-      where: { userId: targetId },
-    });
-
-    // Step 7: Delete the user
-    await this.prisma.user.delete({ where: { id: targetId } });
-
-    return { message: `Pilot "${displayName}" has been permanently removed.` };
+    return { message: `"${displayName}" has been permanently removed.` };
   }
 
   // ──────────────────────────────────────────────
-  // ITEM 2: CONVERT GUEST TO REGISTERED PILOT
+  // ITEM 2: CONVERT GUEST TO A REGISTERED ACCOUNT
   // ──────────────────────────────────────────────
   async convertGuest(guestId: string, dto: ConvertGuestDto) {
     const user = await this.prisma.user.findUnique({
@@ -406,7 +364,7 @@ export class AuthService {
     });
     if (!user) throw new NotFoundException('User not found');
     if (!user.isGuest)
-      throw new BadRequestException('User is already a registered pilot');
+      throw new BadRequestException('User already has a registered account');
 
     // Check for conflicts
     const conflict = await this.prisma.user.findFirst({
@@ -433,7 +391,7 @@ export class AuthService {
     });
 
     return {
-      message: 'Guest successfully converted to registered pilot',
+      message: 'Guest successfully converted to a registered account',
       user: upgraded,
     };
   }
@@ -501,6 +459,6 @@ export class AuthService {
       select: { id: true, username: true, email: true, roles: true },
     });
 
-    return { message: 'Pilot account created', user: created };
+    return { message: 'Account created', user: created };
   }
 }
