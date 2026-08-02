@@ -7,6 +7,7 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "setup": "bash setup.sh",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -103,5 +104,13 @@
     "setupFiles": [
       "<rootDir>/../test/jest-setup-env.js"
     ]
+  },
+  "allowScripts": {
+    "@nestjs/core@11.1.21": true,
+    "@prisma/engines@7.9.1": true,
+    "bcrypt@6.0.0": true,
+    "prisma@7.9.1": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.11.1": true
   }
 }

@@ -1,0 +1,13 @@
+# ── Backend, PROD mode ───────────────────────────────────────────────────────
+# Immutable built image (deploy/Dockerfile.prod), no source mount. Runs the
+# compiled entrypoint. Migrations are applied at container start.
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: deploy/Dockerfile.prod
+    # seed is guarded (won't overwrite an existing admin) — safe on every restart,
+    # and gives a fresh DB its first admin + built-in formats (deploy.md §2.3).
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && node dist/src/main.js"
+    expose:
+      - "4000"

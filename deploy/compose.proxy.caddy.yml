@@ -1,0 +1,24 @@
+# ── Reverse proxy: Caddy (containerized) ─────────────────────────────────────
+# Added when the proxy layer = caddy. Fronts both apps; the apps are then NOT
+# published to the host. Routes /socket.io/* straight to the backend (Next never
+# forwards it); all else to the frontend. The Caddyfile is rendered into the repo
+# root by setup.sh. Phase 4 (TLS) adds the 443 publish + real-cert directives.
+#
+# Host-port publishing lives in compose.proxy.caddy.publish.yml — included only
+# when NO tunnel fronts Caddy (with a tunnel, cloudflared reaches caddy:80 over
+# the compose network, so no host port is needed or wanted).
+services:
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - server
+      - new
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certs/state — persist so LE isn't re-hit on restart
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

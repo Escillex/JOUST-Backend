@@ -1,0 +1,15 @@
+# ── Exposure: cloudflared tunnel (containerized) ─────────────────────────────
+# Added when tunnel=cloudflared. Runs a token-based (remotely-managed) tunnel:
+# the public hostname and its ingress → service target live in the Cloudflare
+# dashboard; point that ingress at  http://caddy:80  (cloudflared resolves it on
+# this compose network). Nothing is published to the host — the tunnel is the
+# only ingress. The token is CF_TUNNEL_TOKEN in .env (secret, gitignored).
+#
+# Get the token:  cloudflared tunnel token <tunnel-name>
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
+    depends_on:
+      - caddy
+    restart: unless-stopped

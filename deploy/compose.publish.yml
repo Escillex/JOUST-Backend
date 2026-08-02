@@ -1,0 +1,13 @@
+# ── Publish app ports to the host ────────────────────────────────────────────
+# Included ONLY when no reverse proxy fronts the apps (proxy=none). With a proxy,
+# it reaches `server`/`new` over the compose network and these host ports stay
+# closed. The browser talks to the frontend on FRONTEND_PORT and — with no proxy
+# to route /socket.io/ — must reach the backend directly on BACKEND_PORT, so both
+# are published here.
+services:
+  server:
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${BACKEND_PORT:-4000}:4000"
+  new:
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${FRONTEND_PORT:-3000}:3000"

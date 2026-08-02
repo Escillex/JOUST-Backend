@@ -1,0 +1,25 @@
+# ── Base layer: Postgres + shared volumes ────────────────────────────────────
+# Deposited into the repo root by server/setup.sh. Every value comes from the
+# root .env that setup.sh generates — nothing machine-specific is hardcoded.
+# The db port is bound to 127.0.0.1 (host-only) on purpose; only the compose
+# network needs it, and a password-auth DB should not sit on the LAN.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-joust}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-joust}
+    ports:
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-joust}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:

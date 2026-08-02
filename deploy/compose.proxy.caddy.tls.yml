@@ -1,0 +1,12 @@
+# ── Publish Caddy for real TLS (VPS case) ────────────────────────────────────
+# Replaces compose.proxy.caddy.publish.yml when tls=on: publishes 80 (ACME
+# HTTP-01 challenge + HTTP→HTTPS redirect) and 443 (TCP + UDP for HTTP/3). The
+# rendered Caddyfile uses `$HOST { … }`, so Caddy provisions a real Let's Encrypt
+# cert automatically. The caddy_data volume (in compose.proxy.caddy.yml) persists
+# the cert across restarts so LE isn't re-hit.
+services:
+  caddy:
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"

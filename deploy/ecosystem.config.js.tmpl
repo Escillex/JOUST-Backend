@@ -1,0 +1,36 @@
+// PM2 process file — TEMPLATE. `setup.sh` (STACK=pm2) copies this to the repo
+// root and PM2 reads env from the root .env via the `env_file`-style block the
+// script injects. Runs the built artifacts (native/host stack, no Docker).
+//
+// Backend: compiled Nest entrypoint. Frontend: `next start` on the built .next
+// (works even with output:'standalone').  Both read PORT/host/origins from env.
+module.exports = {
+  apps: [
+    {
+      name: 'joust-api',
+      cwd: './server',
+      script: 'node',
+      args: 'dist/src/main.js',
+      env: {
+        NODE_ENV: '__NODE_ENV__',
+        PORT: '__BACKEND_PORT__',
+        DATABASE_URL: '__DATABASE_URL__',
+        JWT_SECRET: '__JWT_SECRET__',
+        ADMIN_PASSWORD: '__ADMIN_PASSWORD__',
+        ALLOWED_ORIGINS: '__ALLOWED_ORIGINS__',
+        SOCKET_ALLOWED_ORIGINS: '__SOCKET_ALLOWED_ORIGINS__',
+        HOST_IP: '__HOST_IP__',
+      },
+    },
+    {
+      name: 'joust-web',
+      cwd: './new',
+      script: 'npm',
+      args: 'run start -- -p __FRONTEND_PORT__ -H 0.0.0.0',
+      env: {
+        NODE_ENV: 'production',
+        BACKEND_URL: 'http://127.0.0.1:__BACKEND_PORT__',
+      },
+    },
+  ],
+};

@@ -1,0 +1,15 @@
+# ── Backend, DEV mode ────────────────────────────────────────────────────────
+# Mounted source + hot reload. Uses the existing dev Dockerfile. node_modules is
+# an anonymous volume so the container's install isn't shadowed by the host mount.
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    command: sh -c "npx prisma migrate deploy && npx prisma db seed && npm run start:dev"
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    expose:
+      - "4000"
