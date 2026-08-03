@@ -10,6 +10,13 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in .env}
+    # Force the http2 (TCP) transport. cloudflared defaults to QUIC (UDP/7844),
+    # which registers a connection through Docker's NAT but then can't sustain
+    # datagrams (MTU) — connections flap with "timeout: no recent network
+    # activity" and the edge returns 503 because requests never reach the
+    # connector. http2 is TCP and works reliably in a container.
+    environment:
+      - TUNNEL_TRANSPORT_PROTOCOL=http2
     depends_on:
       - caddy
     restart: unless-stopped

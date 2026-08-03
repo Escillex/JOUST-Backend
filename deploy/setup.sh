@@ -120,7 +120,19 @@ CF_TUNNEL_TOKEN=$(existing_env CF_TUNNEL_TOKEN)
 TUNNEL_NAME=$(existing_env TUNNEL_NAME)
 if [ "$TUNNEL" = cloudflared ]; then
 	if [ "$RUNTIME" = containerized ]; then
-		ask CF_TUNNEL_TOKEN "cloudflared tunnel token (from: cloudflared tunnel token <name>)" "${CF_TUNNEL_TOKEN:-}"
+		# Ask for the tunnel NAME and fetch its token automatically — friendlier
+		# than pasting a long opaque token (and avoids the easy mistake of typing
+		# the name where the token goes). Falls back to a manual paste if cloudflared
+		# can't fetch it (not installed / not logged in on this box).
+		ask TUNNEL_NAME "cloudflared tunnel name (its token is fetched for you)" "${TUNNEL_NAME:-prodjoust}"
+		tok=""
+		[ -n "$TUNNEL_NAME" ] && have cloudflared && tok=$(cloudflared tunnel token "$TUNNEL_NAME" 2>/dev/null | tr -d '[:space:]')
+		if [ -n "$tok" ] && [ "${#tok}" -ge 40 ]; then
+			CF_TUNNEL_TOKEN=$tok; say "  ${c_dim}fetched token for tunnel '$TUNNEL_NAME'${c_rst}"
+		else
+			warn "  couldn't fetch a token for '$TUNNEL_NAME' (cloudflared missing / not logged in / no such tunnel)."
+			ask CF_TUNNEL_TOKEN "paste the tunnel token manually (from: cloudflared tunnel token <name>)" "${CF_TUNNEL_TOKEN:-}"
+		fi
 		[ -z "$CF_TUNNEL_TOKEN" ] && die "a containerized cloudflared tunnel needs a token."
 	else
 		ask TUNNEL_NAME "cloudflared tunnel name (you've run: cloudflared tunnel create <name>)" "${TUNNEL_NAME:-joust}"
@@ -436,6 +448,31 @@ sync_db_password() {
 	fi
 }
 
+# Everyday "how to run & manage it" summary — printed at the END of the docker
+# path whether we started it now or the user deferred. Includes the host-tunnel
+# run/persist commands and the two manual Cloudflare steps that are easy to miss
+# (DNS route + Always-Use-HTTPS), since neither can be scripted from here.
+print_run_help() {
+	banner "How to run & manage it  (from $ROOT)"
+	say "  start   : ${c_bold}docker compose up -d${c_rst}"
+	say "  stop    : ${c_bold}docker compose down${c_rst}   ${c_dim}(add -v to also wipe the DB)${c_rst}"
+	say "  restart : ${c_bold}docker compose restart${c_rst}"
+	say "  logs    : ${c_bold}docker compose logs -f${c_rst}"
+	say "  open    : ${c_bold}$url${c_rst}"
+	if [ "$RUNTIME" = host ] && [ "$TUNNEL" = cloudflared ]; then
+		local cfg="$HOME/.cloudflared/joust-deploy.yml"
+		say ""
+		say "  ${c_bold}Cloudflare tunnel (host):${c_rst}"
+		say "    run it   : ${c_bold}cloudflared --config $cfg tunnel run $TUNNEL_NAME${c_rst}"
+		say "    keep up  : ${c_bold}sudo cloudflared --config $cfg service install && sudo systemctl enable --now cloudflared${c_rst}"
+		say "    ${c_dim}first-time DNS (once):${c_rst} ${c_bold}cloudflared tunnel route dns $TUNNEL_NAME $HOST_IP${c_rst}"
+		say "    ${c_dim}if that says it already routes to another tunnel, repoint the${c_rst}"
+		say "    ${c_dim}$HOST_IP CNAME in the Cloudflare DNS tab to this tunnel's <id>.cfargotunnel.com.${c_rst}"
+		say "    ${c_dim}Cloudflare → SSL/TLS: turn on 'Always Use HTTPS' + mode Full (else login cookies drop).${c_rst}"
+	fi
+	[ "$SERVICE" = on ] && say "  boot    : ${c_bold}sudo cp joust.service /etc/systemd/system/ && sudo systemctl enable --now joust.service${c_rst}"
+}
+
 # ── assemble & (optionally) launch ───────────────────────────────────────────
 if [ "$STACK" = docker ]; then
 	write_env
@@ -460,8 +497,15 @@ if [ "$STACK" = docker ]; then
 	say "  ${c_dim}COMPOSE_FILE=$(compose_list)${c_rst}"
 	[ "$RUNTIME" = host ] && say "  ${c_dim}(host runtime — Caddy vhost + cloudflared config are written on start)${c_rst}"
 	if [ "$TUNNEL" = cloudflared ] && [ "$RUNTIME" = containerized ]; then
-		say "  ${c_bold}Cloudflare dashboard (manual):${c_rst} point the tunnel's public hostname"
-		say "  ($HOST_IP) ingress at ${c_bold}http://caddy:80${c_rst}, and add an Access policy to lock it."
+		say "  ${c_bold}Cloudflare dashboard — REQUIRED for a container (token) tunnel:${c_rst}"
+		say "    A token tunnel is ${c_bold}dashboard-managed${c_rst}: its routing lives in Cloudflare, not a"
+		say "    local file. In ${c_bold}Zero Trust → Networks → Tunnels → $TUNNEL_NAME${c_rst} add a"
+		say "    ${c_bold}Public Hostname${c_rst}: $HOST_IP · type ${c_bold}HTTP${c_rst} · URL ${c_bold}caddy:80${c_rst} (also"
+		say "    creates the DNS record). ${c_bold}Without it every request is 503.${c_rst}"
+		say "    ${c_dim}A CLI-created tunnel (cloudflared tunnel create) must first be MIGRATED to${c_rst}"
+		say "    ${c_dim}dashboard-managed there — otherwise it has no ingress. Then: docker compose restart cloudflared.${c_rst}"
+		say "    ${c_dim}Gating with an Access policy is optional (free ≤50 users; skip it to keep the site public + free).${c_rst}"
+		say "  ${c_bold}Also:${c_rst} Cloudflare → SSL/TLS → turn on ${c_bold}Always Use HTTPS${c_rst} + mode ${c_bold}Full${c_rst} (else login cookies drop)."
 	fi
 	if [ "$TLS" = on ]; then
 		say "  ${c_bold}TLS:${c_rst} point $HOST_IP DNS (A/AAAA) at this box and open ports 80+443."
@@ -485,9 +529,10 @@ if [ "$STACK" = docker ]; then
 		fi
 		printf '%s✅ up:%s  %s\n' "$c_grn" "$c_rst" "$url"
 	else
-		say "  Later: ${c_bold}docker compose up -d --build${c_rst} (in $ROOT)"
-		[ "$RUNTIME" = host ] && say "  ${c_dim}(host Caddy/cloudflared are written on start, not now)${c_rst}"
+		say "  Deferred — build & start it yourself with the commands below."
+		[ "$RUNTIME" = host ] && say "  ${c_dim}(host Caddy/cloudflared are written/reloaded when you next run ./setup.sh and start)${c_rst}"
 	fi
+	print_run_help
 else
 	# STACK=pm2 (native/host). Requires pm2 + a host toolchain. See notes below.
 	write_env
