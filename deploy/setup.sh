@@ -13,13 +13,16 @@
 #   TLS (Let's Encrypt) · systemd boot-service. The old local/cloudflared/vps
 #   "modes" are just compositions of these answers.
 # ─────────────────────────────────────────────────────────────────────────────
-set -eu   # NB: no `pipefail` — head-terminated pipes below would SIGPIPE upstream
+set -eu   # NB: no `pipefail` — early-exit pipes (grep -m1, awk … exit) mustn't fail the run
 cd "$(dirname "$0")"
 ROOT="$PWD"
 
 c_bold=$'\033[1m'; c_dim=$'\033[2m'; c_grn=$'\033[32m'; c_red=$'\033[31m'; c_rst=$'\033[0m'
-say()  { printf '%s\n' "$*"; }
-head() { printf '\n%s%s%s\n' "$c_bold" "$*" "$c_rst"; }
+say()    { printf '%s\n' "$*"; }
+# NB: named `banner`, NOT `head` — a `head()` function shadows the coreutil, so
+# `head -c`/`head -n` in pipelines silently call this printer instead (that bug
+# once wrote a bold "-1" control sequence into the cloudflared config).
+banner() { printf '\n%s%s%s\n' "$c_bold" "$*" "$c_rst"; }
 die()  { printf '%s%s%s\n' "$c_red" "$*" "$c_rst" >&2; exit 1; }
 warn() { printf '%s%s%s\n' "$c_red" "$*" "$c_rst" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -78,7 +81,7 @@ choose() {
 # read a value from an existing .env (grep -m1 → no SIGPIPE; || true → set -e safe)
 existing_env() { [ -f .env ] || return 0; grep -m1 -E "^$1=" .env | cut -d= -f2- | tr -d '"' || true; }
 
-head "JOUST deploy setup"
+banner "JOUST deploy setup"
 choose STACK "Stack — how do the apps run?" docker docker pm2
 choose MODE  "Mode"                          prod   prod   dev
 ask    HOST  "Public host (blank = localhost, for LAN/local use)" "localhost"
@@ -429,7 +432,7 @@ if [ "$STACK" = docker ]; then
 		url="http://$HOST_IP$([ "$PROXY_HTTP_PORT" != 80 ] && echo ":$PROXY_HTTP_PORT")"
 		probe="http://127.0.0.1:$PROXY_HTTP_PORT/api/backend/tournaments"
 	fi
-	head "docker stack ready"
+	banner "docker stack ready"
 	say "  ${c_dim}COMPOSE_FILE=$(compose_list)${c_rst}"
 	[ "$RUNTIME" = host ] && say "  ${c_dim}(host runtime — Caddy vhost + cloudflared config are written on start)${c_rst}"
 	if [ "$TUNNEL" = cloudflared ] && [ "$RUNTIME" = containerized ]; then
@@ -471,7 +474,7 @@ else
 	    -e "s|__ALLOWED_ORIGINS__|$ORIGINS|; s|__SOCKET_ALLOWED_ORIGINS__|$ORIGINS|; s|__HOST_IP__|$HOST_IP|" \
 	    -e "s|__SERVER_DIR__|$JOUST_SERVER_DIR|; s|__FRONTEND_DIR__|$JOUST_FRONTEND_DIR|" \
 	    "$JOUST_SERVER_DIR/deploy/ecosystem.config.js.tmpl" > ecosystem.config.js
-	head "pm2 stack scaffolded"
+	banner "pm2 stack scaffolded"
 	say "  Wrote ecosystem.config.js. Native/host build needs, per app: npm ci, npm run build,"
 	say "  a running Postgres, and pm2 installed. (On npm 12 hosts you must first"
 	say "  'npm install-scripts approve bcrypt sharp …' so native modules build.)"
