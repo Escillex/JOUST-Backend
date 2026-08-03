@@ -412,6 +412,30 @@ ENV
 	chmod 600 .env
 }
 
+# Reconcile the Postgres role password with .env. Postgres sets a role's password
+# ONLY at first init of the pgdata volume — so if that named volume survives from
+# an earlier run, or from an earlier .env with a different secret (.env is
+# gitignored, so a fresh clone regenerates every secret), the server can't auth
+# and crash-loops on Prisma "P1000: authentication failed". We resync idempotently
+# over Postgres's LOCAL trust socket (no password needed): a fresh volume makes it
+# a harmless no-op, a stale volume gets fixed. PG_PW is alphanumeric, so it is safe
+# inside the single-quoted SQL literal.
+sync_db_password() {
+	printf '  syncing db credentials'
+	local i=0
+	until docker compose exec -T db pg_isready -U joust >/dev/null 2>&1; do
+		i=$((i+1)); [ "$i" -gt 30 ] && { warn " (db not ready — skipped; server may hit P1000)"; return; }
+		printf '.'; sleep 2
+	done
+	if docker compose exec -T db psql -U joust -d joust -v ON_ERROR_STOP=1 \
+			-c "ALTER USER joust WITH PASSWORD '$PG_PW';" >/dev/null 2>&1; then
+		say " ok"
+		docker compose restart server >/dev/null 2>&1 || true   # retry with good creds
+	else
+		warn " (could not sync — inspect: docker compose logs db)"
+	fi
+}
+
 # ── assemble & (optionally) launch ───────────────────────────────────────────
 if [ "$STACK" = docker ]; then
 	write_env
@@ -448,6 +472,7 @@ if [ "$STACK" = docker ]; then
 	ask GO "Build & start now with 'docker compose up -d --build'? (y/N)" "N"
 	if [[ "$GO" =~ ^[Yy] ]]; then
 		docker compose up -d --build
+		sync_db_password   # ensure the DB role password matches .env (stale-volume guard)
 		if [ "$RUNTIME" = host ]; then
 			render_host_caddy
 			[ "$TUNNEL" = cloudflared ] && render_host_cloudflared
