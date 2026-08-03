@@ -30,10 +30,26 @@ randb64() {
 	else od -An -tx1 -N "$1" /dev/urandom | tr -d ' \n'; fi
 }
 
-# ── preflight: both app setups must have run ─────────────────────────────────
-[ -f docker-compose.base.yml ] || die "docker-compose.base.yml missing — run ./server/setup.sh first."
-[ -f compose.server.yml ]      || die "compose.server.yml missing — run ./server/setup.sh first."
-[ -f compose.new.yml ]         || die "compose.new.yml missing — run ./new/setup.sh first."
+# ── locate the two app repos ─────────────────────────────────────────────────
+# The compose fragments live INSIDE each repo's deploy/ dir (not copied here), so
+# a bare "clone backend + clone frontend side by side" is enough. Folder names are
+# arbitrary — a GitHub clone is JOUST-Backend / JOUST-Frontend, a dev checkout is
+# server / new — so we identify each repo by a marker file unique to it rather
+# than by name. All host paths handed to compose are ABSOLUTE (see .env below),
+# which is what lets the fragments sit outside this deploy root.
+find_repo() {          # $1 = marker file (relative to a candidate repo dir)
+	local d
+	for d in */; do [ -f "$d$1" ] && { printf '%s' "$ROOT/${d%/}"; return 0; }; done
+	return 1
+}
+JOUST_SERVER_DIR=$(find_repo deploy/compose.server.yml) \
+	|| die "backend repo not found beside this dir (looked for */deploy/compose.server.yml). Clone it here and run its 'npm run setup'."
+JOUST_FRONTEND_DIR=$(find_repo deploy/compose.new.yml) \
+	|| die "frontend repo not found beside this dir (looked for */deploy/compose.new.yml). Clone it here and run its 'npm run setup'."
+JOUST_IMAGES_DIR="$ROOT/images"
+mkdir -p "$JOUST_IMAGES_DIR"   # uploads bind-mount target; persists across restarts
+[ -f "$JOUST_SERVER_DIR/deploy/docker-compose.base.yml" ] \
+	|| die "$JOUST_SERVER_DIR/deploy/docker-compose.base.yml missing — is the backend repo intact?"
 
 # ── prompt helpers ───────────────────────────────────────────────────────────
 # ask VAR "Question" "default"
@@ -180,23 +196,30 @@ else
 fi
 
 # ── compose file list (COMPOSE_FILE lets `docker compose` auto-merge them) ────
+# Fragments are referenced IN PLACE by absolute path inside each repo's deploy/
+# dir — nothing is copied into the deploy root. `docker compose` resolves each -f
+# relative to the working dir (root), and every host path inside the fragments is
+# an absolute ${JOUST_*_DIR} var, so the split location is invisible to the build.
+# All shared/base/proxy/tunnel fragments live in the backend repo; only the two
+# compose.new.* fragments live in the frontend repo.
 compose_list() {
-	local f="docker-compose.base.yml:compose.server.yml:compose.server.$MODE.yml:compose.new.yml:compose.new.$MODE.yml"
+	local s="$JOUST_SERVER_DIR/deploy" n="$JOUST_FRONTEND_DIR/deploy"
+	local f="$s/docker-compose.base.yml:$s/compose.server.yml:$s/compose.server.$MODE.yml:$n/compose.new.yml:$n/compose.new.$MODE.yml"
 	if [ "$PROXY" = none ] || [ "$RUNTIME" = host ]; then
 		# apps publish their ports: all-interfaces for `none`, loopback for host
 		# runtime (a host Caddy proxies to them). No containerized proxy/tunnel.
-		f="$f:compose.publish.yml"
+		f="$f:$s/compose.publish.yml"
 	else
-		f="$f:compose.proxy.$PROXY.yml"                   # a container proxy fronts them
+		f="$f:$s/compose.proxy.$PROXY.yml"                # a container proxy fronts them
 		# publish the proxy's host port(s) only when a tunnel ISN'T fronting it:
 		# tls → 80+443 (real cert), else → 80 only
 		if [ "$TUNNEL" = none ]; then
-			if [ "$TLS" = on ]; then f="$f:compose.proxy.$PROXY.tls.yml"
-			else f="$f:compose.proxy.$PROXY.publish.yml"; fi
+			if [ "$TLS" = on ]; then f="$f:$s/compose.proxy.$PROXY.tls.yml"
+			else f="$f:$s/compose.proxy.$PROXY.publish.yml"; fi
 		fi
 	fi
 	# containerized tunnel only; a host tunnel runs outside compose
-	[ "$TUNNEL" != none ] && [ "$RUNTIME" != host ] && f="$f:compose.tunnel.$TUNNEL.yml"
+	[ "$TUNNEL" != none ] && [ "$RUNTIME" != host ] && f="$f:$s/compose.tunnel.$TUNNEL.yml"
 	printf '%s' "$f"
 }
 
@@ -345,6 +368,14 @@ write_env() {
 COMPOSE_PROJECT_NAME=joust
 COMPOSE_FILE=$(compose_list)
 
+# Absolute paths to the two app repos + the uploads dir. The compose fragments
+# live inside the repos and reference these, so build contexts / volume mounts
+# resolve correctly no matter what the repo folders are named or where they sit.
+JOUST_SERVER_DIR=$JOUST_SERVER_DIR
+JOUST_FRONTEND_DIR=$JOUST_FRONTEND_DIR
+JOUST_IMAGES_DIR=$JOUST_IMAGES_DIR
+JOUST_ROOT_DIR=$ROOT
+
 UID=$(id -u)
 GID=$(id -g)
 
@@ -429,11 +460,14 @@ if [ "$STACK" = docker ]; then
 else
 	# STACK=pm2 (native/host). Requires pm2 + a host toolchain. See notes below.
 	write_env
+	# Template lives in the backend repo (not copied here); render it into root
+	# with absolute app cwds so pm2 finds the built artifacts regardless of names.
 	sed -e "s|__NODE_ENV__|$NODE_ENV|; s|__BACKEND_PORT__|$BACKEND_PORT|; s|__FRONTEND_PORT__|$FRONTEND_PORT|" \
 	    -e "s|__DATABASE_URL__|postgresql://joust:$PG_PW@localhost:5433/joust?schema=public|" \
 	    -e "s|__JWT_SECRET__|$JWT_SECRET|; s|__ADMIN_PASSWORD__|$ADMIN_PW|" \
 	    -e "s|__ALLOWED_ORIGINS__|$ORIGINS|; s|__SOCKET_ALLOWED_ORIGINS__|$ORIGINS|; s|__HOST_IP__|$HOST_IP|" \
-	    ecosystem.config.js.tmpl > ecosystem.config.js
+	    -e "s|__SERVER_DIR__|$JOUST_SERVER_DIR|; s|__FRONTEND_DIR__|$JOUST_FRONTEND_DIR|" \
+	    "$JOUST_SERVER_DIR/deploy/ecosystem.config.js.tmpl" > ecosystem.config.js
 	head "pm2 stack scaffolded"
 	say "  Wrote ecosystem.config.js. Native/host build needs, per app: npm ci, npm run build,"
 	say "  a running Postgres, and pm2 installed. (On npm 12 hosts you must first"

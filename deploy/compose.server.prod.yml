@@ -4,7 +4,9 @@
 services:
   server:
     build:
-      context: ./server
+      # Absolute var (set in .env by setup.sh) → folder-name-agnostic; dockerfile
+      # is resolved relative to this context, i.e. <repo>/deploy/Dockerfile.prod.
+      context: ${JOUST_SERVER_DIR:-./server}
       dockerfile: deploy/Dockerfile.prod
     # seed is guarded (won't overwrite an existing admin) — safe on every restart,
     # and gives a fresh DB its first admin + built-in formats (deploy.md §2.3).

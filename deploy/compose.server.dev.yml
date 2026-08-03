@@ -4,12 +4,14 @@
 services:
   server:
     build:
-      context: ./server
+      # Absolute var (set in .env by setup.sh) → the fragment can live inside the
+      # backend repo whatever its folder is named (JOUST-Backend, server, …).
+      context: ${JOUST_SERVER_DIR:-./server}
       dockerfile: Dockerfile
     command: sh -c "npx prisma migrate deploy && npx prisma db seed && npm run start:dev"
     user: "${UID:-1000}:${GID:-1000}"
     volumes:
-      - ./server:/app
+      - ${JOUST_SERVER_DIR:-./server}:/app
       - /app/node_modules
     expose:
       - "4000"

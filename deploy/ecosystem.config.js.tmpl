@@ -8,7 +8,7 @@ module.exports = {
   apps: [
     {
       name: 'joust-api',
-      cwd: './server',
+      cwd: '__SERVER_DIR__',
       script: 'node',
       args: 'dist/src/main.js',
       env: {
@@ -24,7 +24,7 @@ module.exports = {
     },
     {
       name: 'joust-web',
-      cwd: './new',
+      cwd: '__FRONTEND_DIR__',
       script: 'npm',
       args: 'run start -- -p __FRONTEND_PORT__ -H 0.0.0.0',
       env: {

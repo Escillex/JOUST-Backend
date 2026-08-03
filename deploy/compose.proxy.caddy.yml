@@ -14,7 +14,9 @@ services:
       - server
       - new
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # setup.sh renders the Caddyfile into the deploy root; mount it by absolute
+      # path (this fragment lives in the backend repo, not the deploy root).
+      - ${JOUST_ROOT_DIR:-.}/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data      # certs/state — persist so LE isn't re-hit on restart
       - caddy_config:/config
     restart: unless-stopped

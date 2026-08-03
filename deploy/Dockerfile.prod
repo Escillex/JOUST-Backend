@@ -1,5 +1,5 @@
 # ── Backend production image (multi-stage) ───────────────────────────────────
-# Build context is the server repo root (compose sets `context: ./server`).
+# Build context is the backend repo root (compose sets `context: ${JOUST_SERVER_DIR}`).
 # node:22 ships npm 10, which runs install scripts normally — so bcrypt/sharp
 # native builds happen here (unlike the host's npm 12, which blocks them).
 FROM node:22-alpine AS build

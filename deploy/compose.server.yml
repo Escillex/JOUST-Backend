@@ -18,9 +18,12 @@ services:
       - SOCKET_ALLOWED_ORIGINS=${SOCKET_ALLOWED_ORIGINS:-}
       - HOST_IP=${HOST_IP:-localhost}
     # main.ts serves uploads from <cwd>/../images; the container runs in /app so
-    # that resolves to /images. Bind the repo-root images/ dir there.
+    # that resolves to /images. Bind the deploy-root images/ dir there. The path
+    # is an ABSOLUTE var (set in .env by setup.sh) so the fragment can live inside
+    # the backend repo — a relative ./images would resolve against THIS file's
+    # dir, not the deploy root. Fallback keeps an in-root checkout working.
     volumes:
-      - ./images:/images
+      - ${JOUST_IMAGES_DIR:-./images}:/images
     depends_on:
       db:
         condition: service_healthy
