@@ -25,6 +25,7 @@ export class TournamentFormatService {
       orderBy: [{ isBuiltin: 'desc' }, { createdAt: 'asc' }],
       include: {
         createdBy: { select: { id: true, username: true } },
+        game: { select: { id: true, name: true, iconUrl: true } },
         _count: { select: { tournaments: true } },
       },
     });
@@ -42,6 +43,7 @@ export class TournamentFormatService {
       where: { id },
       include: {
         createdBy: { select: { id: true, username: true } },
+        game: { select: { id: true, name: true, iconUrl: true } },
         _count: { select: { tournaments: true } },
       },
     });
@@ -62,6 +64,7 @@ export class TournamentFormatService {
         name: dto.name,
         description: dto.description ?? null,
         gameName: dto.gameName ?? null,
+        gameId: dto.gameId ?? null,
         system: dto.system,
         config: dto.config,
         isBuiltin: false, // admins cannot set isBuiltin via API
@@ -102,6 +105,7 @@ export class TournamentFormatService {
         ...(dto.name && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.gameName !== undefined && { gameName: dto.gameName }),
+        ...(dto.gameId !== undefined && { gameId: dto.gameId }),
         ...(dto.system && { system: dto.system }),
         ...(dto.config && { config: dto.config }),
       },

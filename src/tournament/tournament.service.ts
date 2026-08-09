@@ -210,6 +210,21 @@ export class TournamentService {
     if (!fmt)
       throw new BadRequestException('Invalid formatId — format not found');
 
+    // Resolve the game. Every tournament has exactly one (todo.md §5): the
+    // organizer's explicit choice wins, else the format's default game, else the
+    // built-in "General". An explicit choice is validated; General is the floor.
+    let gameId: string | null = dto.gameId ?? fmt.gameId ?? null;
+    if (dto.gameId) {
+      const g = await this.prisma.game.findUnique({ where: { id: dto.gameId } });
+      if (!g) throw new BadRequestException('Invalid gameId — game not found');
+    }
+    if (!gameId) {
+      const general = await this.prisma.game.findUnique({
+        where: { name: 'General' },
+      });
+      gameId = general?.id ?? null;
+    }
+
     const status = dto.startNow
       ? TournamentStatus.OPEN
       : TournamentStatus.UPCOMING;
@@ -233,6 +248,7 @@ export class TournamentService {
           status,
           createdById: dto.createdById,
           formatId: dto.formatId,
+          gameId,
           slug,
           // A null config on create simply means "no override", so store
           // nothing. Prisma's create input does not accept a plain null
@@ -244,6 +260,7 @@ export class TournamentService {
             select: { id: true, username: true, roles: true, email: true },
           },
           format: true,
+          game: true,
         },
       });
     } catch (e) {
@@ -271,6 +288,11 @@ export class TournamentService {
         throw new BadRequestException('Invalid formatId — format not found');
     }
 
+    if (dto.gameId) {
+      const g = await this.prisma.game.findUnique({ where: { id: dto.gameId } });
+      if (!g) throw new BadRequestException('Invalid gameId — game not found');
+    }
+
     const { createdById, date, startNow, config, slug, ...rest } = dto;
 
     try {
@@ -287,11 +309,30 @@ export class TournamentService {
         },
         include: {
           format: true,
+          game: true,
         },
       });
     } catch (e) {
       TournamentService.rethrowSlugConflict(e);
     }
+  }
+
+  /** Reassign a tournament's game — allowed at any status (unlike updateTournament,
+   *  which is OPEN-only). Lets staff attach a just-created game to a tournament that
+   *  has been running under "General" (todo.md §5). Past awards already credited to
+   *  the old game are not retroactively moved here; the dev backfill can rebuild
+   *  per-game stats from history if a correction is wanted. */
+  async reassignGame(id: string, gameId: string) {
+    const tournament = await this.prisma.tournament.findUnique({ where: { id } });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+    const game = await this.prisma.game.findUnique({ where: { id: gameId } });
+    if (!game) throw new BadRequestException('Invalid gameId — game not found');
+
+    return this.prisma.tournament.update({
+      where: { id },
+      data: { gameId },
+      include: { format: true, game: true },
+    });
   }
 
   // ─── BRACKET PREVIEW ─────────────────────────────────────────
@@ -652,9 +693,16 @@ export class TournamentService {
     // neither of which this method changes.
     const tournamentWithFormat = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
-      include: { format: true },
+      include: { format: true, game: { select: { name: true } } },
     });
-    const gameName = tournamentWithFormat?.format?.gameName ?? null;
+    // Per-game credit routes by the tournament's own game (todo.md §5) — every
+    // tournament has one (the "General" floor), so unlike the old format-derived
+    // path this is (almost) never null. The format.gameName fallback only covers
+    // legacy rows not yet backfilled to a game.
+    const gameName =
+      tournamentWithFormat?.game?.name ??
+      tournamentWithFormat?.format?.gameName ??
+      null;
 
     const rawConfig = effectiveRawConfig(tournamentWithFormat);
     const config = resolveConfig(rawConfig);
@@ -962,6 +1010,7 @@ export class TournamentService {
         createdBy: { select: { id: true, username: true, email: true } },
         winner: { select: { id: true, username: true, isGuest: true } },
         format: true,
+        game: { select: { id: true, name: true, iconUrl: true } },
         participants: {
           include: {
             user: {
@@ -991,6 +1040,7 @@ export class TournamentService {
         createdBy: { select: { id: true, username: true, email: true } },
         winner: { select: { id: true, username: true, isGuest: true } },
         format: true,
+        game: { select: { id: true, name: true, iconUrl: true } },
         participants: {
           include: {
             user: {
@@ -1113,6 +1163,7 @@ export class TournamentService {
       include: {
         winner: { select: { username: true, isGuest: true } },
         format: true,
+        game: { select: { id: true, name: true, iconUrl: true } },
         participants: true,
         rounds: {
           orderBy: { roundNumber: 'desc' },

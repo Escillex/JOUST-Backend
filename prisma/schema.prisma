@@ -55,6 +55,13 @@ enum OrganizerInviteStatus {
   DECLINED
 }
 
+// Lifecycle of an organizer's request for a game not yet in the catalog (todo.md §5).
+enum GameRequestStatus {
+  PENDING // awaiting an admin
+  RESOLVED // an admin created/assigned the game
+  DISMISSED // an admin declined it
+}
+
 // One entry per thing that happened to a specific user. The type drives the icon
 // and styling on the frontend, so it is an enum rather than a free string.
 enum NotificationType {
@@ -68,6 +75,9 @@ enum NotificationType {
   PARTICIPANT_FORFEITED
   ORGANIZER_INVITED
   GUEST_CLEANUP_SCHEDULED
+  // An organizer asked for a game that is not yet in the catalog. Fanned out to
+  // admins, who create the game and reassign the tournament (see todo.md §5).
+  GAME_REQUESTED
 }
 
 // ─── MODELS ──────────────────────────────────────────────────────
@@ -85,12 +95,14 @@ model User {
   updateAt       DateTime  @updatedAt()
 
   tournamentsCreated      Tournament[]
-  wonTournaments          Tournament[]           @relation("TournamentWinner")
+  wonTournaments          Tournament[]            @relation("TournamentWinner")
   participatedTournaments TournamentParticipant[]
-  matchesAsPlayer1        Match[]                @relation("Player1")
-  matchesAsPlayer2        Match[]                @relation("Player2")
-  wonMatches              Match[]                @relation("Winner")
+  matchesAsPlayer1        Match[]                 @relation("Player1")
+  matchesAsPlayer2        Match[]                 @relation("Player2")
+  wonMatches              Match[]                 @relation("Winner")
   createdFormats          TournamentFormat[]
+  createdGames            Game[]
+  gameRequests            GameRequest[]
 
   // NEW: global stats back-relation
   globalStats UserGlobalStats?
@@ -126,13 +138,74 @@ model Notification {
   @@index([userId, createdAt])
 }
 
+// ─── GAME (Admin-managed catalog — the thing being played) ────────
+//
+// A Game is first-class taxonomy, distinct from the tournament STRUCTURE
+// (TournamentSystem) and from a FORMAT preset. Every Tournament has a game; the
+// built-in "General" game is the required floor (todo.md §5). Only admins create
+// games — organizers request one, which fans out as a GAME_REQUESTED notification.
+model Game {
+  id          String  @id @default(uuid())
+  name        String  @unique // "Chess", "Beyblade", "General"
+  slug        String? @unique // optional URL-friendly key
+  description String?
+  iconUrl     String? // path: /uploads/assets/<uuid>.webp
+
+  // Default tracking mode + rule defaults a format/tournament of this game can
+  // inherit. Metadata for now (routing reads the resolved tournament config);
+  // wired into config resolution in a later phase.
+  trackingMode  GameTrackingMode @default(POINTS)
+  defaultConfig Json?
+
+  // The built-in "General" game cannot be deleted (mirrors isBuiltin on formats).
+  isBuiltin Boolean @default(false)
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  tournaments Tournament[]
+  formats     TournamentFormat[]
+  userStats   UserGameStats[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// An organizer's request for a game not yet in the catalog (todo.md §5). A durable
+// queue so admins can work through requests, distinct from the fire-and-forget
+// GAME_REQUESTED notification. Resolving one typically means creating the game and
+// reassigning the originating tournament onto it.
+model GameRequest {
+  id     String            @id @default(uuid())
+  name   String // the requested game name
+  note   String?
+  status GameRequestStatus @default(PENDING)
+
+  // The tournament that prompted the request; it runs under "General" until the
+  // request is resolved. Kept if the tournament is later deleted (SetNull).
+  tournamentId String?
+  tournament   Tournament? @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
+
+  requestedById String?
+  requestedBy   User?   @relation(fields: [requestedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+}
+
 // ─── TOURNAMENT FORMAT (Admin-managed named rulesets) ─────────────
 
 model TournamentFormat {
   id          String           @id @default(uuid())
   name        String           @unique // "Beyblade Standard", "Pickleball Open"
   description String?
-  gameName    String? // Dynamic game association (e.g. "Pickleball")
+  gameName    String? // DEPRECATED — backfill source for gameId; drop after migration
+  // Optional default game this preset pre-fills at tournament creation. NOT the
+  // source of truth — the tournament's own game wins (todo.md §5).
+  gameId      String?
+  game        Game?            @relation(fields: [gameId], references: [id], onDelete: SetNull)
   system      TournamentSystem // the engine to run
   config      Json // all rules as JSON blob
   isBuiltin   Boolean          @default(false) // builtin formats cannot be deleted
@@ -157,7 +230,7 @@ model Tournament {
   entranceFee Float?
   venue       String?
   date        DateTime?
-  inviteToken String           @default(uuid()) @unique
+  inviteToken String           @unique @default(uuid())
   // Short human-readable invite name (e.g. "summer-cup"). The long
   // inviteToken UUID keeps working as a fallback, so old links never break.
   slug        String?          @unique
@@ -167,6 +240,14 @@ model Tournament {
   // Format reference — points to admin-defined named ruleset
   formatId String?
   format   TournamentFormat? @relation(fields: [formatId], references: [id], onDelete: SetNull)
+
+  // The game being played. Application-required (every tournament has one; the
+  // service defaults it to the built-in "General"). Kept nullable at the DB level
+  // because the default is a looked-up row, not a literal — the SetNull backstop
+  // only fires if a game is force-deleted; the service reassigns to General first
+  // (todo.md §5). Tighten to NOT NULL in a follow-up once backfill is proven.
+  gameId String?
+  game   Game?   @relation(fields: [gameId], references: [id], onDelete: SetNull)
 
   // Per-tournament rules override; when set, fully replaces format.config
   config Json?
@@ -183,6 +264,7 @@ model Tournament {
   participants TournamentParticipant[]
   organizers   TournamentOrganizer[]
   rounds       Round[]
+  gameRequests GameRequest[]
 
   bannerUrl String? // path: /uploads/banners/<uuid>.webp
 
@@ -227,9 +309,9 @@ model TournamentParticipant {
 // OMW/OOMW are recomputed after each round resolves.
 
 model TournamentParticipantStats {
-  id            String @id @default(uuid())
+  id String @id @default(uuid())
 
-  participantId String @unique
+  participantId String                @unique
   participant   TournamentParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
 
   gamesPlayed Int   @default(0)
@@ -254,7 +336,7 @@ model TournamentParticipantStats {
 // and after each tournament completes (for tournamentsPlayed/Won).
 
 model UserGlobalStats {
-  id     String @id @default(uuid())
+  id String @id @default(uuid())
 
   userId String @unique
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -279,12 +361,16 @@ model UserGlobalStats {
 // Updated at the same write sites as UserGlobalStats.
 
 model UserGameStats {
-  id     String @id @default(uuid())
+  id String @id @default(uuid())
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  gameName String // matches TournamentFormat.gameName
+  gameName String // DEPRECATED — backfill source for gameId; keep until [userId, gameId] unique lands
+  // Per-game FK. Nullable during the backfill transition; becomes the unique key
+  // ([userId, gameId]) once every row is backfilled from gameName (todo.md §5).
+  gameId   String?
+  game     Game?   @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
   tournamentsPlayed Int   @default(0)
   tournamentsWon    Int   @default(0)
@@ -298,6 +384,7 @@ model UserGameStats {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, gameName])
+  @@index([gameId])
 }
 
 // ─── ROUNDS & MATCHES ─────────────────────────────────────────────
@@ -347,13 +434,13 @@ model Match {
 
   status MatchStatus @default(PENDING)
   isBye  Boolean     @default(false)
-  
+
   matchIndex Int @default(0)
 
   // For HYBRID tournaments: which phase this match belongs to
   phase Int @default(1)
 
-  createdAt DateTime @default(now())
+  createdAt DateTime       @default(now())
   gameLogs  MatchGameLog[]
 
   // Postgres does not index foreign keys automatically. Every bracket read walks
@@ -370,15 +457,15 @@ model MatchGameLog {
   matchId String
   match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
 
-  gameNumber    Int              // 1, 2, 3... (which game in the bestOf series)
+  gameNumber    Int // 1, 2, 3... (which game in the bestOf series)
   mode          GameTrackingMode // HP | POINTS
-  startingValue Int              // max HP or points threshold for this game
+  startingValue Int // max HP or points threshold for this game
 
   player1Value Int @default(0) // HP remaining (HP mode) OR points scored (POINTS mode)
   player2Value Int @default(0)
 
   trackerActive Boolean   @default(true) // set to false once organizer submits game result
-  winnerId      String?                  // null until game result is submitted
+  winnerId      String? // null until game result is submitted
   completedAt   DateTime?
 
   createdAt DateTime @default(now())
@@ -400,12 +487,12 @@ model SiteAsset {
 
 model StoreProduct {
   id          String   @id @default(uuid())
-  name        String   // display name e.g. "Hobby+ Hoodie"
-  price       String   // display price e.g. "₱1,299" (string for flexibility)
-  imageUrl    String?  // served path: /uploads/assets/<uuid>.webp
-  category    String?  // e.g. "APPAREL", "GEAR"
+  name        String // display name e.g. "Hobby+ Hoodie"
+  price       String // display price e.g. "₱1,299" (string for flexibility)
+  imageUrl    String? // served path: /uploads/assets/<uuid>.webp
+  category    String? // e.g. "APPAREL", "GEAR"
   description String?
-  link        String?  // external purchase link
+  link        String? // external purchase link
   sortOrder   Int      @default(0) // controls carousel order
   isVisible   Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -421,11 +508,11 @@ model TournamentOrganizer {
   userId       String
   user         User       @relation("TournamentOrganizerUser", fields: [userId], references: [id], onDelete: Cascade)
 
-  status OrganizerInviteStatus @default(PENDING)
+  status      OrganizerInviteStatus @default(PENDING)
   // SetNull like Tournament.createdById: deleting the inviter must never destroy
   // the staff list.
   invitedById String?
-  invitedBy   User?   @relation("TournamentOrganizerInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedBy   User?                 @relation("TournamentOrganizerInviter", fields: [invitedById], references: [id], onDelete: SetNull)
 
   createdAt   DateTime  @default(now())
   respondedAt DateTime?

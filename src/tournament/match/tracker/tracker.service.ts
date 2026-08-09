@@ -2,10 +2,13 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
   Inject,
   forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
+import { checkTournamentAccess } from '../../../guards/tournament-access.util';
+import type { JwtPayload } from '../../../guards/jwt-auth.guard';
 import { MatchService } from '../match.service';
 import {
   effectiveRawConfig,
@@ -16,8 +19,9 @@ import {
   UpdateTrackerDto,
   SubmitGameDto,
 } from './dto/tracker.dto';
-import { GameTrackingMode } from '@prisma/client';
+import { GameTrackingMode, NotificationType } from '@prisma/client';
 import { RealtimeGateway } from '../../../realtime/realtime.gateway';
+import { NotificationService } from '../../../notification/notification.service';
 
 @Injectable()
 export class TrackerService {
@@ -26,6 +30,7 @@ export class TrackerService {
     @Inject(forwardRef(() => MatchService))
     private matchService: MatchService,
     private realtime: RealtimeGateway,
+    private notifications: NotificationService,
   ) {}
 
   /** Finds which tournament a match belongs to so live updates can be sent to
@@ -98,10 +103,74 @@ export class TrackerService {
     // panel refetches its log list and shows the new game.
     this.realtime.emitTournamentUpdated(match.round.tournament.id);
 
+    // "Your match is ready" fires when the organizer STARTS the match — i.e. opens
+    // the tracker on its first game — not when the bracket advances. With 1-2
+    // organizers running many tables, the advancement-time ping (removed from
+    // activateMatch) was premature; this is the real "come to your table" moment.
+    // First game only: for games 2+ of a series the players are already present.
+    if (gameNumber === 1 && (match.player1Id || match.player2Id)) {
+      await this.notifications.notifyMany(
+        [match.player1Id, match.player2Id].filter((id): id is string => !!id),
+        {
+          type: NotificationType.MATCH_READY,
+          title: 'Your match is ready',
+          body: 'It is your turn to play.',
+          link: `/tournaments/${match.round.tournament.id}/bracket`,
+          tournamentId: match.round.tournament.id,
+        },
+      );
+    }
+
     return created;
   }
 
-  async updateTracker(matchId: string, dto: UpdateTrackerDto) {
+  async updateTracker(
+    matchId: string,
+    dto: UpdateTrackerDto,
+    user: JwtPayload,
+  ) {
+    // Authorization is done here rather than by TournamentAccessGuard, because the
+    // rule depends on *who* the user is relative to the match. Two roles may write
+    // live values (todo.md / parity): the tournament's staff (creator/admin/
+    // co-organizer), who may set either side; and a *participant of this match*,
+    // who may set only their OWN slot. This restores the player self-scoring the
+    // frontend was always built for — organizers keep final say, since opening the
+    // tracker and submitting the game result stay staff-only. Guests can't
+    // authenticate, so they never reach here and stay organizer-driven.
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: {
+        player1Id: true,
+        player2Id: true,
+        round: { select: { tournamentId: true } },
+      },
+    });
+    if (!match) throw new NotFoundException('Match not found');
+
+    const matchTournamentId = match.round?.tournamentId;
+    const isStaff =
+      !!matchTournamentId &&
+      (await checkTournamentAccess(this.prisma, matchTournamentId, user)) ===
+        'ALLOWED';
+
+    if (!isStaff) {
+      const isP1 = !!user?.id && user.id === match.player1Id;
+      const isP2 = !!user?.id && user.id === match.player2Id;
+      if (!isP1 && !isP2) {
+        throw new ForbiddenException(
+          'Only a player in this match or the tournament organizer can update the tracker',
+        );
+      }
+      // A participant may move only their own number. Writing the opponent's slot
+      // is a staff-only action (the organizer verifies both sides).
+      if (isP1 && dto.player2Value !== undefined) {
+        throw new ForbiddenException('You can only update your own value');
+      }
+      if (isP2 && dto.player1Value !== undefined) {
+        throw new ForbiddenException('You can only update your own value');
+      }
+    }
+
     const activeLog = await this.prisma.matchGameLog.findFirst({
       where: { matchId, trackerActive: true },
     });

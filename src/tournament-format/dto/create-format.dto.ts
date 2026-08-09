@@ -23,6 +23,11 @@ export class CreateTournamentFormatDto {
   @IsString()
   gameName?: string;
 
+  // Optional default game this preset pre-fills at tournament creation (todo.md §5).
+  @IsOptional()
+  @IsString()
+  gameId?: string;
+
   @IsEnum(TournamentSystem, {
     message: `system must be one of: ${Object.values(TournamentSystem).join(', ')}`,
   })

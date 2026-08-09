@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { NotificationType } from '@prisma/client';
+import { NotificationType, Role } from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
 import { RealtimeGateway } from 'src/realtime/realtime.gateway';
 
@@ -70,6 +70,24 @@ export class NotificationService {
       }
     } catch (error) {
       this.logger.warn(`Failed to fan out notifications: ${String(error)}`);
+    }
+  }
+
+  /** Fan-out to every admin. For platform-level requests an organizer cannot
+   *  self-serve — e.g. asking for a game the catalog does not have yet (todo.md
+   *  §5). Admins are resolved here so callers need not know how roles are stored. */
+  async notifyAdmins(input: Omit<NotifyInput, 'userId'>): Promise<void> {
+    try {
+      const admins = await this.prisma.user.findMany({
+        where: { roles: { has: Role.ADMIN }, isGuest: false },
+        select: { id: true },
+      });
+      await this.notifyMany(
+        admins.map((a) => a.id),
+        input,
+      );
+    } catch (error) {
+      this.logger.warn(`Failed to notify admins: ${String(error)}`);
     }
   }
 

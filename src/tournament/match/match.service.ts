@@ -97,12 +97,17 @@ export class MatchService {
         participants.map((participant) => [participant.userId, participant]),
       );
 
-      // Game bucket for per-game stats — null when the format has no designation
+      // Game bucket for per-game stats — the tournament's own game (todo.md §5),
+      // with the format's gameName as a legacy fallback for un-backfilled rows.
       const tournamentMeta = await tx.tournament.findUnique({
         where: { id: match.round.tournamentId },
-        select: { format: { select: { gameName: true } } },
+        select: {
+          game: { select: { name: true } },
+          format: { select: { gameName: true } },
+        },
       });
-      const gameName = tournamentMeta?.format?.gameName ?? null;
+      const gameName =
+        tournamentMeta?.game?.name ?? tournamentMeta?.format?.gameName ?? null;
 
       const maybeUpdateGlobalStats = async (
         userId: string,
@@ -714,9 +719,13 @@ export class MatchService {
 
       const tournamentMeta = await tx.tournament.findUnique({
         where: { id: tournamentId },
-        select: { format: { select: { gameName: true } } },
+        select: {
+          game: { select: { name: true } },
+          format: { select: { gameName: true } },
+        },
       });
-      const gameName = tournamentMeta?.format?.gameName ?? null;
+      const gameName =
+        tournamentMeta?.game?.name ?? tournamentMeta?.format?.gameName ?? null;
       if (!gameName) return;
 
       const currentGame = await tx.userGameStats.findUnique({
@@ -846,14 +855,11 @@ export class MatchService {
       include: { round: { select: { tournamentId: true } } },
     });
 
-    // Both players are told their match is live. Guests are filtered inside the
-    // notification service, so no check is needed here.
-    await this.notifyPlayers(
-      updated,
-      NotificationType.MATCH_READY,
-      'Your match is ready',
-      'It is your turn to play.',
-    );
+    // Note: no MATCH_READY here. Advancement (a match becoming *eligible* to play)
+    // is not the same as the organizer *starting* it — with a handful of
+    // organizers and many tables, pinging players the instant their feeders finish
+    // is premature. "Your match is ready" now fires when the organizer opens the
+    // tracker (TrackerService.openTracker, first game). See docs/history 2026-08-09.
 
     return updated;
   }

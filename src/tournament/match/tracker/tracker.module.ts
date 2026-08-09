@@ -5,6 +5,7 @@ import { PrismaModule } from 'prisma/prisma.module';
 import { MatchModule } from '../match.module';
 import { AuthModule } from '../../../auth/auth.module';
 import { RealtimeModule } from '../../../realtime/realtime.module';
+import { NotificationModule } from '../../../notification/notification.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { RealtimeModule } from '../../../realtime/realtime.module';
     forwardRef(() => MatchModule),
     AuthModule,
     RealtimeModule,
+    NotificationModule,
   ],
   controllers: [TrackerController],
   providers: [TrackerService],

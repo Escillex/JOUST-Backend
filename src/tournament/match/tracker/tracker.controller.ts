@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Body,
+  Req,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -16,7 +17,10 @@ import {
   UpdateTrackerDto,
   SubmitGameDto,
 } from './dto/tracker.dto';
-import { JwtAuthGuard } from '../../../guards/jwt-auth.guard';
+import {
+  JwtAuthGuard,
+  type AuthenticatedRequest,
+} from '../../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../../guards/roles.guard';
 import { Roles } from '../../../guards/decorators/roles.decorator';
 import { TournamentAccessGuard } from '../../../guards/tournament-access.guard';
@@ -46,23 +50,22 @@ export class TrackerController {
 
   /**
    * PATCH /matches/:id/tracker/update
-   * Auth: staff of this match's tournament (creator or ADMIN)
-   * Updates player HP or points values on the active game log.
-   * Previously public, on the assumption that players would drive it from their
-   * phones. No player-facing UI ever called it, so it is now scoped like every
-   * other write. Reintroducing player self-scoring would need a per-match player
-   * token, since guests have no credential to check.
+   * Auth: any authenticated user, then authorized in the service — the tournament's
+   * staff may set either side; a *participant of this match* may set only their own
+   * slot (self-scoring). Organizers keep final say (open + submit-game are staff-
+   * only). Deliberately NOT guarded by RolesGuard/TournamentAccessGuard here: those
+   * would reject a PLAYER before the per-match ownership check can run. Guests have
+   * no credential, so JwtAuthGuard keeps them out and they stay organizer-driven.
    */
   @Patch(':id/tracker/update')
-  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
-  @Roles(Role.ORGANIZER, Role.ADMIN)
-  @TournamentAccess('match:id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   updateTracker(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTrackerDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.trackerService.updateTracker(id, dto);
+    return this.trackerService.updateTracker(id, dto, req.user);
   }
 
   /**

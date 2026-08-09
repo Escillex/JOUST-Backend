@@ -128,7 +128,25 @@ async function main() {
     console.log(`  ✅ Admin preserved: ${admin.username}`);
   }
 
-  // ── 2. Seed built-in Tournament Formats ──────────────────────────
+  // ── 2. Seed the built-in "General" game ──────────────────────────
+  // Every tournament has a game; "General" is the required floor an organizer
+  // falls back to when no specific game is chosen (todo.md §5). It is builtin and
+  // must never be deletable.
+  const general = await prisma.game.upsert({
+    where: { name: 'General' },
+    update: { isBuiltin: true },
+    create: {
+      name: 'General',
+      slug: 'general',
+      description:
+        'Uncategorised play. The default game every tournament falls back to when no specific game is set.',
+      isBuiltin: true,
+      createdById: admin.id,
+    },
+  });
+  console.log(`  ✅ Game: ${general.name}`);
+
+  // ── 3. Seed built-in Tournament Formats ──────────────────────────
   console.log('  Seeding built-in formats...');
   for (const fmt of BUILTIN_FORMATS) {
     await prisma.tournamentFormat.upsert({

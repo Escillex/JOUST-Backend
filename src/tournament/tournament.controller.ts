@@ -19,6 +19,7 @@ import {
   CreateTournamentDto,
   UpdateTournamentDto,
   TournamentStatusDto,
+  ReassignGameDto,
 } from './dto/tournament.dto';
 import { Roles } from '../guards/decorators/roles.decorator';
 import { RolesGuard } from '../guards/roles.guard';
@@ -52,6 +53,18 @@ export class TournamentController {
     @Body() dto: UpdateTournamentDto,
   ) {
     return this.tournamentService.updateTournament(id, dto);
+  }
+
+  // PATCH /tournaments/:id/game — reassign the game (any status; staff-gated)
+  @Patch(':id/game')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('id')
+  async reassignGame(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReassignGameDto,
+  ) {
+    return this.tournamentService.reassignGame(id, dto.gameId);
   }
 
   @Patch(':id/status')

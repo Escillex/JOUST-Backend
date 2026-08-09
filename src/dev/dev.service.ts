@@ -27,9 +27,14 @@ export class DevService {
     await this.prisma.userGameStats.deleteMany({});
 
     const tournaments = await this.prisma.tournament.findMany({
-      where: { format: { gameName: { not: null } } },
+      // A tournament contributes per-game stats if it has a game (the new source
+      // of truth) or a legacy format.gameName not yet backfilled (todo.md §5).
+      where: {
+        OR: [{ gameId: { not: null } }, { format: { gameName: { not: null } } }],
+      },
       include: {
         format: true,
+        game: { select: { name: true } },
         participants: { include: { user: true, stats: true } },
       },
     });
@@ -67,7 +72,7 @@ export class DevService {
     };
 
     for (const t of tournaments) {
-      const gameName = t.format?.gameName;
+      const gameName = t.game?.name ?? t.format?.gameName;
       if (!gameName) continue;
 
       const registered = t.participants.filter(

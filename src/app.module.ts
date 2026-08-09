@@ -10,6 +10,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { UserModule } from './user/user.module';
 import { DevModule } from './dev/dev.module';
 import { TournamentFormatModule } from './tournament-format/tournament-format.module';
+import { GameModule } from './game/game.module';
 import { ImagesModule } from './images/images.module';
 import { StoreModule } from './store/store.module';
 import { TrackerModule } from './tournament/match/tracker/tracker.module';
@@ -30,6 +31,7 @@ import { OrganizerModule } from './organizer/organizer.module';
     UserModule,
     DevModule,
     TournamentFormatModule,
+    GameModule,
     ImagesModule,
     StoreModule,
     TrackerModule,
