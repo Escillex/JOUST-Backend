@@ -67,9 +67,18 @@ describe('ParticipantService.leaveTournament permissions', () => {
     );
   });
 
-  it('lets an anonymous caller remove a guest (on-site registration desk)', async () => {
+  // F7: guests are organizer-managed now, so an anonymous caller can no longer
+  // remove one — only tournament staff can.
+  it('rejects an anonymous caller removing a guest', async () => {
+    await expect(service.leaveTournament('t1', 'guest1')).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(prisma.tournamentParticipant.delete).not.toHaveBeenCalled();
+  });
+
+  it('lets the tournament creator remove a guest', async () => {
     await expect(
-      service.leaveTournament('t1', 'guest1'),
+      service.leaveTournament('t1', 'guest1', CREATOR),
     ).resolves.toBeDefined();
     expect(prisma.tournamentParticipant.delete).toHaveBeenCalled();
   });

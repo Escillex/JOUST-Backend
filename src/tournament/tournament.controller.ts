@@ -39,8 +39,12 @@ export class TournamentController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
   @HttpCode(HttpStatus.CREATED)
-  async createTournament(@Body() dto: CreateTournamentDto) {
-    return this.tournamentService.createTournament(dto);
+  async createTournament(
+    @Body() dto: CreateTournamentDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    // Owner is always the authenticated caller — never taken from the body (F3).
+    return this.tournamentService.createTournament(dto, req.user.id);
   }
 
   // PATCH /tournaments/:id

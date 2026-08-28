@@ -19,9 +19,8 @@ import {
   UpdateTrackerDto,
   SubmitGameDto,
 } from './dto/tracker.dto';
-import { GameTrackingMode, NotificationType } from '@prisma/client';
+import { GameTrackingMode } from '@prisma/client';
 import { RealtimeGateway } from '../../../realtime/realtime.gateway';
-import { NotificationService } from '../../../notification/notification.service';
 
 @Injectable()
 export class TrackerService {
@@ -30,7 +29,6 @@ export class TrackerService {
     @Inject(forwardRef(() => MatchService))
     private matchService: MatchService,
     private realtime: RealtimeGateway,
-    private notifications: NotificationService,
   ) {}
 
   /** Finds which tournament a match belongs to so live updates can be sent to
@@ -73,7 +71,10 @@ export class TrackerService {
         `Game ${activeLog.gameNumber} tracker is already active. Submit it before opening the next.`,
       );
 
-    const config = resolveConfig(effectiveRawConfig(match.round.tournament));
+    const config = resolveConfig(
+      effectiveRawConfig(match.round.tournament),
+      match.phase,
+    );
 
     // Resolve mode — dto > format config > default 'POINTS'
     const mode: GameTrackingMode =
@@ -103,23 +104,10 @@ export class TrackerService {
     // panel refetches its log list and shows the new game.
     this.realtime.emitTournamentUpdated(match.round.tournament.id);
 
-    // "Your match is ready" fires when the organizer STARTS the match — i.e. opens
-    // the tracker on its first game — not when the bracket advances. With 1-2
-    // organizers running many tables, the advancement-time ping (removed from
-    // activateMatch) was premature; this is the real "come to your table" moment.
-    // First game only: for games 2+ of a series the players are already present.
-    if (gameNumber === 1 && (match.player1Id || match.player2Id)) {
-      await this.notifications.notifyMany(
-        [match.player1Id, match.player2Id].filter((id): id is string => !!id),
-        {
-          type: NotificationType.MATCH_READY,
-          title: 'Your match is ready',
-          body: 'It is your turn to play.',
-          link: `/tournaments/${match.round.tournament.id}/bracket`,
-          tournamentId: match.round.tournament.id,
-        },
-      );
-    }
+    // MATCH_READY is no longer sent here. It now fires when the organizer STARTS
+    // the match (MatchService.startMatch) — the single organizer-driven moment a
+    // match becomes playable. Opening the tracker is a later, separate step (and a
+    // match must already be ONGOING to open one), so pinging here would double-notify.
 
     return created;
   }
@@ -213,18 +201,16 @@ export class TrackerService {
     if (!activeLog)
       throw new BadRequestException('No active tracker to submit');
 
-    // Close the log
-    const log = await this.prisma.matchGameLog.update({
-      where: { id: activeLog.id },
-      data: {
-        trackerActive: false,
-        winnerId: dto.winnerId ?? null,
-        completedAt: new Date(),
-      },
-    });
-
-    // Report to the match service — increments player1Score/player2Score
-    // and auto-completes the match when winsNeeded is reached
+    // Record the result FIRST. reportGameResult / reportDraw validate the submit
+    // (a winner-less draw on a bestOf>1, elimination, points-threshold, or
+    // allowDraw:false match all throw here) before writing anything. Only once
+    // that has succeeded do we close the log below. The old order closed the log
+    // first, so an invalid draw left an orphaned "completed" game with no result
+    // and no active tracker to retry (F5). We deliberately do NOT wrap the two in
+    // one transaction: the result path cascades through handleMatchCompletion into
+    // bracket generation, which the codebase intentionally keeps out of a single
+    // long transaction — so ordering, not a transaction, is what guarantees the
+    // log is never closed until the result is committed.
     let matchResult: any = null;
     if (dto.winnerId) {
       matchResult = await this.matchService.reportGameResult(
@@ -234,6 +220,16 @@ export class TrackerService {
     } else {
       matchResult = await this.matchService.reportDraw(matchId);
     }
+
+    // Result is committed — now close the game log.
+    const log = await this.prisma.matchGameLog.update({
+      where: { id: activeLog.id },
+      data: {
+        trackerActive: false,
+        winnerId: dto.winnerId ?? null,
+        completedAt: new Date(),
+      },
+    });
 
     // The game closed and the series score changed (and the match may have
     // completed, which advances the bracket). Signal the tournament room so

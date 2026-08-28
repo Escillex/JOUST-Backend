@@ -224,10 +224,10 @@ export class ParticipantService {
   }
 
   // ❌ LEAVE TOURNAMENT
-  /** Removes a participant. Guests stay removable without a login: they have no
-   *  token, and the on-site registration desk must be able to correct mistakes.
-   *  Registered accounts may only be removed by themselves or by someone with
-   *  access to this tournament. */
+  /** Removes a participant. F7: guests are an organizer-managed resource, so a
+   *  guest can only be removed by tournament staff. A registered account may be
+   *  removed by that account itself or by staff. (Previously guests were removable
+   *  without any login — the walk-in desk is now run by an authenticated organizer.) */
   async leaveTournament(
     tournamentId: string,
     userId: string,
@@ -263,21 +263,20 @@ export class ParticipantService {
       );
     }
 
-    // 3b. Registered accounts are only removable by themselves or by staff.
-    // Guests deliberately skip this check - see the method comment.
-    if (!participant.user?.isGuest) {
-      const isSelf = requester?.id === userId;
-      if (!isSelf) {
-        const access = await checkTournamentAccess(
-          this.prisma,
-          tournamentId,
-          requester,
+    // 3b. Anyone removed here is either removing themselves (a registered account)
+    // or being removed by tournament staff. A guest can never be "self" (no token),
+    // so guest removal is effectively staff-only — F7.
+    const isSelf = requester?.id === userId;
+    if (!isSelf) {
+      const access = await checkTournamentAccess(
+        this.prisma,
+        tournamentId,
+        requester,
+      );
+      if (access !== 'ALLOWED') {
+        throw new ForbiddenException(
+          'You do not have permission to remove this participant',
         );
-        if (access !== 'ALLOWED') {
-          throw new ForbiddenException(
-            'You do not have permission to remove this participant',
-          );
-        }
       }
     }
 

@@ -7,6 +7,7 @@ import {
   MinLength,
   MaxLength,
 } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
 import { TournamentSystem } from '@prisma/client';
 
 export class CreateTournamentFormatDto {
@@ -42,3 +43,9 @@ export class CreateTournamentFormatDto {
   @IsBoolean()
   isBuiltin?: boolean;
 }
+
+// Real DTO for PATCH bodies — `Partial<CreateTournamentFormatDto>` erases to
+// `Object` at runtime and bypasses the global whitelist ValidationPipe (F11).
+export class UpdateTournamentFormatDto extends PartialType(
+  CreateTournamentFormatDto,
+) {}

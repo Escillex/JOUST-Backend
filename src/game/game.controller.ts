@@ -11,7 +11,7 @@ import {
   Req,
 } from '@nestjs/common';
 import { GameService } from './game.service';
-import { CreateGameDto } from './dto/create-game.dto';
+import { CreateGameDto, UpdateGameDto } from './dto/create-game.dto';
 import { RequestGameDto } from './dto/request-game.dto';
 import { ResolveRequestDto } from './dto/resolve-request.dto';
 import { GameRequestStatus } from '@prisma/client';
@@ -79,7 +79,7 @@ export class GameController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: Partial<CreateGameDto>) {
+  update(@Param('id') id: string, @Body() dto: UpdateGameDto) {
     return this.service.update(id, dto);
   }
 

@@ -75,7 +75,13 @@ export class ParticipantController {
   }
 
   // POST /tournaments/:tournamentId/participants/guest
+  // F7. Guests are an organizer tool now — only tournament staff may register one.
+  // Online self-registration is for account holders (the /join route above); the
+  // organizer runs the walk-in desk. (Previously this was fully unauthenticated.)
   @Post('guest')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
   @HttpCode(HttpStatus.CREATED)
   async joinGuest(
     @Param('tournamentId', ParseUUIDPipe) tournamentId: string,

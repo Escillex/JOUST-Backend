@@ -16,7 +16,7 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { isEmail } from './utils/check-input';
 import { Response } from 'express';
-import { Role } from '@prisma/client';
+import { Role, ParticipantStatus, TournamentStatus } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
@@ -303,6 +303,38 @@ export class AuthService {
       where: { id: targetId },
     });
     if (!user) throw new NotFoundException('User not found');
+
+    // F6. Refuse to delete someone still active in a live tournament. Deleting
+    // them would null their pending match slots with no walkover, stalling the
+    // opponent and the bracket. The organizer must forfeit them first (which
+    // awards their pending matches to opponents), then the account can go. A
+    // FORFEITED participant is fine — they have already been walked over.
+    const liveParticipation = await this.prisma.tournamentParticipant.findMany({
+      where: {
+        userId: targetId,
+        status: { not: ParticipantStatus.FORFEITED },
+        tournament: {
+          status: {
+            in: [TournamentStatus.OPEN, TournamentStatus.ONGOING],
+          },
+        },
+      },
+      select: { tournamentId: true, tournament: { select: { name: true } } },
+    });
+    if (liveParticipation.length > 0) {
+      // Structured payload so the admin UI can offer a forfeit-then-delete flow:
+      // it lists the live tournaments to forfeit the user from before retrying.
+      throw new BadRequestException({
+        code: 'ACTIVE_IN_LIVE_TOURNAMENT',
+        message:
+          `This user is an active participant in ${liveParticipation.length} live ` +
+          `tournament(s). Forfeit them first, then delete the account.`,
+        tournaments: liveParticipation.map((p) => ({
+          id: p.tournamentId,
+          name: p.tournament.name,
+        })),
+      });
+    }
 
     const displayName = user.username ?? 'Deleted player';
 

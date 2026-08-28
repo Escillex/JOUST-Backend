@@ -18,6 +18,7 @@ import {
   resolveConfig,
   systemAllowsDraw,
   winsNeeded,
+  type ByeResult,
 } from '../../Formats/format-config.helper';
 
 @Injectable()
@@ -36,6 +37,9 @@ export class MatchService {
       pointsForDraw: number;
       pointsForLoss: number;
     },
+    // How a bye match credits its player. Only consulted when match.isBye; a real
+    // result ignores it. Defaults to WIN so every existing caller is unchanged.
+    byeResult: ByeResult = 'WIN',
   ) {
     // One transaction: this credits BOTH players. Half-applied, one player
     // has the match on their record and the other does not, and nothing
@@ -234,14 +238,29 @@ export class MatchService {
       };
 
       if (match.isBye) {
-        await updateParticipant(
-          match.player1Id,
-          1,
-          1,
-          0,
-          0,
-          points.pointsForWin,
-        );
+        // A bye credits its player per the configured byeResult. WIN is the
+        // standard and the default; DRAW records a draw's points; NONE credits
+        // nothing (the match still stands as a completed bye, just uncounted).
+        if (byeResult === 'NONE') return;
+        if (byeResult === 'DRAW') {
+          await updateParticipant(
+            match.player1Id,
+            1,
+            0,
+            0,
+            1,
+            points.pointsForDraw,
+          );
+        } else {
+          await updateParticipant(
+            match.player1Id,
+            1,
+            1,
+            0,
+            0,
+            points.pointsForWin,
+          );
+        }
         return;
       }
 
@@ -268,6 +287,56 @@ export class MatchService {
         updateParticipant(match.player2Id, 1, 1, 0, 0, points.pointsForWin),
       ]);
     });
+  }
+
+  /**
+   * Scores a completed bye match per the format's configurable `byeResult`. A bye
+   * is a result the player never had to play for — in the points-scored systems
+   * (Swiss, round robin, hybrid phase 1) it must still be credited, or the benched
+   * player is silently penalised for an odd field they did not choose. Generated
+   * byes are completed with a direct status write that bypasses `updateMatchStats`,
+   * so nothing scored them; this restores it, honouring the organizer's choice:
+   *   WIN  (default) - full points, +1 win, winner = the byed player.
+   *   DRAW           - draw points, +1 draw, no winner recorded.
+   *   NONE           - not counted; no points, no game, no winner.
+   * Deliberately called only from the Swiss/round-robin bye sites: in an elimination
+   * bracket a bye is not a played game and must not appear in a record. Idempotency:
+   * call exactly once, at the point the bye is completed.
+   */
+  async creditBye(matchId: string): Promise<void> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        round: { include: { tournament: { include: { format: true } } } },
+      },
+    });
+    if (!match?.isBye || match.status !== MatchStatus.COMPLETED) return;
+
+    const config = resolveConfig(
+      effectiveRawConfig(match.round.tournament),
+      match.phase,
+    );
+    const byeResult = config.byeResult;
+
+    // DRAW and NONE do not have a winner: a bye completed as a draw must not claim
+    // one, and an uncounted bye should not read as a win anywhere it surfaces.
+    if (byeResult !== 'WIN' && match.winnerId) {
+      await this.prisma.match.update({
+        where: { id: matchId },
+        data: { winnerId: null },
+      });
+    }
+    if (byeResult === 'NONE') return;
+
+    await this.updateMatchStats(
+      matchId,
+      {
+        pointsForWin: config.swissPointsForWin,
+        pointsForDraw: config.swissPointsForDraw,
+        pointsForLoss: config.swissPointsForLoss,
+      },
+      byeResult,
+    );
   }
 
   // ─── CREATE / LINK ────────────────────────────────────────────
@@ -346,7 +415,7 @@ export class MatchService {
     if (match.isBye) throw new BadRequestException('Cannot draw a bye match');
 
     const rawConfig = effectiveRawConfig(match.round.tournament);
-    const config = resolveConfig(rawConfig);
+    const config = resolveConfig(rawConfig, match.phase);
     if (!config.allowDraw)
       throw new BadRequestException('Draws are not allowed in this tournament');
 
@@ -418,7 +487,7 @@ export class MatchService {
     }
 
     const rawConfig = effectiveRawConfig(match.round.tournament);
-    const config = resolveConfig(rawConfig);
+    const config = resolveConfig(rawConfig, match.phase);
     const {
       pointsThreshold,
       bestOf,
@@ -545,7 +614,7 @@ export class MatchService {
       );
 
     const rawConfig = effectiveRawConfig(match.round.tournament);
-    const config = resolveConfig(rawConfig);
+    const config = resolveConfig(rawConfig, match.phase);
     const { bestOf } = config;
     const winsReq = winsNeeded(bestOf);
 
@@ -809,14 +878,11 @@ export class MatchService {
     });
 
     if (updated.player1Id && updated.player2Id) {
+      // Both slots now filled. Auto-resolve only a walkover (active vs forfeited);
+      // otherwise the match is left PENDING for the organizer to start explicitly
+      // (POST /matches/:id/start). Match readiness is organizer-driven now, so
+      // advancement no longer activates or notifies.
       await this.resolveForfeitedPairing(nextMatchId);
-      const after = await this.prisma.match.findUnique({
-        where: { id: nextMatchId },
-        select: { status: true },
-      });
-      if (after?.status !== MatchStatus.COMPLETED) {
-        await this.activateMatch(nextMatchId);
-      }
     } else if (updated.isBye && (updated.player1Id || updated.player2Id)) {
       await this.submitResult(nextMatchId, winnerId);
     }
@@ -835,17 +901,51 @@ export class MatchService {
     });
 
     if (updated.player1Id && updated.player2Id) {
+      // Same as advanceWinner: fill the slot, auto-resolve only a walkover, and
+      // otherwise leave the match PENDING for the organizer to start.
       await this.resolveForfeitedPairing(nextMatchId);
-      const after = await this.prisma.match.findUnique({
-        where: { id: nextMatchId },
-        select: { status: true },
-      });
-      if (after?.status !== MatchStatus.COMPLETED) {
-        await this.activateMatch(nextMatchId);
-      }
     } else if (updated.isBye && (updated.player1Id || updated.player2Id)) {
       await this.submitResult(nextMatchId, loserId);
     }
+  }
+
+  /**
+   * Organizer-driven "start this match": PENDING → ONGOING, and the single point at
+   * which the two players are told to come to the table (MATCH_READY). Nothing
+   * auto-activates any more, so this is how every real match becomes playable, in
+   * every format. Byes/walkovers never reach here — they resolve automatically and
+   * have no game to start. Idempotent on an already-started match.
+   */
+  async startMatch(matchId: string) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: { round: { select: { tournamentId: true } } },
+    });
+    if (!match) throw new NotFoundException('Match not found');
+    if (match.status === MatchStatus.COMPLETED)
+      throw new BadRequestException('Match already completed');
+    if (match.isBye)
+      throw new BadRequestException('A bye has no match to start');
+    if (!match.player1Id || !match.player2Id)
+      throw new BadRequestException(
+        'Both players must be determined before the match can start',
+      );
+    if (match.status === MatchStatus.ONGOING) return match; // already started
+
+    const updated = await this.prisma.match.update({
+      where: { id: matchId },
+      data: { status: MatchStatus.ONGOING },
+      include: { round: { select: { tournamentId: true } } },
+    });
+
+    await this.notifyPlayers(
+      updated,
+      NotificationType.MATCH_READY,
+      'Your match is ready',
+      'It is your turn to play.',
+    );
+
+    return updated;
   }
 
   async activateMatch(matchId: string) {

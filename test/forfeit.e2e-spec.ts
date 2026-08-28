@@ -418,7 +418,7 @@ describe('MatchService.resolveForfeitedPairing (via advanceWinner/advanceLoser)'
     expect(matchL.winnerId).toBe('p');
   });
 
-  it('advanceLoser into a slot with two ACTIVE players does not auto-resolve — activates instead', async () => {
+  it('advanceLoser into a slot with two ACTIVE players does not auto-resolve — stays PENDING for the organizer to start (F2)', async () => {
     const matchL2: any = {
       id: 'L2',
       status: MatchStatus.PENDING,
@@ -448,7 +448,8 @@ describe('MatchService.resolveForfeitedPairing (via advanceWinner/advanceLoser)'
     await matchService.advanceLoser('q', 'L2');
 
     expect(formatsService.handleMatchCompletion).not.toHaveBeenCalled();
-    expect(matchL2.status).toBe(MatchStatus.ONGOING);
+    // F2: nothing auto-activates — the filled match waits PENDING for startMatch.
+    expect(matchL2.status).toBe(MatchStatus.PENDING);
   });
 
   // Global constraint: a pairing where BOTH players are FORFEITED must not
@@ -486,7 +487,8 @@ describe('MatchService.resolveForfeitedPairing (via advanceWinner/advanceLoser)'
 
     expect(formatsService.handleMatchCompletion).not.toHaveBeenCalled();
     expect(matchL3.status).not.toBe(MatchStatus.COMPLETED);
-    expect(matchL3.status).toBe(MatchStatus.ONGOING);
+    // F2: stays PENDING (no auto-activation) rather than being force-activated.
+    expect(matchL3.status).toBe(MatchStatus.PENDING);
   });
 });
 
@@ -676,7 +678,11 @@ describe('ParticipantService.forfeitParticipant', () => {
 describe('FormatsService.generateNextSwissRound (forfeited players excluded)', () => {
   let formatsService: FormatsService;
   let prisma: any;
-  let matchService: { createMatch: jest.Mock; activateMatch: jest.Mock };
+  let matchService: {
+    createMatch: jest.Mock;
+    activateMatch: jest.Mock;
+    creditBye: jest.Mock;
+  };
   let leaderboardService: { getLeaderboard: jest.Mock };
   let realtime: { emitTournamentUpdated: jest.Mock };
 
@@ -717,6 +723,8 @@ describe('FormatsService.generateNextSwissRound (forfeited players excluded)', (
         ...dto,
       })),
       activateMatch: jest.fn().mockResolvedValue(undefined),
+      // F16: generateNextSwissRound credits the round's bye as a win via creditBye.
+      creditBye: jest.fn().mockResolvedValue(undefined),
     };
 
     leaderboardService = {

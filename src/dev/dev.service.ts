@@ -156,21 +156,24 @@ export class DevService {
     });
     if (!tournament) throw new NotFoundException('Tournament not found');
 
-    // Delete rounds and matches (Prisma will handle some via Cascade if set, but let's be safe)
-    // Actually, in schema.prisma, Match/Round don't have Cascade from Tournament.
-
-    const rounds = await this.prisma.round.findMany({
-      where: { tournamentId },
+    // F13. Matches point at each other through nextMatchId / loserNextMatchId,
+    // which are Restrict, so a match cannot be deleted while another still
+    // references it. The old code deleted matches round-by-round (in no particular
+    // order), which threw a FK error whenever a referenced later-round match went
+    // first. Mirror discardGeneratedBracket: null the links, then delete matches,
+    // rounds, participants, and finally the tournament — all in one transaction so
+    // a partial delete can't strand the row half-gone. (GameRequest.tournamentId is
+    // SetNull and MatchGameLog/TournamentOrganizer cascade, so those need no help.)
+    await this.prisma.$transaction(async (tx) => {
+      await tx.match.updateMany({
+        where: { round: { tournamentId } },
+        data: { nextMatchId: null, loserNextMatchId: null },
+      });
+      await tx.match.deleteMany({ where: { round: { tournamentId } } });
+      await tx.round.deleteMany({ where: { tournamentId } });
+      await tx.tournamentParticipant.deleteMany({ where: { tournamentId } });
+      await tx.tournament.delete({ where: { id: tournamentId } });
     });
-    for (const round of rounds) {
-      await this.prisma.match.deleteMany({ where: { roundId: round.id } });
-    }
-    await this.prisma.round.deleteMany({ where: { tournamentId } });
-    await this.prisma.tournamentParticipant.deleteMany({
-      where: { tournamentId },
-    });
-
-    await this.prisma.tournament.delete({ where: { id: tournamentId } });
 
     return {
       message: `Tournament "${tournament.name}" and all related data deleted.`,

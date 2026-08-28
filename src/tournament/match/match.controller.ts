@@ -50,6 +50,18 @@ export class MatchController {
     return this.matchService.reportGameResult(id, dto.gameWinnerId);
   }
 
+  // POST /matches/:id/start
+  // Organizer-driven activation: nothing auto-activates any more, so staff start
+  // each match explicitly. PENDING → ONGOING and notifies both players.
+  @Post(':id/start')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('match:id')
+  @HttpCode(HttpStatus.OK)
+  async startMatch(@Param('id', ParseUUIDPipe) id: string) {
+    return this.matchService.startMatch(id);
+  }
+
   // POST /matches/:id/draw was REMOVED (plan 7.3, 2026-07-31).
   //
   // It was never called by the frontend, and it validated strictly less than

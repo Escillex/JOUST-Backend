@@ -52,6 +52,7 @@ export class CleanGuestsJob {
       where: { guestCleanupAt: { lte: new Date(), not: null } },
       select: {
         id: true,
+        winnerId: true,
         participants: {
           where: { user: { isGuest: true } },
           select: { userId: true },
@@ -60,7 +61,11 @@ export class CleanGuestsJob {
     });
 
     for (const t of tournaments) {
-      const guestIds = t.participants.map((p) => p.userId);
+      // F8. Never purge the winner, even a guest one — completeTournament
+      // deliberately preserves them, and the winner name/record should survive.
+      const guestIds = t.participants
+        .map((p) => p.userId)
+        .filter((id) => id !== t.winnerId);
       if (guestIds.length > 0) {
         // Re-check: a guest may have been converted to a real account since the
         // cleanup was scheduled, and those must never be deleted.
@@ -118,6 +123,9 @@ export class CleanGuestsJob {
         participatedTournaments: {
           every: { tournament: { status: 'COMPLETED' } },
         },
+        // F8. Preserve a guest who won a tournament — their name/record must
+        // survive for the completed bracket and standings.
+        wonTournaments: { none: {} },
       },
       select: { id: true },
     });

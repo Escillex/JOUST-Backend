@@ -205,9 +205,14 @@ describe('NotificationService', () => {
 });
 
 describe('notification write sites', () => {
+  // MATCH_READY now fires from startMatch (the organizer explicitly starting a
+  // match) — nothing auto-activates any more, so advancement no longer notifies.
   const makeMatchService = (match: any) => {
     const prisma = {
-      match: { update: jest.fn().mockResolvedValue(match) },
+      match: {
+        findUnique: jest.fn().mockResolvedValue(match),
+        update: jest.fn().mockResolvedValue(match),
+      },
     } as any;
     // Transaction-aware code under test calls prisma.$transaction(cb). The
     // mock runs the callback against itself, so the assertions below are
@@ -218,14 +223,16 @@ describe('notification write sites', () => {
     return { prisma, notifications, service };
   };
 
-  it('notifies both players when their match becomes active', async () => {
+  it('startMatch notifies both players when the organizer starts the match', async () => {
     const { notifications, service } = makeMatchService({
       id: 'm1',
+      status: 'PENDING',
+      isBye: false,
       player1Id: 'a',
       player2Id: 'b',
       round: { tournamentId: 't1' },
     });
-    await service.activateMatch('m1');
+    await service.startMatch('m1');
     expect(notifications.notifyMany).toHaveBeenCalledWith(
       ['a', 'b'],
       expect.objectContaining({
@@ -235,28 +242,29 @@ describe('notification write sites', () => {
     );
   });
 
-  it('notifies only the known player when the opponent slot is still empty', async () => {
+  it('startMatch refuses a match that is missing a player (nothing to start, no ping)', async () => {
     const { notifications, service } = makeMatchService({
       id: 'm1',
+      status: 'PENDING',
+      isBye: false,
       player1Id: 'a',
       player2Id: null,
       round: { tournamentId: 't1' },
     });
-    await service.activateMatch('m1');
-    expect(notifications.notifyMany).toHaveBeenCalledWith(
-      ['a'],
-      expect.anything(),
-    );
+    await expect(service.startMatch('m1')).rejects.toBeDefined();
+    expect(notifications.notifyMany).not.toHaveBeenCalled();
   });
 
-  it('sends nothing when the match has no resolvable tournament', async () => {
+  it('startMatch sends nothing when the match has no resolvable tournament', async () => {
     const { notifications, service } = makeMatchService({
       id: 'm1',
+      status: 'PENDING',
+      isBye: false,
       player1Id: 'a',
       player2Id: 'b',
       round: null,
     });
-    await service.activateMatch('m1');
+    await service.startMatch('m1');
     expect(notifications.notifyMany).not.toHaveBeenCalled();
   });
 

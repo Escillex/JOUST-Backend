@@ -71,8 +71,9 @@ export class CreateTournamentDto {
   @IsOptional()
   startNow?: boolean;
 
-  @IsUUID('4', { message: 'createdById must be a valid UUID' })
-  createdById!: string;
+  // createdById is NOT a request field: the owner is always the authenticated
+  // caller, set server-side in the controller. Accepting it from the body let an
+  // organizer create a tournament owned by an arbitrary user (F3).
 
   /** Per-tournament rules override; fully replaces the format preset's config.
    *  Explicit null (on update) clears the override. */

@@ -197,9 +197,9 @@ export class TournamentService {
     throw e;
   }
 
-  async createTournament(dto: CreateTournamentDto) {
+  async createTournament(dto: CreateTournamentDto, createdById: string) {
     const existing = await this.prisma.tournament.findFirst({
-      where: { name: dto.name, createdById: dto.createdById },
+      where: { name: dto.name, createdById },
     });
     if (existing) throw new BadRequestException('Tournament name exists');
 
@@ -246,7 +246,7 @@ export class TournamentService {
           date: dto.date ? new Date(dto.date) : undefined,
           isPrivate: dto.isPrivate,
           status,
-          createdById: dto.createdById,
+          createdById,
           formatId: dto.formatId,
           gameId,
           slug,
@@ -293,7 +293,8 @@ export class TournamentService {
       if (!g) throw new BadRequestException('Invalid gameId — game not found');
     }
 
-    const { createdById, date, startNow, config, slug, ...rest } = dto;
+    // createdById is no longer a DTO field (F3); ownership is never changed on update.
+    const { date, startNow, config, slug, ...rest } = dto;
 
     try {
       return await this.prisma.tournament.update({
@@ -522,17 +523,21 @@ export class TournamentService {
       }
 
       for (const match of firstRound.matches) {
-        if (match.player1Id && match.player2Id) {
-          await this.prisma.match.update({
-            where: { id: match.id },
-            data: { status: MatchStatus.ONGOING },
-          });
-        } else if (match.isBye && (match.player1Id || match.player2Id)) {
-          const winnerId = (match.player1Id || match.player2Id) as string;
-          await this.prisma.match.update({
-            where: { id: match.id },
-            data: { winnerId, status: MatchStatus.COMPLETED },
-          });
+        // Real, playable round-1 matches are left PENDING: the organizer starts
+        // each one explicitly (POST /matches/:id/start). Nothing auto-activates any
+        // more. Byes still resolve automatically — there is no game to start.
+        if (match.isBye && (match.player1Id || match.player2Id)) {
+          // Swiss / round-robin byes are already completed AND scored during
+          // generation (creditBye), so only complete a bye that generation left
+          // pending — an elimination bye. Re-writing a finished bye would clobber a
+          // configured DRAW/NONE result, which records no winner, back into a win.
+          if (match.status !== MatchStatus.COMPLETED) {
+            const winnerId = (match.player1Id || match.player2Id) as string;
+            await this.prisma.match.update({
+              where: { id: match.id },
+              data: { winnerId, status: MatchStatus.COMPLETED },
+            });
+          }
           await this.formatsService.handleMatchCompletion(match.id);
         }
       }
@@ -677,10 +682,13 @@ export class TournamentService {
       return { message: 'Tournament already completed. No changes made.' };
     }
 
-    const winnerId = tournament.winnerId;
-    const guestUserIds = tournament.participants
-      .filter((p) => p.user.isGuest && p.user.id !== winnerId)
-      .map((p) => p.user.id);
+    // F10. On a normal completion the winner is already set (the format's own
+    // completion check writes it before calling here). On a MANUAL early
+    // completion it can be null — it is finalized from the resolved final
+    // placements below, so the champion still gets tournamentsWon, a winner name,
+    // and exclusion from guest cleanup. guestUserIds is likewise computed after
+    // that, so a derived guest winner is not scheduled for removal.
+    let winnerId = tournament.winnerId;
 
     const registeredParticipants = tournament.participants.filter(
       (p) => p.user && !p.user.isGuest,
@@ -738,6 +746,15 @@ export class TournamentService {
       pointsLeaderboard,
     );
 
+    // F10. Finalize the winner when it was never set (manual early completion):
+    // the top of the resolved final placements is the champion. Persisted in the
+    // transaction below alongside the winner-name snapshot.
+    if (!winnerId) winnerId = leaderboard[0]?.userId ?? null;
+
+    const guestUserIds = tournament.participants
+      .filter((p) => p.user.isGuest && p.user.id !== winnerId)
+      .map((p) => p.user.id);
+
     const cleanupTime = new Date();
     cleanupTime.setDate(
       cleanupTime.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
@@ -787,14 +804,18 @@ export class TournamentService {
           }
         }
 
-        // Snapshot tournament winner name
+        // Snapshot tournament winner name — and persist winnerId itself, which may
+        // have been derived from placement here on a manual early completion (F10).
         if (winnerId) {
           const winner = tournament.participants.find(
             (p) => p.userId === winnerId,
           )?.user;
           await tx.tournament.update({
             where: { id: tournamentId },
-            data: { winnerName: winner?.username || 'Unknown' } as any,
+            data: {
+              winnerId,
+              winnerName: winner?.username || 'Unknown',
+            } as any,
           });
         }
 
@@ -1007,14 +1028,18 @@ export class TournamentService {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
       include: {
-        createdBy: { select: { id: true, username: true, email: true } },
+        // No email in the public tournament read — GET /tournaments/:id and the
+        // invite route are unauthenticated, so exposing creator/participant emails
+        // let anyone with a tournament id enumerate them. Managers who need contact
+        // details use GET /auth/users (organizer/admin only).
+        createdBy: { select: { id: true, username: true } },
         winner: { select: { id: true, username: true, isGuest: true } },
         format: true,
         game: { select: { id: true, name: true, iconUrl: true } },
         participants: {
           include: {
             user: {
-              select: { id: true, username: true, email: true, isGuest: true },
+              select: { id: true, username: true, isGuest: true },
             },
           },
         },
@@ -1037,14 +1062,18 @@ export class TournamentService {
     const tournament = await this.prisma.tournament.findFirst({
       where: { OR: [{ slug: inviteToken }, { inviteToken }] },
       include: {
-        createdBy: { select: { id: true, username: true, email: true } },
+        // No email in the public tournament read — GET /tournaments/:id and the
+        // invite route are unauthenticated, so exposing creator/participant emails
+        // let anyone with a tournament id enumerate them. Managers who need contact
+        // details use GET /auth/users (organizer/admin only).
+        createdBy: { select: { id: true, username: true } },
         winner: { select: { id: true, username: true, isGuest: true } },
         format: true,
         game: { select: { id: true, name: true, iconUrl: true } },
         participants: {
           include: {
             user: {
-              select: { id: true, username: true, email: true, isGuest: true },
+              select: { id: true, username: true, isGuest: true },
             },
           },
         },

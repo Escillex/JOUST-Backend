@@ -63,6 +63,8 @@ describe('participant routes are access-guarded', () => {
     ['updateSeed', 'tournamentId'],
     ['forfeit', 'tournamentId'],
     ['replace', 'tournamentId'],
+    // F7: registering a guest is an organizer action, staff-scoped like the rest.
+    ['joinGuest', 'tournamentId'],
   ];
 
   it.each(cases)(
@@ -77,11 +79,7 @@ describe('participant routes are access-guarded', () => {
     expect(guardsOf(proto.join)).not.toContain(TournamentAccessGuard);
   });
 
-  it('joinGuest stays public for on-site registration', () => {
-    expect(guardsOf(proto.joinGuest)).toHaveLength(0);
-  });
-
-  it('leave is not access-guarded - its rule depends on the target participant', () => {
+  it('leave is not TournamentAccessGuard-scoped - its rule (self vs staff) is enforced in the service', () => {
     expect(guardsOf(proto.leave)).not.toContain(TournamentAccessGuard);
   });
 });
@@ -111,13 +109,21 @@ describe('match and tracker routes are access-guarded', () => {
     expect(match.reportDraw).toBeUndefined();
   });
 
-  it.each([['openTracker'], ['updateTracker'], ['submitGame']])(
+  // openTracker/submitGame are staff-only (organizer has final say). updateTracker
+  // is deliberately NOT here: it's JwtAuthGuard-only, with per-match authorization
+  // in TrackerService so a *participant* can adjust their own slot (player
+  // self-scoring, 2026-08-09). See the updateTracker assertion below.
+  it.each([['openTracker'], ['submitGame']])(
     'TrackerController.%s is guarded by match id',
     (name) => {
       expect(guardsOf(tracker[name])).toContain(TournamentAccessGuard);
       expect(accessSourceOf(tracker[name])).toBe('match:id');
     },
   );
+
+  it('TrackerController.updateTracker is JwtAuthGuard-only (per-match ownership enforced in the service)', () => {
+    expect(guardsOf(tracker.updateTracker)).not.toContain(TournamentAccessGuard);
+  });
 
   it('tracker reads stay public for spectators', () => {
     expect(guardsOf(tracker.getTrackerLogs)).toHaveLength(0);

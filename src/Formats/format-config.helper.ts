@@ -6,6 +6,15 @@
  *  MANUAL - honour the organizer's arranged order from the seed column. */
 export type SeedingMode = 'RANDOM' | 'MANUAL';
 
+/** What a bye is worth in a points-scored system (Swiss / round robin / hybrid
+ *  phase 1). A bye is given to the lowest-standing player who has not had one, so
+ *  it never hands a contender a free result — but organizers can still tune how
+ *  generous it is. Inert in elimination, where a bye only advances a player.
+ *  WIN  - counts as a win (full points). The default and the standard practice.
+ *  DRAW - counts as a draw (draw points), with no winner recorded.
+ *  NONE - not counted at all: no points, no game, no winner. */
+export type ByeResult = 'WIN' | 'DRAW' | 'NONE';
+
 /** Whether a drawn result (COMPLETED with `winnerId: null`) is survivable under
  *  this system. This is a correctness gate, not a preference.
  *
@@ -40,6 +49,12 @@ export interface ResolvedConfig {
   swissPointsForDraw: number;
   swissPointsForLoss: number;
   tieBreakerOrder: string[];
+  byeResult: ByeResult;
+  // Double elimination only. When true (the default — this is what makes it
+  // "double" elimination), if the losers-bracket finalist wins the grand final a
+  // deciding reset match is played, so the winners-bracket finalist must be beaten
+  // twice. When false the grand final is a single match (F15).
+  grandFinalReset: boolean;
 
   pointsThreshold: number;
   startingHp: number;
@@ -76,12 +91,32 @@ export function effectiveRawConfig(
 
 export function resolveConfig(
   config: Record<string, any> | null,
+  phase?: number,
 ): ResolvedConfig {
-  // For HYBRID formats, the root config IS the phase1 Swiss config for scoring purposes
-  const c = config?.phase1 ?? config ?? {};
+  // Hybrid stores per-phase rules. Resolve a match's rules from the phase it
+  // belongs to — phase 2 (the top cut) from `phase2`, otherwise `phase1` — each
+  // merged OVER the root so a flat (un-nested) config still works and root-level
+  // edits are always honoured. Non-hybrid configs have neither key and resolve
+  // straight from the root. This is the single accessor every path uses, so
+  // phase-2 rules (e.g. bestOf for the top cut) are no longer silently dropped and
+  // the completion logic and the match logic can't disagree about the shape (F4).
+  const base = config ?? {};
+  const phaseObj = phase === 2 ? base.phase2 : base.phase1;
+  const c =
+    phaseObj && typeof phaseObj === 'object'
+      ? { ...base, ...(phaseObj as Record<string, any>) }
+      : base;
 
-  // If old winsToAdvance exists, fall back to it, otherwise bestOf (or 1)
-  const wins = c.bestOf ?? c.winsToAdvance ?? 1;
+  // `bestOf` is the number of games in the series; winsNeeded is ceil(bestOf/2).
+  // Legacy configs stored `winsToAdvance` (the number of wins to take the series,
+  // i.e. first-to-N). Treating that value as `bestOf` halved the series — first-to-2
+  // became bestOf 2 → winsNeeded 1, deciding the match after a single game (F12).
+  // Convert it: a first-to-N series is bestOf 2N-1, so winsNeeded lands back on N.
+  const wins =
+    c.bestOf ??
+    (typeof c.winsToAdvance === 'number' && c.winsToAdvance > 0
+      ? c.winsToAdvance * 2 - 1
+      : 1);
 
   const pointsThreshold = c.pointsThreshold ?? 0;
   const startingHp = c.startingHp ?? 0;
@@ -106,6 +141,13 @@ export function resolveConfig(
     swissPointsForDraw: c.swissPointsForDraw ?? 1,
     swissPointsForLoss: c.swissPointsForLoss ?? 0,
     tieBreakerOrder: c.tieBreakerOrder ?? [],
+    // Default WIN (standard). Any unrecognised value falls back to WIN rather
+    // than silently disabling bye scoring.
+    byeResult:
+      c.byeResult === 'DRAW' || c.byeResult === 'NONE' ? c.byeResult : 'WIN',
+    // Default true: a bracket reset is what makes double elimination actually
+    // double — the winners-bracket finalist has to be beaten twice (F15).
+    grandFinalReset: c.grandFinalReset === false ? false : true,
 
     pointsThreshold,
     startingHp,

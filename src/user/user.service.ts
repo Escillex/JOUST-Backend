@@ -34,11 +34,14 @@ export class UserService {
       throw new NotFoundException('User not found');
     }
 
-    // Wins and losses
+    // Wins and losses. Byes are excluded (F14): a bye sets winnerId but is not a
+    // played game, and counting it as a win inflates the record — the losses query
+    // below already excludes byes, so wins must too.
     const wins = await this.prisma.match.count({
       where: {
         winnerId: userId,
         status: MatchStatus.COMPLETED,
+        NOT: { isBye: true },
       },
     });
 
@@ -76,6 +79,9 @@ export class UserService {
         where: {
           winnerId: { not: null },
           status: MatchStatus.COMPLETED,
+          // Same as the win count above (F14): byes are not real wins, so they
+          // must not inflate anyone's total in the ranking comparison either.
+          NOT: { isBye: true },
         },
         _count: {
           winnerId: true,

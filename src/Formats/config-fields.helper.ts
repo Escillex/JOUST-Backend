@@ -114,6 +114,15 @@ function pointsRankedFields(includeSwissRounds: boolean): ConfigField[] {
       type: 'array',
       help: 'Comma-separated, most significant first. Valid: omw, oomw, matchWinPct, wins, losses. Blank uses the default order.',
     },
+    {
+      key: 'byeResult',
+      label: 'Bye Result',
+      placeholder: 'WIN',
+      defaultValue: 'WIN',
+      type: 'select',
+      options: ['WIN', 'DRAW', 'NONE'],
+      help: 'What a bye is worth when the field is odd. WIN = full points (default), DRAW = draw points, NONE = no points. The bye goes to the lowest-standing player who has not had one.',
+    },
   ];
 
   if (includeSwissRounds) {
@@ -234,8 +243,21 @@ export function configFieldsForSystem(
       ];
 
     case 'SINGLE_ELIMINATION':
-    case 'DOUBLE_ELIMINATION':
       return [...universalFields(), ...placementFields(false)];
+
+    case 'DOUBLE_ELIMINATION':
+      return [
+        ...universalFields(),
+        {
+          key: 'grandFinalReset',
+          label: 'Grand Final Bracket Reset',
+          placeholder: 'Yes',
+          defaultValue: true,
+          type: 'boolean',
+          help: 'On (true double elimination): if the losers-bracket finalist wins the grand final, a deciding reset match is played — the winners-bracket finalist must be beaten twice. Off: a single grand final decides it.',
+        },
+        ...placementFields(false),
+      ];
 
     default:
       return universalFields();

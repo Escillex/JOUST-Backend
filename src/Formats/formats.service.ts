@@ -99,6 +99,18 @@ export class FormatsService {
         if (loserId)
           await this.matchService.advanceLoser(loserId, match.loserNextMatchId);
       }
+      // A winners-bracket bye produces no loser, so the losers-bracket match wired
+      // to receive that loser can be left under-filled. Re-check the two matches
+      // this completion fed: settleLosersStarvation walks over (or, if both feeders
+      // were byes, kills) any losers match whose feeders are all resolved but which
+      // has fewer than two players. Without this, double elimination with a
+      // non-power-of-two field deadlocks — the losers bracket never resolves and the
+      // grand final never happens. See settleLosersStarvation.
+      if (match.nextMatchId)
+        await this.settleLosersStarvation(match.nextMatchId);
+      if (match.loserNextMatchId)
+        await this.settleLosersStarvation(match.loserNextMatchId);
+
       // Plan 7.11. This used to call checkTournamentComplete — the ROUND ROBIN
       // checker — which decided the winner from the points leaderboard and
       // applied the 1st-place points-tie halt. In a bracket that is simply the
@@ -135,6 +147,65 @@ export class FormatsService {
     this.realtime.emitTournamentUpdated(tournament.id);
   }
 
+  /**
+   * Resolves a losers-bracket match left under-filled by an upstream winners-bracket
+   * bye. A bye produces no loser, so a losers match wired to receive that loser can
+   * end up with one player — walk them over — or none — the match is dead, so
+   * complete it with no winner and propagate the emptiness to whatever it fed.
+   *
+   * Only acts once *every* feeder of the match has completed, so it can never
+   * pre-empt a slot that is still legitimately waiting for a player. Byes only
+   * originate in winners round 1 (the bracket is padded to the next power of two and
+   * the field is always more than half full), so that is the sole starvation source;
+   * a fully-populated bracket never triggers this, and single elimination — whose
+   * every non-first round always receives two winners — never does either.
+   * Recursive down the losers side; idempotent (returns immediately once COMPLETED).
+   */
+  private async settleLosersStarvation(matchId: string): Promise<void> {
+    const m = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        previousMatches: { select: { status: true } }, // winner-feeders
+        previousLoserMatches: { select: { status: true } }, // loser-feeders
+      },
+    });
+    if (!m || m.status === MatchStatus.COMPLETED) return;
+
+    const feeders = [...m.previousMatches, ...m.previousLoserMatches];
+    // A match with no feeders is a round-1 match, which byes cannot starve.
+    if (feeders.length === 0) return;
+    if (!feeders.every((f) => f.status === MatchStatus.COMPLETED)) return;
+
+    const players = [m.player1Id, m.player2Id].filter(Boolean) as string[];
+    // Two players present: normally filled — the advance path activates it.
+    if (players.length >= 2) return;
+
+    if (players.length === 1) {
+      // One real player, the other feeder was a bye: walk them over as a bye.
+      // handleMatchCompletion then advances the winner and settles the next match.
+      await this.prisma.match.update({
+        where: { id: m.id },
+        data: {
+          winnerId: players[0],
+          status: MatchStatus.COMPLETED,
+          isBye: true,
+        },
+      });
+      await this.handleMatchCompletion(m.id);
+      return;
+    }
+
+    // Zero players: both feeders delivered nobody. This match is dead — complete it
+    // with no winner and push the emptiness on to whatever it fed.
+    await this.prisma.match.update({
+      where: { id: m.id },
+      data: { status: MatchStatus.COMPLETED, isBye: true },
+    });
+    if (m.nextMatchId) await this.settleLosersStarvation(m.nextMatchId);
+    if (m.loserNextMatchId)
+      await this.settleLosersStarvation(m.loserNextMatchId);
+  }
+
   // ─── HYBRID (Swiss → Top Cut) ────────────────────────────────
 
   private async initHybrid(
@@ -168,9 +239,13 @@ export class FormatsService {
     if (!tournament?.format) return;
 
     const config = effectiveRawConfig(tournament);
-    const phase1Config = config.phase1 ?? {};
+    // Read through the phase with a root fallback, so a flat (un-nested) config is
+    // honoured too. resolveConfig's phase-1 merge gives swissRounds the same way;
+    // topCutSize isn't in ResolvedConfig, so it's read directly with the same
+    // nested-then-root precedence (F4 — the completion logic and resolveConfig
+    // now agree on the config shape).
     const maxRounds =
-      phase1Config.swissRounds ??
+      (resolveConfig(config, 1).swissRounds ?? config.swissRounds) ??
       Math.max(1, Math.ceil(Math.log2(tournament.participants.length)));
 
     if (round.roundNumber < maxRounds) {
@@ -180,8 +255,10 @@ export class FormatsService {
     }
 
     // Swiss phase complete — begin Top Cut
-    const phase2Config = config.phase2 ?? {};
-    const topCutSize = phase2Config.topCutSize ?? 8;
+    const topCutSize =
+      (config.phase2 as Record<string, any>)?.topCutSize ??
+      config.topCutSize ??
+      8;
     const leaderboard =
       await this.leaderboardService.getLeaderboard(tournamentId);
     const topN = leaderboard.slice(0, topCutSize).map((e) => e.userId);
@@ -326,34 +403,110 @@ export class FormatsService {
   }
 
   /**
-   * Completion for double elimination: the grand final decides it.
+   * Completion for double elimination.
    *
    * Deliberately separate from checkTournamentComplete (plan 7.11). That
    * function ranks by accumulated match points and halts on a 1st-place points
    * tie, which is correct for standings-based systems (Swiss, round robin,
-   * hybrid phase 1) and wrong for a bracket — where two players on equal points
-   * is the normal outcome of a grand final, not an unresolved tie.
+   * hybrid phase 1) and wrong for a bracket. No tie halt here: a bracket cannot tie.
    *
-   * No tie halt here: a bracket cannot tie. Whoever wins round 200 wins.
+   * F15 — grand final bracket reset. When `grandFinalReset` is on (the default),
+   * the winners-bracket finalist enters the grand final undefeated, so a single
+   * loss must not eliminate them: if the losers-bracket finalist wins round 200, a
+   * deciding reset match (round 201) is spawned and the winner of THAT is champion.
+   * With reset off, round 200 decides it outright (the previous behaviour).
    */
   private async checkDoubleEliminationComplete(tournamentId: string) {
-    const grandFinal = await this.prisma.round.findFirst({
-      where: { tournamentId, roundNumber: 200 },
+    const rounds = await this.prisma.round.findMany({
+      where: { tournamentId, roundNumber: { in: [200, 201] } },
       include: { matches: true },
     });
+    const grandFinal = rounds.find((r) => r.roundNumber === 200);
+    const reset = rounds.find((r) => r.roundNumber === 201);
     if (!grandFinal) return;
 
-    const decider = grandFinal.matches.find(
+    const gf = grandFinal.matches.find(
       (m) => m.status === MatchStatus.COMPLETED && m.winnerId,
     );
-    if (!decider?.winnerId) return;
+    if (!gf?.winnerId) return;
 
+    // If a reset match exists, it is the decider — wait for it to be played.
+    if (reset) {
+      const rm = reset.matches.find(
+        (m) => m.status === MatchStatus.COMPLETED && m.winnerId,
+      );
+      if (!rm?.winnerId) return; // reset created but not yet played
+      await this.finishDoubleElimination(tournamentId, rm.winnerId);
+      return;
+    }
+
+    // No reset yet. Does the configured format want one, and did the
+    // losers-bracket finalist just win?
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { format: true },
+    });
+    const { grandFinalReset } = resolveConfig(effectiveRawConfig(tournament));
+    if (grandFinalReset) {
+      const wbFinalist = await this.winnersFinalistId(grandFinal.matches[0]?.id);
+      // The winners-bracket finalist LOST the grand final: both now have one loss,
+      // so play a deciding reset match rather than eliminate the undefeated player.
+      if (wbFinalist && gf.winnerId !== wbFinalist) {
+        await this.createGrandFinalReset(tournamentId, gf);
+        return; // not complete until the reset is played
+      }
+    }
+
+    // Single grand final, or the winners-bracket finalist won: they are champion.
+    await this.finishDoubleElimination(tournamentId, gf.winnerId);
+  }
+
+  /** Records the winner and completes the tournament. */
+  private async finishDoubleElimination(tournamentId: string, winnerId: string) {
     await this.prisma.tournament.update({
       where: { id: tournamentId },
-      data: { winnerId: decider.winnerId },
+      data: { winnerId },
     });
-
     await this.tournamentService.completeTournament(tournamentId);
+  }
+
+  /** The winners-bracket finalist: the winner of the grand final's winners-side
+   *  feeder (a winners round, numbered < 100). */
+  private async winnersFinalistId(
+    grandFinalMatchId: string | undefined,
+  ): Promise<string | null> {
+    if (!grandFinalMatchId) return null;
+    const gf = await this.prisma.match.findUnique({
+      where: { id: grandFinalMatchId },
+      include: {
+        previousMatches: {
+          select: { winnerId: true, round: { select: { roundNumber: true } } },
+        },
+      },
+    });
+    const winnersFeeder = gf?.previousMatches.find(
+      (m) => m.round.roundNumber < 100,
+    );
+    return winnersFeeder?.winnerId ?? null;
+  }
+
+  /** Spawns the deciding reset match (round 201) with the two grand-final players.
+   *  Left PENDING for the organizer to start, like every other match. */
+  private async createGrandFinalReset(
+    tournamentId: string,
+    grandFinalMatch: Match,
+  ): Promise<void> {
+    const round = await this.prisma.round.create({
+      data: { tournamentId, roundNumber: 201 },
+    });
+    await this.matchService.createMatch({
+      roundId: round.id,
+      player1Id: grandFinalMatch.player1Id ?? undefined,
+      player2Id: grandFinalMatch.player2Id ?? undefined,
+      isBye: false,
+      matchIndex: 0,
+    });
+    this.realtime.emitTournamentUpdated(tournamentId);
   }
 
   private async checkSingleEliminationComplete(
@@ -584,6 +737,9 @@ export class FormatsService {
           where: { id: match.id },
           data: { winnerId: p1, status: MatchStatus.COMPLETED },
         });
+        // A Swiss bye counts as a win: award the round's points so the benched
+        // player is not penalised for an odd field.
+        await this.matchService.creditBye(match.id);
       }
     }
 
@@ -703,7 +859,8 @@ export class FormatsService {
         matchIndex: i,
       });
       matchesCreated.push(match);
-      await this.matchService.activateMatch(match.id);
+      // Left PENDING: the organizer starts each new-round match explicitly. Nothing
+      // auto-activates any more (see MatchService.startMatch).
     }
 
     if (byePlayer) {
@@ -719,6 +876,9 @@ export class FormatsService {
         where: { id: byeMatch.id },
         data: { winnerId: byePlayer, status: MatchStatus.COMPLETED },
       });
+      // Credit the bye as a win (round points) before the round can complete, so
+      // the standings that drive the next pairing already reflect it.
+      await this.matchService.creditBye(byeMatch.id);
     }
 
     for (const m of matchesCreated) {
@@ -860,6 +1020,8 @@ export class FormatsService {
             where: { id: match.id },
             data: { winnerId: p, status: MatchStatus.COMPLETED },
           });
+          // A round-robin bye counts as a win: award the round's points.
+          await this.matchService.creditBye(match.id);
           if (activate) await this.handleMatchCompletion(match.id);
         }
       }

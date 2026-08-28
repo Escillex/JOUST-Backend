@@ -88,7 +88,8 @@ export class GameService {
     if (game.isBuiltin)
       throw new ForbiddenException('The built-in "General" game cannot be modified');
 
-    if (dto.name && dto.name !== game.name) {
+    const renaming = !!dto.name && dto.name !== game.name;
+    if (renaming) {
       const conflict = await this.prisma.game.findUnique({
         where: { name: dto.name },
       });
@@ -96,20 +97,41 @@ export class GameService {
         throw new BadRequestException('A game with that name already exists');
     }
 
-    return this.prisma.game.update({
-      where: { id },
-      data: {
-        ...(dto.name && { name: dto.name }),
-        ...(dto.slug !== undefined && { slug: dto.slug }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.iconUrl !== undefined && { iconUrl: dto.iconUrl }),
-        ...(dto.trackingMode && { trackingMode: dto.trackingMode }),
-        ...(dto.defaultConfig !== undefined && {
-          defaultConfig: dto.defaultConfig,
-        }),
-      },
-      include: { createdBy: { select: { id: true, username: true } } },
-    });
+    const data = {
+      ...(dto.name && { name: dto.name }),
+      ...(dto.slug !== undefined && { slug: dto.slug }),
+      ...(dto.description !== undefined && { description: dto.description }),
+      ...(dto.iconUrl !== undefined && { iconUrl: dto.iconUrl }),
+      ...(dto.trackingMode && { trackingMode: dto.trackingMode }),
+      ...(dto.defaultConfig !== undefined && {
+        defaultConfig: dto.defaultConfig,
+      }),
+    };
+    const include = { createdBy: { select: { id: true, username: true } } };
+
+    // F9. Per-game stats and the legacy format designation are keyed by the game's
+    // NAME, so a rename would otherwise strand all prior history under the old name
+    // and start a fresh, empty bucket. Migrate those rows to the new name in the
+    // same transaction as the rename, so history follows the game. (Renaming to an
+    // existing name is already blocked above, so the target name has no rows.)
+    if (renaming) {
+      const oldName = game.name;
+      const newName = dto.name as string;
+      return this.prisma.$transaction(async (tx) => {
+        const updated = await tx.game.update({ where: { id }, data, include });
+        await tx.userGameStats.updateMany({
+          where: { gameName: oldName },
+          data: { gameName: newName },
+        });
+        await tx.tournamentFormat.updateMany({
+          where: { gameName: oldName },
+          data: { gameName: newName },
+        });
+        return updated;
+      });
+    }
+
+    return this.prisma.game.update({ where: { id }, data, include });
   }
 
   /** Delete a non-builtin game that no tournament uses — ADMIN only. Strict, like

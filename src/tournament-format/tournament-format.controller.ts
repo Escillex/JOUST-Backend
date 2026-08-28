@@ -10,7 +10,10 @@ import {
   Req,
 } from '@nestjs/common';
 import { TournamentFormatService } from './tournament-format.service';
-import { CreateTournamentFormatDto } from './dto/create-format.dto';
+import {
+  CreateTournamentFormatDto,
+  UpdateTournamentFormatDto,
+} from './dto/create-format.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
@@ -47,7 +50,7 @@ export class TournamentFormatController {
   @Patch(':id')
   update(
     @Param('id') id: string,
-    @Body() dto: Partial<CreateTournamentFormatDto>,
+    @Body() dto: UpdateTournamentFormatDto,
     @Req() req: any,
   ) {
     return this.service.update(id, dto, req.user?.roles ?? []);

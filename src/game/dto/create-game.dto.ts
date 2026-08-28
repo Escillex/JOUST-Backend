@@ -6,6 +6,7 @@ import {
   MinLength,
   MaxLength,
 } from 'class-validator';
+import { PartialType } from '@nestjs/mapped-types';
 import { GameTrackingMode } from '@prisma/client';
 
 export class CreateGameDto {
@@ -40,3 +41,8 @@ export class CreateGameDto {
   @IsObject()
   defaultConfig?: Record<string, any>;
 }
+
+// A real DTO (not `Partial<CreateGameDto>`, which erases to `Object` at runtime and
+// slips past the global whitelist ValidationPipe) so PATCH bodies are validated and
+// stripped (F11).
+export class UpdateGameDto extends PartialType(CreateGameDto) {}
