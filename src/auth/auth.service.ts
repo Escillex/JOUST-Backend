@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
+import { generateUniqueUserSlug } from '../user/user-slug.util';
 import {
   AuthDto,
   AdminCreateUserDto,
@@ -74,10 +75,12 @@ export class AuthService {
 
     const hashedPassword = await this.hashPassword(password);
 
+    const slug = await generateUniqueUserSlug(this.prisma, username);
     await this.prisma.user.create({
       data: {
         email,
         username,
+        slug,
         hashedPassword,
         roles: [Role.PLAYER],
       },
@@ -198,6 +201,7 @@ export class AuthService {
       select: {
         id: true,
         username: true,
+        slug: true,
         email: true,
         roles: true,
         isGuest: true,
@@ -279,10 +283,12 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24); // 24-hour lifespan by default
 
+    const slug = await generateUniqueUserSlug(this.prisma, username);
     return this.prisma.user.create({
       data: {
         isGuest: true,
         username,
+        slug,
         roles: [Role.PLAYER],
         expiresAt,
       },
@@ -457,10 +463,21 @@ export class AuthService {
     if (dto.password)
       data.hashedPassword = await this.hashPassword(dto.password);
 
+    // Re-derive the profile handle when the username actually changes. Old links
+    // still resolve via the UUID path, so a rename never 404s a shared link — it
+    // just makes the pretty handle match the new name.
+    if (dto.username && dto.username !== user.username) {
+      data.slug = await generateUniqueUserSlug(
+        this.prisma,
+        dto.username,
+        targetId,
+      );
+    }
+
     const updated = await this.prisma.user.update({
       where: { id: targetId },
       data,
-      select: { id: true, username: true, email: true, roles: true },
+      select: { id: true, username: true, email: true, roles: true, slug: true },
     });
 
     return { message: 'Profile updated', user: updated };
@@ -480,10 +497,12 @@ export class AuthService {
 
     const hashedPassword = await this.hashPassword(dto.password);
 
+    const slug = await generateUniqueUserSlug(this.prisma, dto.username);
     const created = await this.prisma.user.create({
       data: {
         username: dto.username,
         email: dto.email,
+        slug,
         hashedPassword,
         roles: dto.roles && dto.roles.length > 0 ? dto.roles : [Role.PLAYER],
         isGuest: false,

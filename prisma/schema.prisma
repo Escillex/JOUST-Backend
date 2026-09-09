@@ -78,6 +78,9 @@ enum NotificationType {
   // An organizer asked for a game that is not yet in the catalog. Fanned out to
   // admins, who create the game and reassign the tournament (see todo.md §5).
   GAME_REQUESTED
+  // A match's shared countdown timer reached zero. Sent to the tournament's
+  // organizer(s) so they can act even if no browser was watching it.
+  MATCH_TIMER_ENDED
 }
 
 // ─── MODELS ──────────────────────────────────────────────────────
@@ -86,6 +89,10 @@ model User {
   id             String    @id @default(uuid())
   email          String?   @unique
   username       String?   @unique
+  // URL-friendly public handle derived from username (e.g. "swift-falcon").
+  // Unique like Tournament.slug; profile links resolve by slug OR legacy UUID so
+  // old links never break. Generated on create and re-derived on username change.
+  slug           String?   @unique
   hashedPassword String?
   isGuest        Boolean   @default(false)
   roles          Role[]    @default([PLAYER])
@@ -286,6 +293,11 @@ model TournamentParticipant {
 
   seed Int?
 
+  // Final placing in this tournament (1 = champion), written at completion from
+  // the resolved final placements. Null until the tournament completes. Powers
+  // the profile "tournament history" / top-3 showcase.
+  placement Int?
+
   // ACTIVE by default. FORFEITED means the organizer removed the player from a
   // live tournament: their pending matches are awarded to opponents and they are
   // skipped in future Swiss/hybrid pairings. See the participant-management spec.
@@ -443,6 +455,11 @@ model Match {
   createdAt DateTime       @default(now())
   gameLogs  MatchGameLog[]
 
+  // Shared "match utilities" state (organizer timer + per-player coin/dice),
+  // broadcast live to everyone viewing the match. Optional — a match only gets a
+  // row once someone uses a utility.
+  utilityState MatchUtilityState?
+
   // Postgres does not index foreign keys automatically. Every bracket read walks
   // matches by round, and forfeit/participant lookups filter on the two player
   // columns, so all three were sequential scans before these.
@@ -450,6 +467,36 @@ model Match {
   @@index([player1Id])
   @@index([player2Id])
   @@index([winnerId])
+}
+
+// ─── SHARED MATCH UTILITIES ────────────────────────────────────────
+//
+// Live, shared state for the "Match Utilities" panel (docs/shared-utilities-plan.md).
+// One row per match. The timer is organizer-run and rendered from `timerEndsAt`
+// so every viewer counts down in sync; coin/dice results are per-participant and
+// stored in `flips` (a { userId: { kind, result, at } } map) so each person's
+// latest is visible to all. Who may trigger each utility is resolved from the
+// tournament config, not fixed here.
+model MatchUtilityState {
+  id      String @id @default(uuid())
+  matchId String @unique
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  // Timer (staff-controlled). Remaining time is derived: while running,
+  // timerEndsAt - now; while paused, timerPausedRemainingSec.
+  timerDurationSec        Int?
+  timerEndsAt             DateTime?
+  timerRunning            Boolean   @default(false)
+  timerPausedRemainingSec Int?
+  // De-dupes the one finish notification the jobs sweep sends the organizer.
+  timerNotified           Boolean   @default(false)
+
+  // Latest coin/dice result per participant, as { [userId]: { kind, result, at } }.
+  flips Json?
+
+  updatedAt DateTime @updatedAt
+
+  @@index([timerRunning])
 }
 
 model MatchGameLog {

@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
-import { MatchStatus } from '@prisma/client';
+import { MatchStatus, TournamentStatus } from '@prisma/client';
 
 export interface UserStats {
   userId: string;
@@ -18,6 +18,90 @@ export interface UserStats {
 @Injectable()
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** Resolve a profile reference that may be a slug OR a legacy UUID, so old
+   *  UUID links keep working after the switch to username handles. */
+  private async resolveUser(handle: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { OR: [{ slug: handle }, { id: handle }] },
+      select: {
+        id: true,
+        username: true,
+        slug: true,
+        avatarUrl: true,
+        isGuest: true,
+        roles: true,
+        createdAt: true,
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    return user;
+  }
+
+  /** Public profile bundle for the profile page: basic identity, lifetime stats,
+   *  and recent COMPLETED tournaments with the user's placement (drives the
+   *  top-3 showcase). Resolves by slug or UUID. */
+  async getPublicProfile(handle: string) {
+    const user = await this.resolveUser(handle);
+
+    const globalStats = await this.prisma.userGlobalStats.findUnique({
+      where: { userId: user.id },
+    });
+
+    const participations = await this.prisma.tournamentParticipant.findMany({
+      where: { userId: user.id, tournament: { status: TournamentStatus.COMPLETED } },
+      select: {
+        placement: true,
+        tournament: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            date: true,
+            createdAt: true,
+            format: { select: { system: true, name: true } },
+            game: { select: { name: true } },
+          },
+        },
+      },
+      take: 50,
+    });
+
+    const recentTournaments = participations
+      .map((p) => ({
+        id: p.tournament.id,
+        name: p.tournament.name,
+        slug: p.tournament.slug,
+        date: (p.tournament.date ?? p.tournament.createdAt).toISOString(),
+        placement: p.placement,
+        format: p.tournament.format?.system ?? null,
+        game: p.tournament.game?.name ?? null,
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 12);
+
+    return {
+      id: user.id,
+      username: user.username,
+      slug: user.slug,
+      avatarUrl: user.avatarUrl,
+      isGuest: user.isGuest,
+      roles: user.roles,
+      memberSince: user.createdAt,
+      stats: globalStats
+        ? {
+            tournamentsPlayed: globalStats.tournamentsPlayed,
+            tournamentsWon: globalStats.tournamentsWon,
+            wins: globalStats.wins,
+            losses: globalStats.losses,
+            draws: globalStats.draws,
+            winRate: globalStats.winRate,
+            globalPoints: globalStats.globalPoints,
+          }
+        : null,
+      recentTournaments,
+    };
+  }
 
   async getUserStats(userId: string): Promise<UserStats> {
     const uuidRegex =
@@ -123,8 +207,12 @@ export class UserService {
       },
       include: {
         round: { include: { tournament: true } },
-        player1: { select: { id: true, username: true, avatarUrl: true } },
-        player2: { select: { id: true, username: true, avatarUrl: true } },
+        player1: {
+          select: { id: true, username: true, slug: true, avatarUrl: true },
+        },
+        player2: {
+          select: { id: true, username: true, slug: true, avatarUrl: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: 15,
@@ -157,12 +245,14 @@ export class UserService {
         value: `${myScore} - ${oppScore}`,
         player1: {
           id: match.player1Id,
+          slug: match.player1?.slug || null,
           name: match.player1?.username || match.p1Name || 'TBD',
           avatarUrl: match.player1?.avatarUrl || null,
           score: match.player1Score,
         },
         player2: {
           id: match.player2Id,
+          slug: match.player2?.slug || null,
           name: match.player2?.username || match.p2Name || 'TBD',
           avatarUrl: match.player2?.avatarUrl || null,
           score: match.player2Score,

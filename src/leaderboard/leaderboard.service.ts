@@ -30,6 +30,7 @@ export interface LeaderboardEntry {
 export type GlobalLeaderboardEntry = Omit<LeaderboardEntry, 'omw' | 'oomw'> & {
   tournamentsPlayed: number;
   avatarUrl?: string | null;
+  slug?: string | null;
 };
 
 /** Sortable entry: opponent tiebreakers are optional because the global board
@@ -412,7 +413,9 @@ export class LeaderboardService {
             user: { isGuest: false },
           },
           include: {
-            user: { select: { id: true, username: true, avatarUrl: true } },
+            user: {
+              select: { id: true, username: true, slug: true, avatarUrl: true },
+            },
           },
         })
       : await this.prisma.userGlobalStats.findMany({
@@ -420,7 +423,9 @@ export class LeaderboardService {
             user: { isGuest: false },
           },
           include: {
-            user: { select: { id: true, username: true, avatarUrl: true } },
+            user: {
+              select: { id: true, username: true, slug: true, avatarUrl: true },
+            },
           },
         });
 
@@ -428,6 +433,7 @@ export class LeaderboardService {
       (stat) => ({
         userId: stat.userId,
         username: stat.user?.username ?? 'Unknown',
+        slug: stat.user?.slug ?? null,
         points: stat.globalPoints,
         wins: stat.wins,
         losses: stat.losses,

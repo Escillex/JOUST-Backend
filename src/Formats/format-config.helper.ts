@@ -69,6 +69,39 @@ export interface ResolvedConfig {
   placementPoints3rd: number; // 3rd place
   placementPointsTopCut: number; // 4th+ in HYBRID top-cut formats
   placementPointsParticipation: number; // all other finishers
+
+  // Shared match-utilities permissions (docs/shared-utilities-plan.md). Who may
+  // trigger each utility, resolved from config so it's configurable per
+  // tournament/game rather than hardcoded. Enforced server-side by MatchUtilityService.
+  utilities: UtilitiesConfig;
+}
+
+/** Who may trigger a shared utility. NONE = the utility is off/hidden. */
+export type UtilityPerm =
+  | 'NONE'
+  | 'STAFF'
+  | 'PARTICIPANTS'
+  | 'STAFF_AND_PARTICIPANTS';
+
+export interface UtilitiesConfig {
+  enabled: boolean; // master switch — "optional to the game"
+  coinWho: UtilityPerm;
+  diceWho: UtilityPerm;
+  timerWho: UtilityPerm;
+}
+
+const UTILITY_PERMS: readonly UtilityPerm[] = [
+  'NONE',
+  'STAFF',
+  'PARTICIPANTS',
+  'STAFF_AND_PARTICIPANTS',
+];
+
+/** Narrow an unknown config value to a UtilityPerm, falling back to `fallback`. */
+function resolvePerm(value: unknown, fallback: UtilityPerm): UtilityPerm {
+  return UTILITY_PERMS.includes(value as UtilityPerm)
+    ? (value as UtilityPerm)
+    : fallback;
 }
 
 /** Effective raw config for a tournament: the per-tournament override
@@ -166,6 +199,26 @@ export function resolveConfig(
     placementPoints3rd: c.placementPoints3rd ?? 5,
     placementPointsTopCut: c.placementPointsTopCut ?? 3,
     placementPointsParticipation: c.placementPointsParticipation ?? 1,
+
+    // Match utilities — read from ROOT first (like seedingMode, these belong to
+    // the event, not a hybrid Swiss phase), then the phase alias. Defaults make
+    // the feature work unconfigured: timer staff-only, coin/dice open to staff
+    // and the two players.
+    utilities: {
+      enabled: (config?.utilitiesEnabled ?? c.utilitiesEnabled) === false ? false : true,
+      coinWho: resolvePerm(
+        config?.utilityCoinWho ?? c.utilityCoinWho,
+        'STAFF_AND_PARTICIPANTS',
+      ),
+      diceWho: resolvePerm(
+        config?.utilityDiceWho ?? c.utilityDiceWho,
+        'STAFF_AND_PARTICIPANTS',
+      ),
+      timerWho: resolvePerm(
+        config?.utilityTimerWho ?? c.utilityTimerWho,
+        'STAFF',
+      ),
+    },
   };
 }
 

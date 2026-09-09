@@ -907,10 +907,20 @@ export class TournamentService {
 
         // ─── Award placement-based global points ─────────────────────
         for (const entry of leaderboard) {
+          // Persist the final placing on the participant row first — for EVERY
+          // participant (guests included, though they are soon purged), so the
+          // profile "tournament history" / top-3 showcase can read it back. This
+          // is the one durable record of "finished #N"; global stats only keep a
+          // 1st-place count.
+          await tx.tournamentParticipant.updateMany({
+            where: { tournamentId, userId: entry.userId },
+            data: { placement: entry.rank },
+          });
+
           const participant = registeredParticipants.find(
             (p) => p.userId === entry.userId,
           );
-          if (!participant) continue; // skip guests
+          if (!participant) continue; // skip guests for points/stats
 
           let pts: number;
           if (entry.rank === 1) pts = placementPointsChampion;

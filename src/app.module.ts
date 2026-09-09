@@ -14,9 +14,11 @@ import { GameModule } from './game/game.module';
 import { ImagesModule } from './images/images.module';
 import { StoreModule } from './store/store.module';
 import { TrackerModule } from './tournament/match/tracker/tracker.module';
+import { MatchUtilityModule } from './tournament/match/utility/utility.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationModule } from './notification/notification.module';
 import { OrganizerModule } from './organizer/organizer.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -35,9 +37,11 @@ import { OrganizerModule } from './organizer/organizer.module';
     ImagesModule,
     StoreModule,
     TrackerModule,
+    MatchUtilityModule,
     RealtimeModule,
     NotificationModule,
     OrganizerModule,
+    SearchModule,
   ],
 })
 export class AppModule {}

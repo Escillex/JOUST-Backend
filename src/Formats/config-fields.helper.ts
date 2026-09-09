@@ -29,6 +29,51 @@ export interface ConfigField {
   help?: string;
 }
 
+/** Shared match-utilities permissions — apply to every system. A `<tool>Who`
+ *  select of NONE turns that utility off; otherwise it names who may trigger it.
+ *  See docs/shared-utilities-plan.md. Enforced server-side by MatchUtilityService,
+ *  so these are real gates, not just UI hints (Core Rule 9). */
+function utilitiesFields(): ConfigField[] {
+  const whoOptions = ['NONE', 'STAFF', 'PARTICIPANTS', 'STAFF_AND_PARTICIPANTS'];
+  return [
+    {
+      key: 'utilitiesEnabled',
+      label: 'Match Utilities',
+      placeholder: 'true',
+      defaultValue: true,
+      type: 'boolean',
+      help: 'Master switch for the shared coin / dice / timer panel. Off hides it entirely.',
+    },
+    {
+      key: 'utilityCoinWho',
+      label: 'Coin Flip — Who',
+      placeholder: 'STAFF_AND_PARTICIPANTS',
+      defaultValue: 'STAFF_AND_PARTICIPANTS',
+      type: 'select',
+      options: whoOptions,
+      help: 'Who may flip a shared coin. Everyone in the match sees each result. NONE disables it.',
+    },
+    {
+      key: 'utilityDiceWho',
+      label: 'Dice Roll — Who',
+      placeholder: 'STAFF_AND_PARTICIPANTS',
+      defaultValue: 'STAFF_AND_PARTICIPANTS',
+      type: 'select',
+      options: whoOptions,
+      help: 'Who may roll shared dice. NONE disables it.',
+    },
+    {
+      key: 'utilityTimerWho',
+      label: 'Match Timer — Who',
+      placeholder: 'STAFF',
+      defaultValue: 'STAFF',
+      type: 'select',
+      options: whoOptions,
+      help: 'Who controls the synced match clock. Defaults to organizers only; everyone can watch it. NONE disables it.',
+    },
+  ];
+}
+
 /** Rules that apply to every system. */
 function universalFields(): ConfigField[] {
   return [
@@ -207,6 +252,14 @@ function placementFields(includeTopCut: boolean): ConfigField[] {
  * because a drawn result cannot be advanced there at all — see `systemAllowsDraw`.
  */
 export function configFieldsForSystem(
+  system: TournamentSystem | string,
+): ConfigField[] {
+  // Utilities permissions apply to every system, so they are appended once here
+  // rather than in each branch below.
+  return [...baseFieldsForSystem(system), ...utilitiesFields()];
+}
+
+function baseFieldsForSystem(
   system: TournamentSystem | string,
 ): ConfigField[] {
   switch (system) {

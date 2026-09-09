@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import * as bcrypt from 'bcrypt';
 import 'dotenv/config';
+import { generateUniqueUserSlug } from '../src/user/user-slug.util';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -114,10 +115,12 @@ async function main() {
     }
     console.log('  Creating admin user...');
     const hashedPassword = await bcrypt.hash(adminPassword, 10);
+    const adminSlug = await generateUniqueUserSlug(prisma, adminUsername);
     admin = await prisma.user.create({
       data: {
         username: adminUsername,
         email: adminEmail,
+        slug: adminSlug,
         hashedPassword,
         roles: [Role.ADMIN, Role.ORGANIZER, Role.PLAYER],
         isGuest: false,

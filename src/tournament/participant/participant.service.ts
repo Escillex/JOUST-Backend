@@ -18,6 +18,7 @@ import {
 } from '@prisma/client';
 import { JwtPayload } from 'src/guards/jwt-auth.guard';
 import { checkTournamentAccess } from 'src/guards/tournament-access.util';
+import { generateUniqueUserSlug } from '../../user/user-slug.util';
 
 @Injectable()
 export class ParticipantService {
@@ -183,10 +184,12 @@ export class ParticipantService {
             );
           }
 
+          const guestSlug = await generateUniqueUserSlug(tx, username);
           const guestUser = await tx.user.create({
             data: {
               isGuest: true,
               username,
+              slug: guestSlug,
               roles: ['PLAYER'],
               expiresAt,
             },
