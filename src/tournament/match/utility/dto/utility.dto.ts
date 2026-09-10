@@ -1,10 +1,4 @@
-import {
-  IsInt,
-  IsOptional,
-  IsIn,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsInt, IsOptional, IsIn, Min, Max } from 'class-validator';
 
 /** One dice roll request. Defaults to a single six-sided die. Bounded so a
  *  request can't ask for absurd counts/sides. */

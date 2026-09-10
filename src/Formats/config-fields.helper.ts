@@ -34,7 +34,12 @@ export interface ConfigField {
  *  See docs/shared-utilities-plan.md. Enforced server-side by MatchUtilityService,
  *  so these are real gates, not just UI hints (Core Rule 9). */
 function utilitiesFields(): ConfigField[] {
-  const whoOptions = ['NONE', 'STAFF', 'PARTICIPANTS', 'STAFF_AND_PARTICIPANTS'];
+  const whoOptions = [
+    'NONE',
+    'STAFF',
+    'PARTICIPANTS',
+    'STAFF_AND_PARTICIPANTS',
+  ];
   return [
     {
       key: 'utilitiesEnabled',
@@ -259,9 +264,7 @@ export function configFieldsForSystem(
   return [...baseFieldsForSystem(system), ...utilitiesFields()];
 }
 
-function baseFieldsForSystem(
-  system: TournamentSystem | string,
-): ConfigField[] {
+function baseFieldsForSystem(system: TournamentSystem | string): ConfigField[] {
   switch (system) {
     case 'SWISS':
       return [

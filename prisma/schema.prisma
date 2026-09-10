@@ -86,15 +86,46 @@ enum NotificationType {
 // ─── MODELS ──────────────────────────────────────────────────────
 
 model User {
-  id             String    @id @default(uuid())
-  email          String?   @unique
-  username       String?   @unique
+  id String @id @default(uuid())
+
+  /// Stored lowercased. Uniqueness is enforced case-insensitively by a
+  /// functional index (see migration 20260911020000): `Alex@gmail.com` and
+  /// `alex@gmail.com` are one inbox in practice, and with email as the second
+  /// factor they must not be two accounts.
+  email String? @unique
+
+  /// The HANDLE — `@paul`. Unique case-insensitively, no spaces
+  /// (USERNAME_PATTERN), and what you sign in and are @-mentioned with. The
+  /// human-readable name lives in `displayName`.
+  username String? @unique
+
+  /// The human name — "Paul Scholes". Free-form, may contain spaces, NOT
+  /// unique, and purely for display. Twitter/Steam/Discord all split identity
+  /// this way: a stable handle for addressing, a changeable name for showing.
+  /// Accounts that predate the split kept their old spaced username here.
+  displayName String?
   // URL-friendly public handle derived from username (e.g. "swift-falcon").
   // Unique like Tournament.slug; profile links resolve by slug OR legacy UUID so
   // old links never break. Generated on create and re-derived on username change.
   slug           String?   @unique
   hashedPassword String?
   isGuest        Boolean   @default(false)
+
+  // Verification happens at registration, so every account created from here on
+  // has a working address by construction — which is what makes emailed 2FA
+  // codes viable as a mandatory second factor. Accounts that predate this were
+  // marked verified in the migration rather than being forced through it.
+  emailVerified   Boolean   @default(false)
+  emailVerifiedAt DateTime?
+
+  // One-time codes accepted in place of an emailed code. Bcrypt hashes, issued
+  // once at registration. Email IS the second factor here, so a dead inbox would
+  // otherwise be an unrecoverable lockout.
+  twoFactorRecoveryCodes String[]
+
+  emailVerificationTokens EmailVerificationToken[]
+  twoFactorCodes          TwoFactorCode[]
+  trustedDevices          TrustedDevice[]
   roles          Role[]    @default([PLAYER])
   expiresAt      DateTime?
   isExpired      Boolean   @default(false)
@@ -119,6 +150,8 @@ model User {
 
   organizerRoles   TournamentOrganizer[] @relation("TournamentOrganizerUser")
   organizerInvites TournamentOrganizer[] @relation("TournamentOrganizerInviter")
+
+  settingsChanged SystemSetting[]
 
   avatarUrl String? // path: /uploads/avatars/<uuid>.webp
 }
@@ -148,9 +181,10 @@ model Notification {
 // ─── GAME (Admin-managed catalog — the thing being played) ────────
 //
 // A Game is first-class taxonomy, distinct from the tournament STRUCTURE
-// (TournamentSystem) and from a FORMAT preset. Every Tournament has a game; the
-// built-in "General" game is the required floor (todo.md §5). Only admins create
-// games — organizers request one, which fans out as a GAME_REQUESTED notification.
+// (TournamentSystem) and from a FORMAT preset. Every Tournament names a real
+// game — there is no fallback, so a tournament cannot be created until an admin
+// has put something in the catalog (todo.md §5). Only admins create games —
+// organizers request one, which fans out as a GAME_REQUESTED notification.
 model Game {
   id          String  @id @default(uuid())
   name        String  @unique // "Chess", "Beyblade", "General"
@@ -164,7 +198,10 @@ model Game {
   trackingMode  GameTrackingMode @default(POINTS)
   defaultConfig Json?
 
-  // The built-in "General" game cannot be deleted (mirrors isBuiltin on formats).
+  // A retired system row: the old built-in "General" floor. Not listed in the
+  // catalog, not assignable to a tournament, and never deletable — historical
+  // tournaments and UserGameStats still point at it. Nothing new is ever created
+  // with this flag set.
   isBuiltin Boolean @default(false)
 
   createdById String?
@@ -182,14 +219,86 @@ model Game {
 // queue so admins can work through requests, distinct from the fire-and-forget
 // GAME_REQUESTED notification. Resolving one typically means creating the game and
 // reassigning the originating tournament onto it.
+/// Proves an address belongs to whoever is registering. The token is stored
+/// HASHED: a leaked database must not hand over working verification links.
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// A single emailed 2FA code. Hashed at rest for the same reason as above, and
+/// `attempts` is what stops a 6-digit code being brute-forced — a million
+/// guesses against an unlimited endpoint is minutes of work.
+model TwoFactorCode {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// A browser that has already passed the second factor, so it is not challenged
+/// again for 30 days. The cookie carries a random token; this row holds only its
+/// hash, so a stolen database yields no usable device cookies.
+model TrustedDevice {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  userAgent  String?
+  lastUsedAt DateTime @default(now())
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Persisted runtime configuration, editable by an admin in the SETTINGS tab.
+/// The first configuration this project stores anywhere: everything before it
+/// was an env var, or (like DevService.setGuestExpiry) a static field that reset
+/// on restart.
+///
+/// Resolution order is DB -> env -> default, so a container with env vars works
+/// before anyone has logged in, and the admin UI overrides it afterwards.
+///
+/// `encrypted` marks values held as AES-256-GCM ciphertext (the SMTP key). Those
+/// are never returned by the API — the UI shows a placeholder and can replace
+/// them, but cannot read them back.
+model SystemSetting {
+  key       String  @id
+  value     String
+  encrypted Boolean @default(false)
+
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
 model GameRequest {
   id     String            @id @default(uuid())
   name   String // the requested game name
   note   String?
   status GameRequestStatus @default(PENDING)
 
-  // The tournament that prompted the request; it runs under "General" until the
-  // request is resolved. Kept if the tournament is later deleted (SetNull).
+  // The tournament that prompted the request, when there is one. A request can
+  // also stand alone — with no fallback game, an organizer may have to wait for
+  // the game to exist before the tournament can be created at all. Kept if the
+  // tournament is later deleted (SetNull).
   tournamentId String?
   tournament   Tournament? @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
 
@@ -248,11 +357,11 @@ model Tournament {
   formatId String?
   format   TournamentFormat? @relation(fields: [formatId], references: [id], onDelete: SetNull)
 
-  // The game being played. Application-required (every tournament has one; the
-  // service defaults it to the built-in "General"). Kept nullable at the DB level
-  // because the default is a looked-up row, not a literal — the SetNull backstop
-  // only fires if a game is force-deleted; the service reassigns to General first
-  // (todo.md §5). Tighten to NOT NULL in a follow-up once backfill is proven.
+  // The game being played. Application-required: creation refuses without one
+  // (todo.md §5, amended 2026-09-10 — no "General" fallback). Kept nullable at the
+  // DB level for legacy rows still pointing at the retired placeholder and as the
+  // SetNull backstop if a game is force-deleted. Tighten to NOT NULL once those
+  // legacy rows are reassigned.
   gameId String?
   game   Game?   @relation(fields: [gameId], references: [id], onDelete: SetNull)
 
@@ -276,8 +385,14 @@ model Tournament {
   bannerUrl String? // path: /uploads/banners/<uuid>.webp
 
   createdAt DateTime @default(now())
+  // Set once, by completeTournament. The only record of WHEN an event finished:
+  // status alone is a point-in-time flag, so without this no completion can be
+  // placed on a timeline (admin analytics, 2026-09-10). Backfilled from the last
+  // MatchGameLog for tournaments that finished before the column existed.
+  completedAt DateTime?
 
   @@index([status])
+  @@index([completedAt])
   @@index([createdById])
 }
 
@@ -368,8 +483,8 @@ model UserGlobalStats {
 // ─── PER-GAME STATS (registered users only) ────────────────────────
 //
 // Same aggregation as UserGlobalStats, but bucketed by the game the
-// tournament's format designates (TournamentFormat.gameName).
-// Tournaments whose format has no gameName only feed UserGlobalStats.
+// tournament's game designates. Legacy rows (and the retired "General" bucket)
+// are keyed by gameName; tournaments with no game only feed UserGlobalStats.
 // Updated at the same write sites as UserGlobalStats.
 
 model UserGameStats {
@@ -453,6 +568,20 @@ model Match {
   phase Int @default(1)
 
   createdAt DateTime       @default(now())
+
+  // When play actually began and ended. createdAt is when the BRACKET was
+  // generated, which is not the same thing and is why neither can be derived
+  // from it. startedAt is stamped once, the first time the match goes ONGOING
+  // (organizer start or advancement) and never re-stamped; completedAt is
+  // stamped by completedMatchData() at every completion site.
+  //
+  // Byes, walkovers and dead matches complete the instant they are created, so
+  // they carry a completedAt but no startedAt — operational metrics filter on
+  // `isBye = false` AND both timestamps present, or their durations collapse
+  // toward zero (2026-09-10).
+  startedAt   DateTime?
+  completedAt DateTime?
+
   gameLogs  MatchGameLog[]
 
   // Shared "match utilities" state (organizer timer + per-player coin/dice),
@@ -467,6 +596,10 @@ model Match {
   @@index([player1Id])
   @@index([player2Id])
   @@index([winnerId])
+  // Operational analytics scan completed matches by time, and hunt for matches
+  // that have been ONGOING too long.
+  @@index([completedAt])
+  @@index([status, startedAt])
 }
 
 // ─── SHARED MATCH UTILITIES ────────────────────────────────────────

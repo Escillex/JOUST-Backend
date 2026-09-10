@@ -34,8 +34,9 @@ export class CreateTournamentDto {
   @IsUUID('4', { message: 'formatId must be a valid UUID' })
   formatId!: string;
 
-  /** UUID of a Game. Optional: falls back to the format's default game, then to
-   *  the built-in "General" (todo.md §5). Every tournament ends up with a game. */
+  /** UUID of a Game. Optional in the DTO only because the chosen format may carry
+   *  a default game; one or the other must resolve. There is no fallback game —
+   *  creation fails with NO_GAME_SELECTED / NO_GAMES_CONFIGURED (todo.md §5). */
   @IsUUID('4', { message: 'gameId must be a valid UUID' })
   @IsOptional()
   gameId?: string;
@@ -105,7 +106,7 @@ export class UpdateTournamentDto extends PartialType(CreateTournamentDto) {}
 
 /** Move a tournament onto a different game. Unlike a general edit this is allowed
  *  at any status, so an admin can attach a just-created game to a tournament that
- *  has been running under "General" (todo.md §5). */
+ *  has been running under the retired "General" placeholder (todo.md §5). */
 export class ReassignGameDto {
   @IsUUID('4', { message: 'gameId must be a valid UUID' })
   gameId!: string;

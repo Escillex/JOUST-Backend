@@ -18,9 +18,16 @@ export class GameService {
     private notifications: NotificationService,
   ) {}
 
-  /** List all games — public, builtin ("General") first, then alphabetical. */
-  async list() {
+  /** List the games an organizer may actually choose — public, alphabetical.
+   *
+   *  `isBuiltin` rows are the retired system placeholder ("General"). They are
+   *  excluded here: a tournament must name a real game, and if the catalog is
+   *  empty the answer is for an admin to add one, not to fall back to a bucket
+   *  that means nothing. Admins pass `includeSystem` to see the placeholder in
+   *  the catalog manager so historical assignments remain visible. */
+  async list(includeSystem = false) {
     return this.prisma.game.findMany({
+      where: includeSystem ? undefined : { isBuiltin: false },
       orderBy: [{ isBuiltin: 'desc' }, { name: 'asc' }],
       include: {
         createdBy: { select: { id: true, username: true } },
@@ -42,18 +49,25 @@ export class GameService {
     return game;
   }
 
-  /** Resolve the built-in "General" game — the required floor every tournament
-   *  falls back to. Seeded on startup, so this should always find it; it throws
-   *  loudly rather than silently returning null if the seed never ran. */
-  async getGeneral() {
-    const general = await this.prisma.game.findUnique({
-      where: { name: 'General' },
-    });
-    if (!general)
-      throw new NotFoundException(
-        'The built-in "General" game is missing — run the database seed.',
-      );
-    return general;
+  /** Validate a game a tournament is being pointed at. Rejects a missing game and
+   *  the retired system placeholder alike — "General" was a floor that let every
+   *  tournament claim a game without naming one, which made the taxonomy (and the
+   *  per-game leaderboards built on it) meaningless. Callers that assign a game
+   *  go through here. */
+  async assertAssignable(gameId: string) {
+    const game = await this.prisma.game.findUnique({ where: { id: gameId } });
+    if (!game)
+      throw new BadRequestException({
+        message: 'Invalid gameId — game not found',
+        code: 'GAME_NOT_FOUND',
+      });
+    if (game.isBuiltin)
+      throw new BadRequestException({
+        message:
+          'That game is a retired system placeholder and can no longer be assigned. Choose a game from the catalog.',
+        code: 'GAME_NOT_ASSIGNABLE',
+      });
+    return game;
   }
 
   /** Create a new game — ADMIN only. */
@@ -64,7 +78,9 @@ export class GameService {
       },
     });
     if (existing)
-      throw new BadRequestException('A game with that name or slug already exists');
+      throw new BadRequestException(
+        'A game with that name or slug already exists',
+      );
 
     return this.prisma.game.create({
       data: {
@@ -81,12 +97,14 @@ export class GameService {
     });
   }
 
-  /** Update a non-builtin game — ADMIN only. The built-in "General" is locked. */
+  /** Update a non-builtin game — ADMIN only. Retired system rows are locked. */
   async update(id: string, dto: Partial<CreateGameDto>) {
     const game = await this.prisma.game.findUnique({ where: { id } });
     if (!game) throw new NotFoundException('Game not found');
     if (game.isBuiltin)
-      throw new ForbiddenException('The built-in "General" game cannot be modified');
+      throw new ForbiddenException(
+        'The retired system game cannot be modified',
+      );
 
     const renaming = !!dto.name && dto.name !== game.name;
     if (renaming) {
@@ -135,8 +153,9 @@ export class GameService {
   }
 
   /** Delete a non-builtin game that no tournament uses — ADMIN only. Strict, like
-   *  format deletion: reassign tournaments off it first (a tournament always has a
-   *  game, so we never orphan one). "General" can never be deleted. */
+   *  format deletion: reassign tournaments off it first, so we never orphan a
+   *  tournament. The retired "General" placeholder can never be deleted — old
+   *  tournaments and per-game stats still point at it. */
   async delete(id: string) {
     const game = await this.prisma.game.findUnique({
       where: { id },
@@ -144,7 +163,9 @@ export class GameService {
     });
     if (!game) throw new NotFoundException('Game not found');
     if (game.isBuiltin)
-      throw new ForbiddenException('The built-in "General" game cannot be deleted');
+      throw new ForbiddenException(
+        'The retired system game cannot be deleted — historical tournaments and stats still reference it',
+      );
     if (game._count.tournaments > 0) {
       throw new BadRequestException(
         `Cannot delete: ${game._count.tournaments} tournament(s) are using this game. Reassign them first.`,
@@ -157,8 +178,8 @@ export class GameService {
 
   /** An organizer requests a game the catalog lacks. Records a durable GameRequest
    *  (the admin queue) AND fires a GAME_REQUESTED notification to every admin. It
-   *  creates no game — the tournament runs under "General" until an admin resolves
-   *  the request (todo.md §5). */
+   *  creates no game, and there is no longer a "General" floor to run under: until
+   *  an admin creates the game, a tournament for it cannot be created (todo.md §5). */
   async request(
     dto: RequestGameDto,
     requester: { id?: string; username?: string | null },
@@ -178,7 +199,8 @@ export class GameService {
       body:
         `${who} requested a new game "${dto.name}".` +
         (dto.note ? ` Note: ${dto.note}` : '') +
-        ' Create it and reassign the tournament if appropriate.',
+        ' Create it so tournaments can be run under it, and reassign the' +
+        ' originating tournament if there is one.',
       link: '/admin?tab=GAMES',
       tournamentId: dto.tournamentId,
     });
@@ -192,7 +214,9 @@ export class GameService {
       where: status ? { status } : undefined,
       orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       include: {
-        tournament: { select: { id: true, name: true, game: { select: { name: true } } } },
+        tournament: {
+          select: { id: true, name: true, game: { select: { name: true } } },
+        },
         requestedBy: { select: { id: true, username: true } },
       },
     });
@@ -202,7 +226,9 @@ export class GameService {
    *  reassigning the tournament are separate actions (POST /games, PATCH
    *  /tournaments/:id/game); this only closes the queue entry. */
   async resolveRequest(id: string, dto: ResolveRequestDto) {
-    const existing = await this.prisma.gameRequest.findUnique({ where: { id } });
+    const existing = await this.prisma.gameRequest.findUnique({
+      where: { id },
+    });
     if (!existing) throw new NotFoundException('Request not found');
     return this.prisma.gameRequest.update({
       where: { id },

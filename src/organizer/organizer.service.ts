@@ -119,7 +119,14 @@ export class OrganizerService {
       where: { tournamentId },
       orderBy: { createdAt: 'asc' },
       include: {
-        user: { select: { id: true, username: true, avatarUrl: true } },
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+          },
+        },
       },
     });
   }

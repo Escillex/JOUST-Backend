@@ -19,6 +19,10 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationModule } from './notification/notification.module';
 import { OrganizerModule } from './organizer/organizer.module';
 import { SearchModule } from './search/search.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { SettingsModule } from './settings/settings.module';
+import { SettingsAdminModule } from './settings/settings-admin.module';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -42,6 +46,10 @@ import { SearchModule } from './search/search.module';
     NotificationModule,
     OrganizerModule,
     SearchModule,
+    AnalyticsModule,
+    SettingsModule,
+    SettingsAdminModule,
+    MailModule,
   ],
 })
 export class AppModule {}

@@ -35,6 +35,8 @@ import {
   NotificationService,
   NotifyInput,
 } from 'src/notification/notification.service';
+import { GameService } from 'src/game/game.service';
+import { completedMatchData } from './match/match-completion.helper';
 
 @Injectable()
 export class TournamentService {
@@ -47,6 +49,7 @@ export class TournamentService {
     private readonly leaderboardService: LeaderboardService,
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationService,
+    private readonly games: GameService,
   ) {}
 
   private readonly ALLOWED_TRANSITIONS: Record<
@@ -210,19 +213,31 @@ export class TournamentService {
     if (!fmt)
       throw new BadRequestException('Invalid formatId — format not found');
 
-    // Resolve the game. Every tournament has exactly one (todo.md §5): the
-    // organizer's explicit choice wins, else the format's default game, else the
-    // built-in "General". An explicit choice is validated; General is the floor.
-    let gameId: string | null = dto.gameId ?? fmt.gameId ?? null;
-    if (dto.gameId) {
-      const g = await this.prisma.game.findUnique({ where: { id: dto.gameId } });
-      if (!g) throw new BadRequestException('Invalid gameId — game not found');
-    }
-    if (!gameId) {
-      const general = await this.prisma.game.findUnique({
-        where: { name: 'General' },
+    // Resolve the game. Every tournament names exactly one real game (todo.md §5):
+    // the organizer's explicit choice wins, else the format's default game. There
+    // is deliberately NO fallback — the old built-in "General" floor let every
+    // tournament claim a game without naming one, which emptied the taxonomy and
+    // the per-game leaderboards built on it. If the catalog has nothing in it, an
+    // admin has to add a game before tournaments can be created at all.
+    const gameId: string | null = dto.gameId ?? fmt.gameId ?? null;
+    if (gameId) {
+      await this.games.assertAssignable(gameId);
+    } else {
+      const assignable = await this.prisma.game.count({
+        where: { isBuiltin: false },
       });
-      gameId = general?.id ?? null;
+      throw new BadRequestException(
+        assignable === 0
+          ? {
+              message:
+                'No games have been set up yet. An administrator must add a game before tournaments can be created.',
+              code: 'NO_GAMES_CONFIGURED',
+            }
+          : {
+              message: 'Select the game this tournament is played under.',
+              code: 'NO_GAME_SELECTED',
+            },
+      );
     }
 
     const status = dto.startNow
@@ -257,7 +272,13 @@ export class TournamentService {
         },
         include: {
           createdBy: {
-            select: { id: true, username: true, roles: true, email: true },
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              roles: true,
+              email: true,
+            },
           },
           format: true,
           game: true,
@@ -289,7 +310,9 @@ export class TournamentService {
     }
 
     if (dto.gameId) {
-      const g = await this.prisma.game.findUnique({ where: { id: dto.gameId } });
+      const g = await this.prisma.game.findUnique({
+        where: { id: dto.gameId },
+      });
       if (!g) throw new BadRequestException('Invalid gameId — game not found');
     }
 
@@ -319,15 +342,17 @@ export class TournamentService {
   }
 
   /** Reassign a tournament's game — allowed at any status (unlike updateTournament,
-   *  which is OPEN-only). Lets staff attach a just-created game to a tournament that
-   *  has been running under "General" (todo.md §5). Past awards already credited to
-   *  the old game are not retroactively moved here; the dev backfill can rebuild
-   *  per-game stats from history if a correction is wanted. */
+   *  which is OPEN-only). Lets staff move a tournament onto a just-created game —
+   *  including the legacy ones still sitting on the retired "General" placeholder,
+   *  which can be reassigned OFF but never onto (todo.md §5). Past awards already
+   *  credited to the old game are not retroactively moved here; the dev backfill
+   *  can rebuild per-game stats from history if a correction is wanted. */
   async reassignGame(id: string, gameId: string) {
-    const tournament = await this.prisma.tournament.findUnique({ where: { id } });
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id },
+    });
     if (!tournament) throw new NotFoundException('Tournament not found');
-    const game = await this.prisma.game.findUnique({ where: { id: gameId } });
-    if (!game) throw new BadRequestException('Invalid gameId — game not found');
+    await this.games.assertAssignable(gameId);
 
     return this.prisma.tournament.update({
       where: { id },
@@ -344,7 +369,14 @@ export class TournamentService {
       include: {
         participants: {
           include: {
-            user: { select: { id: true, username: true, isGuest: true } },
+            user: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                isGuest: true,
+              },
+            },
           },
           orderBy: [{ seed: 'asc' }, { id: 'asc' }],
         },
@@ -535,7 +567,7 @@ export class TournamentService {
             const winnerId = (match.player1Id || match.player2Id) as string;
             await this.prisma.match.update({
               where: { id: match.id },
-              data: { winnerId, status: MatchStatus.COMPLETED },
+              data: completedMatchData({ winnerId }),
             });
           }
           await this.formatsService.handleMatchCompletion(match.id);
@@ -787,7 +819,13 @@ export class TournamentService {
         // this is equivalent minus the side effect. The emit happens after commit.
         await tx.tournament.update({
           where: { id: tournamentId },
-          data: { status: TournamentStatus.COMPLETED },
+          // completedAt is the only durable record of WHEN the event finished —
+          // status carries no time — and the completion guard above makes this
+          // path run once, so it is never overwritten by a later re-entry.
+          data: {
+            status: TournamentStatus.COMPLETED,
+            completedAt: new Date(),
+          },
         });
 
         // Snapshot match player names before guest purge
@@ -1024,12 +1062,29 @@ export class TournamentService {
         matches: {
           include: {
             player1: {
-              select: { id: true, username: true, isGuest: true },
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                isGuest: true,
+              },
             },
             player2: {
-              select: { id: true, username: true, isGuest: true },
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                isGuest: true,
+              },
             },
-            winner: { select: { id: true, username: true, isGuest: true } },
+            winner: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                isGuest: true,
+              },
+            },
           },
         },
       },
@@ -1043,13 +1098,25 @@ export class TournamentService {
         // let anyone with a tournament id enumerate them. Managers who need contact
         // details use GET /auth/users (organizer/admin only).
         createdBy: { select: { id: true, username: true } },
-        winner: { select: { id: true, username: true, isGuest: true } },
+        winner: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
         format: true,
         game: { select: { id: true, name: true, iconUrl: true } },
         participants: {
           include: {
             user: {
-              select: { id: true, username: true, isGuest: true },
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                isGuest: true,
+              },
             },
           },
         },
@@ -1077,13 +1144,25 @@ export class TournamentService {
         // let anyone with a tournament id enumerate them. Managers who need contact
         // details use GET /auth/users (organizer/admin only).
         createdBy: { select: { id: true, username: true } },
-        winner: { select: { id: true, username: true, isGuest: true } },
+        winner: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
         format: true,
         game: { select: { id: true, name: true, iconUrl: true } },
         participants: {
           include: {
             user: {
-              select: { id: true, username: true, isGuest: true },
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                isGuest: true,
+              },
             },
           },
         },
@@ -1093,12 +1172,29 @@ export class TournamentService {
             matches: {
               include: {
                 player1: {
-                  select: { id: true, username: true, isGuest: true },
+                  select: {
+                    id: true,
+                    username: true,
+                    displayName: true,
+                    isGuest: true,
+                  },
                 },
                 player2: {
-                  select: { id: true, username: true, isGuest: true },
+                  select: {
+                    id: true,
+                    username: true,
+                    displayName: true,
+                    isGuest: true,
+                  },
                 },
-                winner: { select: { id: true, username: true, isGuest: true } },
+                winner: {
+                  select: {
+                    id: true,
+                    username: true,
+                    displayName: true,
+                    isGuest: true,
+                  },
+                },
               },
             },
           },
@@ -1168,28 +1264,27 @@ export class TournamentService {
     // deliberately left open. Only the browse list is filtered, and it still
     // shows a private tournament to people who have a reason to see it — an
     // admin, its creator, an accepted co-organizer, or someone already entered.
-    const privacyWhere =
-      user?.roles?.includes(Role.ADMIN)
-        ? undefined
-        : {
-            OR: [
-              { isPrivate: false },
-              ...(user
-                ? [
-                    { createdById: user.id },
-                    {
-                      organizers: {
-                        some: {
-                          userId: user.id,
-                          status: OrganizerInviteStatus.ACCEPTED,
-                        },
+    const privacyWhere = user?.roles?.includes(Role.ADMIN)
+      ? undefined
+      : {
+          OR: [
+            { isPrivate: false },
+            ...(user
+              ? [
+                  { createdById: user.id },
+                  {
+                    organizers: {
+                      some: {
+                        userId: user.id,
+                        status: OrganizerInviteStatus.ACCEPTED,
                       },
                     },
-                    { participants: { some: { userId: user.id } } },
-                  ]
-                : []),
-            ],
-          };
+                  },
+                  { participants: { some: { userId: user.id } } },
+                ]
+              : []),
+          ],
+        };
 
     const where =
       manageableWhere && privacyWhere
@@ -1200,7 +1295,28 @@ export class TournamentService {
       ...(where ? { where } : {}),
       orderBy: { createdAt: 'desc' },
       include: {
-        winner: { select: { username: true, isGuest: true } },
+        // Who runs a tournament is not secret — it is on the tournament page —
+        // so it rides along on every listing rather than only the manage view.
+        // Kept to id/username/slug so the extra joins stay cheap (Core Rule 8).
+        createdBy: {
+          select: { id: true, username: true, displayName: true, slug: true },
+        },
+        organizers: {
+          where: { status: OrganizerInviteStatus.ACCEPTED },
+          select: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                slug: true,
+              },
+            },
+          },
+        },
+        winner: {
+          select: { username: true, displayName: true, isGuest: true },
+        },
         format: true,
         game: { select: { id: true, name: true, iconUrl: true } },
         participants: true,
@@ -1210,7 +1326,9 @@ export class TournamentService {
           include: {
             matches: {
               include: {
-                winner: { select: { username: true, isGuest: true } },
+                winner: {
+                  select: { username: true, displayName: true, isGuest: true },
+                },
               },
             },
           },

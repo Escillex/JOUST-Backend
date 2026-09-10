@@ -34,7 +34,10 @@ export class MatchUtilityController {
   @Post(':id/utility/coin')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  coin(@Param('id', ParseUUIDPipe) id: string, @Req() req: AuthenticatedRequest) {
+  coin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     return this.utility.flipCoin(id, req.user);
   }
 

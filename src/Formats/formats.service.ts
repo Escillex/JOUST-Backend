@@ -22,6 +22,7 @@ import {
 import { effectiveRawConfig, resolveConfig } from './format-config.helper';
 import { seedBracketSlots, shuffled } from './bracket-seeding.helper';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { completedMatchData } from '../tournament/match/match-completion.helper';
 
 @Injectable()
 export class FormatsService {
@@ -185,11 +186,7 @@ export class FormatsService {
       // handleMatchCompletion then advances the winner and settles the next match.
       await this.prisma.match.update({
         where: { id: m.id },
-        data: {
-          winnerId: players[0],
-          status: MatchStatus.COMPLETED,
-          isBye: true,
-        },
+        data: completedMatchData({ winnerId: players[0], isBye: true }),
       });
       await this.handleMatchCompletion(m.id);
       return;
@@ -199,7 +196,7 @@ export class FormatsService {
     // with no winner and push the emptiness on to whatever it fed.
     await this.prisma.match.update({
       where: { id: m.id },
-      data: { status: MatchStatus.COMPLETED, isBye: true },
+      data: completedMatchData({ isBye: true }),
     });
     if (m.nextMatchId) await this.settleLosersStarvation(m.nextMatchId);
     if (m.loserNextMatchId)
@@ -245,7 +242,8 @@ export class FormatsService {
     // nested-then-root precedence (F4 — the completion logic and resolveConfig
     // now agree on the config shape).
     const maxRounds =
-      (resolveConfig(config, 1).swissRounds ?? config.swissRounds) ??
+      resolveConfig(config, 1).swissRounds ??
+      config.swissRounds ??
       Math.max(1, Math.ceil(Math.log2(tournament.participants.length)));
 
     if (round.roundNumber < maxRounds) {
@@ -377,7 +375,7 @@ export class FormatsService {
             const winnerId = (created.player1Id || created.player2Id) as string;
             await this.prisma.match.update({
               where: { id: created.id },
-              data: { winnerId, status: MatchStatus.COMPLETED },
+              data: completedMatchData({ winnerId }),
             });
           }
         }
@@ -448,7 +446,9 @@ export class FormatsService {
     });
     const { grandFinalReset } = resolveConfig(effectiveRawConfig(tournament));
     if (grandFinalReset) {
-      const wbFinalist = await this.winnersFinalistId(grandFinal.matches[0]?.id);
+      const wbFinalist = await this.winnersFinalistId(
+        grandFinal.matches[0]?.id,
+      );
       // The winners-bracket finalist LOST the grand final: both now have one loss,
       // so play a deciding reset match rather than eliminate the undefeated player.
       if (wbFinalist && gf.winnerId !== wbFinalist) {
@@ -462,7 +462,10 @@ export class FormatsService {
   }
 
   /** Records the winner and completes the tournament. */
-  private async finishDoubleElimination(tournamentId: string, winnerId: string) {
+  private async finishDoubleElimination(
+    tournamentId: string,
+    winnerId: string,
+  ) {
     await this.prisma.tournament.update({
       where: { id: tournamentId },
       data: { winnerId },
@@ -580,10 +583,7 @@ export class FormatsService {
           } else if (created.isBye && created.player1Id) {
             await this.prisma.match.update({
               where: { id: created.id },
-              data: {
-                winnerId: created.player1Id,
-                status: MatchStatus.COMPLETED,
-              },
+              data: completedMatchData({ winnerId: created.player1Id }),
             });
           }
         }
@@ -735,7 +735,7 @@ export class FormatsService {
       else if (p1 && !p2) {
         await this.prisma.match.update({
           where: { id: match.id },
-          data: { winnerId: p1, status: MatchStatus.COMPLETED },
+          data: completedMatchData({ winnerId: p1 }),
         });
         // A Swiss bye counts as a win: award the round's points so the benched
         // player is not penalised for an odd field.
@@ -874,7 +874,7 @@ export class FormatsService {
       matchesCreated.push(byeMatch);
       await this.prisma.match.update({
         where: { id: byeMatch.id },
-        data: { winnerId: byePlayer, status: MatchStatus.COMPLETED },
+        data: completedMatchData({ winnerId: byePlayer }),
       });
       // Credit the bye as a win (round points) before the round can complete, so
       // the standings that drive the next pairing already reflect it.
@@ -1018,7 +1018,7 @@ export class FormatsService {
           });
           await this.prisma.match.update({
             where: { id: match.id },
-            data: { winnerId: p, status: MatchStatus.COMPLETED },
+            data: completedMatchData({ winnerId: p }),
           });
           // A round-robin bye counts as a win: award the round's points.
           await this.matchService.creditBye(match.id);

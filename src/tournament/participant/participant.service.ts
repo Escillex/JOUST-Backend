@@ -95,7 +95,14 @@ export class ParticipantService {
           const created = await tx.tournamentParticipant.create({
             data: { tournamentId, userId },
             include: {
-              user: { select: { id: true, username: true, email: true } },
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  displayName: true,
+                  email: true,
+                },
+              },
               tournament: {
                 select: { id: true, name: true, maxPlayers: true },
               },
@@ -198,7 +205,14 @@ export class ParticipantService {
           const participant = await tx.tournamentParticipant.create({
             data: { tournamentId, userId: guestUser.id },
             include: {
-              user: { select: { id: true, username: true, email: true } },
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  displayName: true,
+                  email: true,
+                },
+              },
               tournament: {
                 select: { id: true, name: true, maxPlayers: true },
               },
@@ -318,7 +332,7 @@ export class ParticipantService {
       where: { tournamentId },
       include: {
         user: {
-          select: { id: true, username: true, email: true },
+          select: { id: true, username: true, displayName: true, email: true },
         },
       },
       orderBy: { seed: 'asc' },
@@ -351,7 +365,14 @@ export class ParticipantService {
       where: { userId_tournamentId: { userId, tournamentId } },
       data: { seed },
       include: {
-        user: { select: { id: true, username: true, isGuest: true } },
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
       },
     });
   }

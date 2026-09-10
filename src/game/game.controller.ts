@@ -24,10 +24,12 @@ import { Role } from '@prisma/client';
 export class GameController {
   constructor(private readonly service: GameService) {}
 
-  /** GET /games — public catalog */
+  /** GET /games — public catalog of assignable games. Retired system rows (the
+   *  old "General" placeholder) are excluded unless `?includeSystem=true`, which
+   *  the admin catalog manager passes so historical assignments stay visible. */
   @Get()
-  list() {
-    return this.service.list();
+  list(@Query('includeSystem') includeSystem?: string) {
+    return this.service.list(includeSystem === 'true' || includeSystem === '1');
   }
 
   /** POST /games/request — organizer asks admins for a missing game.

@@ -12,11 +12,15 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import {
-  AuthDto,
-  UpdateRolesDto,
-  ConvertGuestDto,
-  UpdateProfileDto,
   AdminCreateUserDto,
+  AuthDto,
+  ConvertGuestDto,
+  RecoveryCodeDto,
+  ResendCodeDto,
+  SignUpDto,
+  UpdateProfileDto,
+  UpdateRolesDto,
+  VerifyCodeDto,
 } from './dto/auth.dto';
 import * as express from 'express';
 import {
@@ -36,16 +40,50 @@ export class AuthController {
   // ──────────────────────────────────────────────
 
   @Post('signup')
-  signup(@Body() dto: AuthDto) {
+  signup(@Body() dto: SignUpDto) {
     return this.authService.SignUp(dto);
   }
 
+  /** Password step. Returns a session only when no second factor is due —
+   *  otherwise a short-lived challenge the client submits a code against. */
   @Post('signin')
   signin(
     @Body() dto: AuthDto,
+    @Req() req: express.Request,
     @Res({ passthrough: true }) res: express.Response,
   ) {
-    return this.authService.SignIn(dto, res);
+    const deviceToken = (req.cookies as Record<string, string | undefined>)?.[
+      'device'
+    ];
+    return this.authService.SignIn(dto, res, deviceToken);
+  }
+
+  /** Second step: the emailed code, for both registration and sign-in. */
+  @Post('2fa/verify')
+  submitCode(
+    @Body() dto: VerifyCodeDto,
+    @Req() req: express.Request,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.authService.submitCode(dto, res, req.headers['user-agent']);
+  }
+
+  /** The way back in when the inbox is unreachable. */
+  @Post('2fa/recovery')
+  submitRecovery(
+    @Body() dto: RecoveryCodeDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.authService.submitRecoveryCode(
+      dto.challenge,
+      dto.recoveryCode,
+      res,
+    );
+  }
+
+  @Post('2fa/resend')
+  resendCode(@Body() dto: ResendCodeDto) {
+    return this.authService.resendCode(dto.challenge);
   }
 
   @Get('signout')

@@ -2,10 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from 'prisma/prisma.service';
 import { NotificationService } from 'src/notification/notification.service';
-import {
-  NotificationType,
-  OrganizerInviteStatus,
-} from '@prisma/client';
+import { NotificationType, OrganizerInviteStatus } from '@prisma/client';
 
 /**
  * Notifies the organizer(s) when a shared match timer reaches zero.

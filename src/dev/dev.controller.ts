@@ -1,5 +1,7 @@
 import {
   Controller,
+  Get,
+  Req,
   Post,
   Delete,
   Patch,
@@ -8,6 +10,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { DevService } from './dev.service';
+import { SetTwoFactorDto } from './dto/dev.dto';
+import type { AuthenticatedRequest } from '../guards/jwt-auth.guard';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
@@ -35,6 +39,21 @@ export class DevController {
   @Delete('tournament/:id')
   async deleteTournament(@Param('id') id: string) {
     return this.devService.deleteTournament(id);
+  }
+
+  /** Temporarily relax the second factor while debugging. In-memory: a restart
+   *  puts it back. Refused in production without ALLOW_2FA_BYPASS. */
+  @Patch('two-factor')
+  setTwoFactor(@Body() dto: SetTwoFactorDto, @Req() req: AuthenticatedRequest) {
+    return this.devService.setTwoFactorEnforcement(
+      dto.mode,
+      req.user?.id || (req.user as any)?.sub,
+    );
+  }
+
+  @Get('two-factor')
+  getTwoFactor() {
+    return this.devService.getTwoFactorEnforcement();
   }
 
   @Post('backfill-game-stats')

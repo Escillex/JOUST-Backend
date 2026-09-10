@@ -49,6 +49,7 @@ describe('completeTournament idempotency', () => {
         leaderboard,
         realtime,
         notifications,
+        { assertAssignable: jest.fn() } as any,
       ),
     };
   };

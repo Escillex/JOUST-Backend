@@ -131,23 +131,26 @@ async function main() {
     console.log(`  ✅ Admin preserved: ${admin.username}`);
   }
 
-  // ── 2. Seed the built-in "General" game ──────────────────────────
-  // Every tournament has a game; "General" is the required floor an organizer
-  // falls back to when no specific game is chosen (todo.md §5). It is builtin and
-  // must never be deletable.
-  const general = await prisma.game.upsert({
+  // ── 2. Games ─────────────────────────────────────────────────────
+  // The catalog ships EMPTY, on purpose. There used to be a built-in "General"
+  // game seeded here as the floor every tournament fell back to; it meant a
+  // tournament could claim a game without naming one, which hollowed out the
+  // taxonomy and left every per-game leaderboard pooled into one meaningless
+  // bucket. An admin now creates the games their venue actually plays, and no
+  // tournament can be created until at least one exists (todo.md §5).
+  //
+  // Existing databases keep their "General" row — historical tournaments and
+  // UserGameStats still reference it — but it is flagged isBuiltin, which now
+  // means "retired system row": not listed, not assignable, not deletable.
+  const retired = await prisma.game.updateMany({
     where: { name: 'General' },
-    update: { isBuiltin: true },
-    create: {
-      name: 'General',
-      slug: 'general',
-      description:
-        'Uncategorised play. The default game every tournament falls back to when no specific game is set.',
-      isBuiltin: true,
-      createdById: admin.id,
-    },
+    data: { isBuiltin: true },
   });
-  console.log(`  ✅ Game: ${general.name}`);
+  console.log(
+    retired.count > 0
+      ? '  ✅ Games: legacy "General" retained as a retired system row'
+      : '  ✅ Games: catalog starts empty — an admin adds the first game',
+  );
 
   // ── 3. Seed built-in Tournament Formats ──────────────────────────
   console.log('  Seeding built-in formats...');

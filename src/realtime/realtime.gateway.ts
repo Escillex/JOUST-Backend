@@ -210,7 +210,10 @@ export class RealtimeGateway implements OnGatewayConnection {
 
   /** Shared match-utilities state (timer / coin / dice) for one match, pushed to
    *  everyone viewing the tournament so open panels update without a refetch. */
-  emitUtilityUpdate(tournamentId: string, payload: { matchId: string; state: unknown }): void {
+  emitUtilityUpdate(
+    tournamentId: string,
+    payload: { matchId: string; state: unknown },
+  ): void {
     this.server
       .to(tournamentRoom(tournamentId))
       .emit('utility:update', payload);

@@ -10,6 +10,7 @@ import { AuthModule } from '../auth/auth.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { NotificationModule } from '../notification/notification.module';
+import { GameModule } from '../game/game.module';
 import { forwardRef } from '@nestjs/common';
 
 @Module({
@@ -22,6 +23,7 @@ import { forwardRef } from '@nestjs/common';
     LeaderboardModule,
     RealtimeModule,
     NotificationModule,
+    GameModule,
   ],
   controllers: [TournamentController],
   providers: [TournamentService],

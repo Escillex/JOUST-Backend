@@ -25,11 +25,17 @@ export class SearchService {
       this.prisma.user.findMany({
         where: {
           isGuest: false,
-          username: { contains: q, mode: 'insensitive' },
+          // Both: a handle is what you type to mention someone, a display name
+          // is what you actually remember them as.
+          OR: [
+            { username: { contains: q, mode: 'insensitive' as const } },
+            { displayName: { contains: q, mode: 'insensitive' as const } },
+          ],
         },
         select: {
           id: true,
           username: true,
+          displayName: true,
           slug: true,
           avatarUrl: true,
           globalStats: {
@@ -119,7 +125,15 @@ export class SearchService {
         date: true,
         createdAt: true,
         game: { select: { name: true } },
-        winner: { select: { id: true, username: true, slug: true, avatarUrl: true } },
+        winner: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            slug: true,
+            avatarUrl: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: 6,

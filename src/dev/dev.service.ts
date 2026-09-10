@@ -1,5 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { TwoFactorService } from '../auth/two-factor.service';
+import { isProduction } from '../config/security.config';
 import { ParticipantService } from '../tournament/participant/participant.service';
 import { TournamentService } from '../tournament/tournament.service';
 import { LeaderboardService } from '../leaderboard/leaderboard.service';
@@ -11,6 +18,7 @@ import { TournamentStatus } from '@prisma/client';
 
 @Injectable()
 export class DevService {
+  private readonly logger = new Logger(DevService.name);
   constructor(
     private prisma: PrismaService,
     private participantService: ParticipantService,
@@ -30,7 +38,10 @@ export class DevService {
       // A tournament contributes per-game stats if it has a game (the new source
       // of truth) or a legacy format.gameName not yet backfilled (todo.md §5).
       where: {
-        OR: [{ gameId: { not: null } }, { format: { gameName: { not: null } } }],
+        OR: [
+          { gameId: { not: null } },
+          { format: { gameName: { not: null } } },
+        ],
       },
       include: {
         format: true,
@@ -140,6 +151,42 @@ export class DevService {
       results.push(res);
     }
     return { message: `Added ${count} guests to tournament`, results };
+  }
+
+  /**
+   * Turn the second factor down while debugging something unrelated.
+   *
+   * Deliberately in-memory, exactly like `setGuestExpiry` below: a disabled
+   * second factor that cannot survive a process restart is far safer than one
+   * persisted in a table, where it would quietly outlive whoever flipped it.
+   * Restart returns to the configured mode.
+   *
+   * Refused in production unless ALLOW_2FA_BYPASS is explicitly set — a debug
+   * switch that silently works in prod is a backdoor, not a debug switch.
+   */
+  setTwoFactorEnforcement(mode: 'all' | 'staff' | 'off', actorId?: string) {
+    if (isProduction() && process.env.ALLOW_2FA_BYPASS !== 'true') {
+      throw new ForbiddenException(
+        'Changing 2FA enforcement is disabled in production. Set ALLOW_2FA_BYPASS=true to override.',
+      );
+    }
+    TwoFactorService.enforcementOverride = mode;
+    // Loud on purpose: the window where the second factor was off must be
+    // reconstructable from the logs.
+    this.logger.warn(
+      `2FA enforcement overridden to "${mode}"${actorId ? ` by ${actorId}` : ''} (resets on restart)`,
+    );
+    return {
+      mode,
+      message: `Two-factor enforcement set to "${mode}" until restart.`,
+    };
+  }
+
+  getTwoFactorEnforcement() {
+    return {
+      override: TwoFactorService.enforcementOverride,
+      effective: TwoFactorService.enforcementOverride ?? 'configured',
+    };
   }
 
   async setGuestExpiry(days: number) {

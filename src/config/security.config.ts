@@ -99,6 +99,42 @@ export function corsAllowedOrigins(): string[] | null {
  * would silently break sign-in over plain http, and leaving it off in
  * production would let the session cookie travel unencrypted.
  */
+/** How long a session is good for, as configured by `JWT_EXPIRES_IN`.
+ *
+ *  The signed token and the cookie carrying it must agree. Before this, the JWT
+ *  had NO expiry at all while the cookie expired after an hour — so the cookie
+ *  lapsed while the Bearer copy in localStorage stayed valid forever. One value
+ *  now drives both.
+ *
+ *  Accepts the `zeit/ms` style strings @nestjs/jwt takes (`7d`, `12h`, `30m`,
+ *  `900s`) or a bare number of seconds.
+ */
+export function sessionExpiresIn(): string {
+  return process.env.JWT_EXPIRES_IN?.trim() || '7d';
+}
+
+const DURATION_UNITS: Record<string, number> = {
+  s: 1000,
+  m: 60 * 1000,
+  h: 60 * 60 * 1000,
+  d: 24 * 60 * 60 * 1000,
+};
+
+/** `sessionExpiresIn()` in milliseconds, for the cookie's maxAge. */
+export function sessionLifetimeMs(): number {
+  const raw = sessionExpiresIn();
+  const match = /^(\d+)\s*([smhd])?$/i.exec(raw);
+  if (!match) {
+    // An unparseable value must not silently become a surprise lifetime.
+    throw new Error(
+      `JWT_EXPIRES_IN is not a valid duration: "${raw}". Use e.g. 7d, 12h, 30m, 900s.`,
+    );
+  }
+  const amount = Number(match[1]);
+  const unit = (match[2] ?? 's').toLowerCase();
+  return amount * DURATION_UNITS[unit];
+}
+
 export function sessionCookieOptions(maxAgeMs: number) {
   return {
     httpOnly: true,

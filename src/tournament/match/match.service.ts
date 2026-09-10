@@ -20,6 +20,7 @@ import {
   winsNeeded,
   type ByeResult,
 } from '../../Formats/format-config.helper';
+import { completedMatchData } from './match-completion.helper';
 
 @Injectable()
 export class MatchService {
@@ -441,7 +442,7 @@ export class MatchService {
 
     await this.prisma.match.update({
       where: { id: matchId },
-      data: { winnerId: null, status: MatchStatus.COMPLETED },
+      data: completedMatchData({ winnerId: null }),
     });
 
     await this.updateMatchStats(matchId, {
@@ -539,7 +540,7 @@ export class MatchService {
 
     const completed = await this.prisma.match.update({
       where: { id: matchId },
-      data: { winnerId: winnerId || null, status: MatchStatus.COMPLETED },
+      data: completedMatchData({ winnerId: winnerId || null }),
       include: { round: { select: { tournamentId: true } } },
     });
 
@@ -637,7 +638,7 @@ export class MatchService {
 
       await this.prisma.match.update({
         where: { id: matchId },
-        data: { winnerId: matchWinnerId, status: MatchStatus.COMPLETED },
+        data: completedMatchData({ winnerId: matchWinnerId }),
       });
 
       await this.updateMatchStats(matchId, {
@@ -689,7 +690,7 @@ export class MatchService {
 
     await this.prisma.match.update({
       where: { id: matchId },
-      data: { winnerId, status: MatchStatus.COMPLETED },
+      data: completedMatchData({ winnerId }),
     });
 
     await this.creditWalkoverWin(matchId, winnerId);
@@ -934,7 +935,13 @@ export class MatchService {
 
     const updated = await this.prisma.match.update({
       where: { id: matchId },
-      data: { status: MatchStatus.ONGOING },
+      // startedAt is stamped once and never re-stamped: the early return above
+      // makes this path single-shot, but a match can also have been advanced
+      // into ONGOING first, and that earlier moment is the true start.
+      data: {
+        status: MatchStatus.ONGOING,
+        ...(match.startedAt ? {} : { startedAt: new Date() }),
+      },
       include: { round: { select: { tournamentId: true } } },
     });
 
@@ -949,9 +956,19 @@ export class MatchService {
   }
 
   async activateMatch(matchId: string) {
+    // Unlike startMatch this has no early return, so it can run more than once
+    // for the same match as feeders settle. Read the existing stamp first and
+    // leave it alone if present — the first activation is the start.
+    const existing = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { startedAt: true },
+    });
     const updated = await this.prisma.match.update({
       where: { id: matchId },
-      data: { status: MatchStatus.ONGOING },
+      data: {
+        status: MatchStatus.ONGOING,
+        ...(existing?.startedAt ? {} : { startedAt: new Date() }),
+      },
       include: { round: { select: { tournamentId: true } } },
     });
 
@@ -997,9 +1014,30 @@ export class MatchService {
     return this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
-        player1: { select: { id: true, username: true, isGuest: true } },
-        player2: { select: { id: true, username: true, isGuest: true } },
-        winner: { select: { id: true, username: true, isGuest: true } },
+        player1: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
+        player2: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
+        winner: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
       },
     });
   }
@@ -1008,9 +1046,30 @@ export class MatchService {
     return this.prisma.match.findMany({
       where: { roundId },
       include: {
-        player1: { select: { id: true, username: true, isGuest: true } },
-        player2: { select: { id: true, username: true, isGuest: true } },
-        winner: { select: { id: true, username: true, isGuest: true } },
+        player1: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
+        player2: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
+        winner: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            isGuest: true,
+          },
+        },
       },
     });
   }

@@ -1,6 +1,7 @@
 import { requireJwtSecret } from '../config/security.config';
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { isSessionToken } from './jwt-auth.guard';
 import type { AuthenticatedRequest, JwtPayload } from './jwt-auth.guard';
 
 /** Attaches req.user when a valid token is present and permits the request either
@@ -24,9 +25,14 @@ export class OptionalJwtAuthGuard implements CanActivate {
     if (!token) return true;
 
     try {
-      request.user = await this.jwtService.verifyAsync<JwtPayload>(token, {
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
         secret: requireJwtSecret(),
       });
+      // Same rule as JwtAuthGuard: an intermediate login token is not a session.
+      // Missing it here would let a half-authenticated caller be treated as the
+      // user on every optional-auth route — including the admin-only combined
+      // leaderboard, which decides access from req.user.roles.
+      if (isSessionToken(payload)) request.user = payload;
     } catch {
       // A bad or expired token is treated as anonymous rather than as an error:
       // these routes are public, and a stale cookie must not break reading a

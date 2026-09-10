@@ -205,7 +205,10 @@ export function resolveConfig(
     // the feature work unconfigured: timer staff-only, coin/dice open to staff
     // and the two players.
     utilities: {
-      enabled: (config?.utilitiesEnabled ?? c.utilitiesEnabled) === false ? false : true,
+      enabled:
+        (config?.utilitiesEnabled ?? c.utilitiesEnabled) === false
+          ? false
+          : true,
       coinWho: resolvePerm(
         config?.utilityCoinWho ?? c.utilityCoinWho,
         'STAFF_AND_PARTICIPANTS',

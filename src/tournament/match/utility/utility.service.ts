@@ -42,7 +42,11 @@ export class MatchUtilityService {
         round: {
           select: {
             tournament: {
-              select: { id: true, config: true, format: { select: { config: true } } },
+              select: {
+                id: true,
+                config: true,
+                format: { select: { config: true } },
+              },
             },
           },
         },
@@ -107,7 +111,12 @@ export class MatchUtilityService {
       timerPausedRemainingSec: number | null;
       flips: unknown;
     } | null,
-    perms: { enabled: boolean; coinWho: UtilityPerm; diceWho: UtilityPerm; timerWho: UtilityPerm },
+    perms: {
+      enabled: boolean;
+      coinWho: UtilityPerm;
+      diceWho: UtilityPerm;
+      timerWho: UtilityPerm;
+    },
   ) {
     return {
       matchId,
@@ -126,7 +135,12 @@ export class MatchUtilityService {
   private async persistAndBroadcast(
     matchId: string,
     tournamentId: string,
-    perms: { enabled: boolean; coinWho: UtilityPerm; diceWho: UtilityPerm; timerWho: UtilityPerm },
+    perms: {
+      enabled: boolean;
+      coinWho: UtilityPerm;
+      diceWho: UtilityPerm;
+      timerWho: UtilityPerm;
+    },
     data: Record<string, unknown>,
   ) {
     const row = await this.prisma.matchUtilityState.upsert({
@@ -142,7 +156,9 @@ export class MatchUtilityService {
   async flipCoin(matchId: string, user: JwtPayload) {
     const { match, tournament, config } = await this.loadContext(matchId);
     if (!config.utilities.enabled)
-      throw new ForbiddenException('Match utilities are disabled for this tournament');
+      throw new ForbiddenException(
+        'Match utilities are disabled for this tournament',
+      );
     const ok = await this.isAllowed(
       config.utilities.coinWho,
       tournament.id,
@@ -153,17 +169,26 @@ export class MatchUtilityService {
     if (!ok) throw new ForbiddenException('You are not allowed to flip here');
 
     const result = randomInt(2) === 0 ? 'Heads' : 'Tails';
-    return this.recordFlip(matchId, tournament.id, config.utilities, match.utilityState?.flips, user.id, {
-      kind: 'COIN',
-      result,
-      at: new Date().toISOString(),
-    });
+    return this.recordFlip(
+      matchId,
+      tournament.id,
+      config.utilities,
+      match.utilityState?.flips,
+      user.id,
+      {
+        kind: 'COIN',
+        result,
+        at: new Date().toISOString(),
+      },
+    );
   }
 
   async rollDice(matchId: string, dto: RollDiceDto, user: JwtPayload) {
     const { match, tournament, config } = await this.loadContext(matchId);
     if (!config.utilities.enabled)
-      throw new ForbiddenException('Match utilities are disabled for this tournament');
+      throw new ForbiddenException(
+        'Match utilities are disabled for this tournament',
+      );
     const ok = await this.isAllowed(
       config.utilities.diceWho,
       tournament.id,
@@ -176,17 +201,29 @@ export class MatchUtilityService {
     const sides = dto.sides ?? 6;
     const count = dto.count ?? 1;
     const values = Array.from({ length: count }, () => randomInt(sides) + 1);
-    return this.recordFlip(matchId, tournament.id, config.utilities, match.utilityState?.flips, user.id, {
-      kind: 'DICE',
-      result: values.join(', '),
-      at: new Date().toISOString(),
-    });
+    return this.recordFlip(
+      matchId,
+      tournament.id,
+      config.utilities,
+      match.utilityState?.flips,
+      user.id,
+      {
+        kind: 'DICE',
+        result: values.join(', '),
+        at: new Date().toISOString(),
+      },
+    );
   }
 
   private async recordFlip(
     matchId: string,
     tournamentId: string,
-    perms: { enabled: boolean; coinWho: UtilityPerm; diceWho: UtilityPerm; timerWho: UtilityPerm },
+    perms: {
+      enabled: boolean;
+      coinWho: UtilityPerm;
+      diceWho: UtilityPerm;
+      timerWho: UtilityPerm;
+    },
     existingFlips: unknown,
     userId: string,
     entry: FlipEntry,
@@ -201,7 +238,9 @@ export class MatchUtilityService {
   async timer(matchId: string, dto: TimerActionDto, user: JwtPayload) {
     const { match, tournament, config } = await this.loadContext(matchId);
     if (!config.utilities.enabled)
-      throw new ForbiddenException('Match utilities are disabled for this tournament');
+      throw new ForbiddenException(
+        'Match utilities are disabled for this tournament',
+      );
     const ok = await this.isAllowed(
       config.utilities.timerWho,
       tournament.id,
@@ -209,7 +248,8 @@ export class MatchUtilityService {
       match.player2Id,
       user,
     );
-    if (!ok) throw new ForbiddenException('You are not allowed to control the timer');
+    if (!ok)
+      throw new ForbiddenException('You are not allowed to control the timer');
 
     const state = match.utilityState;
     let data: Record<string, unknown>;
@@ -217,7 +257,9 @@ export class MatchUtilityService {
     switch (dto.action) {
       case 'set': {
         if (!dto.durationSec)
-          throw new BadRequestException('durationSec is required to set the timer');
+          throw new BadRequestException(
+            'durationSec is required to set the timer',
+          );
         data = {
           timerDurationSec: dto.durationSec,
           timerPausedRemainingSec: dto.durationSec,
@@ -234,9 +276,12 @@ export class MatchUtilityService {
           state?.timerPausedRemainingSec ??
           state?.timerDurationSec;
         if (!remaining)
-          throw new BadRequestException('Set a duration before starting the timer');
+          throw new BadRequestException(
+            'Set a duration before starting the timer',
+          );
         data = {
-          timerDurationSec: dto.durationSec ?? state?.timerDurationSec ?? remaining,
+          timerDurationSec:
+            dto.durationSec ?? state?.timerDurationSec ?? remaining,
           timerEndsAt: new Date(Date.now() + remaining * 1000),
           timerRunning: true,
           timerPausedRemainingSec: null,
@@ -247,7 +292,10 @@ export class MatchUtilityService {
       case 'pause': {
         // Freeze the remaining time so it can resume later.
         const remaining = state?.timerEndsAt
-          ? Math.max(0, Math.round((state.timerEndsAt.getTime() - Date.now()) / 1000))
+          ? Math.max(
+              0,
+              Math.round((state.timerEndsAt.getTime() - Date.now()) / 1000),
+            )
           : (state?.timerPausedRemainingSec ?? 0);
         data = {
           timerRunning: false,
@@ -268,6 +316,11 @@ export class MatchUtilityService {
       }
     }
 
-    return this.persistAndBroadcast(matchId, tournament.id, config.utilities, data);
+    return this.persistAndBroadcast(
+      matchId,
+      tournament.id,
+      config.utilities,
+      data,
+    );
   }
 }

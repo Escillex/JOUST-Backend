@@ -64,6 +64,7 @@ describe('startTournament', () => {
       { getLeaderboard: jest.fn().mockResolvedValue([]) } as any,
       { emitTournamentUpdated: jest.fn() } as any,
       { notify: jest.fn(), notifyMany: jest.fn() } as any,
+      { assertAssignable: jest.fn() } as any,
     );
     return { prisma, formats, service };
   };

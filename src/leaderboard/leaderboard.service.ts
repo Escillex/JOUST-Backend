@@ -10,6 +10,8 @@ export interface LeaderboardEntry {
   rank: number;
   userId: string;
   username: string;
+  /** Human name when set; the UI shows this and keeps `username` as the @handle. */
+  displayName?: string | null;
   points: number;
   wins: number;
   losses: number;
@@ -348,7 +350,14 @@ export class LeaderboardService {
       where: { tournamentId },
       include: {
         stats: true,
-        user: { select: { id: true, username: true, avatarUrl: true } },
+        user: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            avatarUrl: true,
+          },
+        },
         tournament: { include: { format: true } },
       },
     });
@@ -414,7 +423,13 @@ export class LeaderboardService {
           },
           include: {
             user: {
-              select: { id: true, username: true, slug: true, avatarUrl: true },
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                slug: true,
+                avatarUrl: true,
+              },
             },
           },
         })
@@ -424,7 +439,13 @@ export class LeaderboardService {
           },
           include: {
             user: {
-              select: { id: true, username: true, slug: true, avatarUrl: true },
+              select: {
+                id: true,
+                username: true,
+                displayName: true,
+                slug: true,
+                avatarUrl: true,
+              },
             },
           },
         });
@@ -433,6 +454,7 @@ export class LeaderboardService {
       (stat) => ({
         userId: stat.userId,
         username: stat.user?.username ?? 'Unknown',
+        displayName: stat.user?.displayName ?? null,
         slug: stat.user?.slug ?? null,
         points: stat.globalPoints,
         wins: stat.wins,
@@ -468,15 +490,46 @@ export class LeaderboardService {
 
   // ─── GAMES ────────────────────────────────────────────────────
 
-  /** Distinct game designations across format presets, for board filtering. */
+  /** The set of per-game boards worth showing, for the leaderboard's filter tabs.
+   *
+   *  This used to read `TournamentFormat.gameName` alone. That column is the
+   *  DEPRECATED backfill source for `gameId` and nothing writes it any more, so
+   *  once games became first-class (todo.md §5) it was always null: the endpoint
+   *  returned [], the frontend hides the tab strip on an empty list, and every
+   *  per-game board silently became unreachable even though the boards
+   *  themselves still worked. Read the catalog instead, unioned with the game
+   *  names that actually have stats so historical boards (including the retired
+   *  "General") stay reachable.
+   *
+   *  `UserGameStats` is keyed by NAME, which is what `?game=` filters on — so the
+   *  names returned here are exactly the values that board accepts. */
   async getGames(): Promise<string[]> {
-    const formats = await this.prisma.tournamentFormat.findMany({
-      where: { gameName: { not: null } },
-      select: { gameName: true },
-      distinct: ['gameName'],
-      orderBy: { gameName: 'asc' },
-    });
-    return formats.map((f) => f.gameName as string);
+    const [games, stats, legacyFormats] = await Promise.all([
+      // The catalog, minus system rows (retired "General"): a game an admin has
+      // created deserves a tab before anyone has finished a tournament in it.
+      this.prisma.game.findMany({
+        where: { isBuiltin: false },
+        select: { name: true },
+      }),
+      // Any name that has a board behind it, whether or not the game still
+      // exists in the catalog.
+      this.prisma.userGameStats.findMany({
+        select: { gameName: true },
+        distinct: ['gameName'],
+      }),
+      this.prisma.tournamentFormat.findMany({
+        where: { gameName: { not: null } },
+        select: { gameName: true },
+        distinct: ['gameName'],
+      }),
+    ]);
+
+    const names = new Set<string>([
+      ...games.map((g) => g.name),
+      ...stats.map((s) => s.gameName),
+      ...legacyFormats.map((f) => f.gameName as string),
+    ]);
+    return [...names].sort((a, b) => a.localeCompare(b));
   }
 
   // ─── USER STATS ───────────────────────────────────────────────

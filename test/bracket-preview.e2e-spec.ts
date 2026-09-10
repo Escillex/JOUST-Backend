@@ -6,6 +6,7 @@ import { TournamentService } from '../src/tournament/tournament.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { FormatsService } from '../src/Formats/formats.service';
 import { LeaderboardService } from '../src/leaderboard/leaderboard.service';
+import { GameService } from '../src/game/game.service';
 import { JwtAuthGuard } from '../src/guards/jwt-auth.guard';
 import { RolesGuard } from '../src/guards/roles.guard';
 import { RealtimeGateway } from '../src/realtime/realtime.gateway';
@@ -28,6 +29,8 @@ describe('TournamentController (generate-bracket)', () => {
       controllers: [TournamentController],
       providers: [
         TournamentService,
+        // TournamentService validates the game a tournament is pointed at.
+        { provide: GameService, useValue: { assertAssignable: jest.fn() } },
         {
           provide: PrismaService,
           useValue: {

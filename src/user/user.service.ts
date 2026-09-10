@@ -27,6 +27,7 @@ export class UserService {
       select: {
         id: true,
         username: true,
+        displayName: true,
         slug: true,
         avatarUrl: true,
         isGuest: true,
@@ -49,7 +50,10 @@ export class UserService {
     });
 
     const participations = await this.prisma.tournamentParticipant.findMany({
-      where: { userId: user.id, tournament: { status: TournamentStatus.COMPLETED } },
+      where: {
+        userId: user.id,
+        tournament: { status: TournamentStatus.COMPLETED },
+      },
       select: {
         placement: true,
         tournament: {
@@ -83,6 +87,7 @@ export class UserService {
     return {
       id: user.id,
       username: user.username,
+      displayName: user.displayName,
       slug: user.slug,
       avatarUrl: user.avatarUrl,
       isGuest: user.isGuest,
@@ -208,10 +213,22 @@ export class UserService {
       include: {
         round: { include: { tournament: true } },
         player1: {
-          select: { id: true, username: true, slug: true, avatarUrl: true },
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            slug: true,
+            avatarUrl: true,
+          },
         },
         player2: {
-          select: { id: true, username: true, slug: true, avatarUrl: true },
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            slug: true,
+            avatarUrl: true,
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -230,8 +247,14 @@ export class UserService {
 
       const isPlayer1 = match.player1Id === userId;
       const opponent = isPlayer1
-        ? match.player2?.username || match.p2Name || 'TBD'
-        : match.player1?.username || match.p1Name || 'TBD';
+        ? match.player2?.displayName ||
+          match.player2?.username ||
+          match.p2Name ||
+          'TBD'
+        : match.player1?.displayName ||
+          match.player1?.username ||
+          match.p1Name ||
+          'TBD';
 
       const myScore = isPlayer1 ? match.player1Score : match.player2Score;
       const oppScore = isPlayer1 ? match.player2Score : match.player1Score;
@@ -246,14 +269,22 @@ export class UserService {
         player1: {
           id: match.player1Id,
           slug: match.player1?.slug || null,
-          name: match.player1?.username || match.p1Name || 'TBD',
+          name:
+            match.player1?.displayName ||
+            match.player1?.username ||
+            match.p1Name ||
+            'TBD',
           avatarUrl: match.player1?.avatarUrl || null,
           score: match.player1Score,
         },
         player2: {
           id: match.player2Id,
           slug: match.player2?.slug || null,
-          name: match.player2?.username || match.p2Name || 'TBD',
+          name:
+            match.player2?.displayName ||
+            match.player2?.username ||
+            match.p2Name ||
+            'TBD',
           avatarUrl: match.player2?.avatarUrl || null,
           score: match.player2Score,
         },
