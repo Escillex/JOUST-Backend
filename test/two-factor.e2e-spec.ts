@@ -87,6 +87,31 @@ describe('TwoFactorService', () => {
       expect(result.retryAfterSeconds).toBeGreaterThan(0);
     });
 
+    it('issues immediately when the previous code was entered correctly', async () => {
+      // Signing out and back in within the minute is ordinary. Throttling it
+      // dead-ends the account: the fresh challenge has no pending code, so the
+      // screen says "No code is pending" and the resend that would fix it is
+      // throttled too. A success already proved inbox access, so it floods nothing.
+      const { service, mail } = build({
+        prisma: {
+          twoFactorCode: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: 'c1',
+              createdAt: new Date(),
+              consumedAt: new Date(),
+              succeededAt: new Date(), // entered correctly, moments ago
+            }),
+            create: jest.fn().mockResolvedValue({}),
+            update: jest.fn(),
+            updateMany: jest.fn(),
+          },
+        },
+      });
+      const result = await service.issueCode({ id: 'u1', email: 'a@example.com' }, 'signin');
+      expect(result.sent).toBe(true);
+      expect(mail.send).toHaveBeenCalled();
+    });
+
     it('reports a delivery failure rather than claiming success', async () => {
       const { service, mail } = build();
       mail.send.mockResolvedValueOnce({ delivered: false, transport: 'smtp', error: 'relay refused' });
@@ -113,9 +138,15 @@ describe('TwoFactorService', () => {
         prisma: { twoFactorCode: { findFirst: jest.fn().mockResolvedValue(row), update: jest.fn(), create: jest.fn(), updateMany: jest.fn() } },
       });
       await expect(service.checkCode('u1', '123456')).resolves.toEqual({ ok: true });
-      // Consumed, so a replay finds nothing.
+      // Consumed, so a replay finds nothing — and marked as a SUCCESS, which is
+      // what exempts the next sign-in from the resend throttle.
       expect(prisma.twoFactorCode.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ consumedAt: expect.any(Date) }) }),
+        expect.objectContaining({
+          data: expect.objectContaining({
+            consumedAt: expect.any(Date),
+            succeededAt: expect.any(Date),
+          }),
+        }),
       );
     });
 

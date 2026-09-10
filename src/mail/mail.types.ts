@@ -17,4 +17,7 @@ export interface MailResult {
 export interface MailTransport {
   readonly name: string;
   send(message: MailMessage, from: string, replyTo?: string): Promise<void>;
+  /** Prove the relay is reachable and the credentials work, without sending.
+   *  Optional: the console transport has nothing to connect to. */
+  verify?(): Promise<void>;
 }

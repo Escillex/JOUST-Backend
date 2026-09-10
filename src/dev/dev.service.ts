@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TwoFactorService } from '../auth/two-factor.service';
+import { SettingsService } from '../settings/settings.service';
 import { isProduction } from '../config/security.config';
 import { ParticipantService } from '../tournament/participant/participant.service';
 import { TournamentService } from '../tournament/tournament.service';
@@ -23,6 +24,7 @@ export class DevService {
     private prisma: PrismaService,
     private participantService: ParticipantService,
     private leaderboardService: LeaderboardService,
+    private settings: SettingsService,
   ) {}
 
   /**
@@ -135,7 +137,20 @@ export class DevService {
     };
   }
 
+  /** Refuses unless bulk guest creation has been explicitly allowed in settings.
+   *  Enforced here rather than only in the UI — a hidden button is not a
+   *  restriction, and this endpoint mints real user rows in a loop. */
+  private async assertBulkGuestsAllowed() {
+    if (!(await this.settings.getBoolean('DEV_BULK_GUESTS'))) {
+      throw new ForbiddenException(
+        'Bulk guest generation is disabled. Enable it in Admin → Dev Tools before using it. ' +
+          'Adding guests individually to a roster is a normal organizer action and is unaffected.',
+      );
+    }
+  }
+
   async batchAddGuests(tournamentId: string, count: number) {
+    await this.assertBulkGuestsAllowed();
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
     });

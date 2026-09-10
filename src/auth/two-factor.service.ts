@@ -73,7 +73,13 @@ export class TwoFactorService {
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
     });
-    if (latest) {
+    // ...but a code that was entered CORRECTLY does not count. Signing out and
+    // back in within the minute is an ordinary thing to do, and throttling it
+    // left the account in a dead end: the new challenge has no pending code, so
+    // the code screen says "No code is pending. Request a new one." and the
+    // resend that would fix it is throttled too. A success already required
+    // reading the inbox, so exempting it floods nothing.
+    if (latest && !latest.succeededAt) {
       const age = Date.now() - latest.createdAt.getTime();
       if (age < RESEND_THROTTLE_MS) {
         return {
@@ -141,9 +147,10 @@ export class TwoFactorService {
     }
 
     if (await bcrypt.compare(code, row.codeHash)) {
+      const now = new Date();
       await this.prisma.twoFactorCode.update({
         where: { id: row.id },
-        data: { consumedAt: new Date() },
+        data: { consumedAt: now, succeededAt: now },
       });
       return { ok: true };
     }

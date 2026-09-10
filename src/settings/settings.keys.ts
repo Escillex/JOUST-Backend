@@ -45,6 +45,15 @@ export const SETTINGS = {
     env: 'GOOGLE_SIGNIN_ENABLED',
     default: 'false',
   },
+  /** Bulk guest creation is off unless explicitly allowed: it mints real user
+   *  rows in a loop, and an organizer who fat-fingers a quantity can flood a
+   *  tournament (and the guest-cleanup crons) in one click. Opt-in, not
+   *  opt-out. */
+  DEV_BULK_GUESTS: {
+    key: 'dev.bulkGuests',
+    env: 'DEV_BULK_GUESTS',
+    default: 'false',
+  },
   SETUP_COMPLETED_AT: { key: 'setup.completedAt' },
 } as const satisfies Record<string, SettingSpec>;
 
@@ -62,4 +71,5 @@ export const EDITABLE_SETTINGS: SettingName[] = [
   'MAIL_REPLY_TO',
   'TWO_FACTOR_ENFORCEMENT',
   'GOOGLE_SIGNIN_ENABLED',
+  'DEV_BULK_GUESTS',
 ];

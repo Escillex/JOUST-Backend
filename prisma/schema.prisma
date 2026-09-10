@@ -244,6 +244,11 @@ model TwoFactorCode {
   codeHash   String
   expiresAt  DateTime
   consumedAt DateTime?
+  /// Set only when this code was entered CORRECTLY. `consumedAt` cannot tell
+  /// the two apart: it is also stamped when a code is burned by five wrong
+  /// guesses or superseded by a resend, and the resend throttle needs to
+  /// punish those cases while letting a genuine re-login through.
+  succeededAt DateTime?
   attempts   Int       @default(0)
   createdAt  DateTime  @default(now())
 

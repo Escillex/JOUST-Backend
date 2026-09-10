@@ -43,6 +43,31 @@ export class MailService {
     });
   }
 
+  /**
+   * Connect and authenticate without sending — used by the admin test button so
+   * a wrong SMTP key reports itself as "535 authentication failed" rather than
+   * as a failed send, which could equally mean a bad recipient or a rejected
+   * From address. The console transport has nothing to verify and passes.
+   */
+  async verifyTransport(): Promise<MailResult> {
+    let transport: MailTransport;
+    try {
+      transport = await this.transport();
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      return { delivered: false, transport: 'none', error };
+    }
+    if (!transport.verify) return { delivered: true, transport: transport.name };
+    try {
+      await transport.verify();
+      return { delivered: true, transport: transport.name };
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Mail transport check failed: ${error}`);
+      return { delivered: false, transport: transport.name, error };
+    }
+  }
+
   async send(message: MailMessage): Promise<MailResult> {
     const from =
       (await this.settings.get('MAIL_FROM')) ?? 'JOUST <noreply@example.com>';
