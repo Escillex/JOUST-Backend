@@ -24,6 +24,8 @@ import { CreateBackupDto, UpdateBackupDto } from './dto/backup.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 /**
  * Database backups, from the browser.
@@ -47,6 +49,7 @@ export class BackupController {
     };
   }
 
+  @Audit({ action: 'backup.create', category: AC.SYSTEM, pick: ['alias', 'sanitized'], describe: (c) => `Created a ${c.body.sanitized ? 'sanitized export' : 'backup'}${c.body.alias ? ` "${String(c.body.alias)}"` : ''}` })
   @Post()
   async create(@Body() dto: CreateBackupDto) {
     return this.backups.create({
@@ -57,6 +60,7 @@ export class BackupController {
     });
   }
 
+  @Audit({ action: 'backup.update', category: AC.SYSTEM, pick: ['alias', 'pinned'], describe: (c) => `Updated the backup ${c.params.name}` })
   @Patch(':name')
   async update(@Param('name') name: string, @Body() dto: UpdateBackupDto) {
     return this.backups.update(name, dto);
@@ -70,6 +74,7 @@ export class BackupController {
     res.sendFile(path);
   }
 
+  @Audit({ action: 'backup.import', category: AC.SYSTEM, describe: (c) => `Imported a backup as ${String((c.result as { name?: string })?.name ?? 'a new file')}` })
   @Post('import')
   @UseInterceptors(FileInterceptor('file'))
   async import(@UploadedFile() file: Express.Multer.File) {
@@ -93,6 +98,7 @@ export class BackupController {
    * restart is coming so it can poll /health, instead of the request dying
    * mid-flight and looking like a failure.
    */
+  @Audit({ action: 'backup.restore', category: AC.SYSTEM, describe: (c) => `Restored the database from ${c.params.name}` })
   @Post(':name/restore')
   async restore(@Param('name') name: string) {
     const result = await this.backups.restore(name);
@@ -106,6 +112,7 @@ export class BackupController {
     };
   }
 
+  @Audit({ action: 'backup.delete', category: AC.SYSTEM, describe: (c) => `Deleted the backup ${c.params.name}` })
   @Delete(':name')
   async remove(@Param('name') name: string) {
     await this.backups.remove(name);

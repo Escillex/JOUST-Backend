@@ -32,6 +32,8 @@ import {
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('auth')
 export class AuthController {
@@ -163,6 +165,7 @@ export class AuthController {
   // GUEST MANAGEMENT
   // ──────────────────────────────────────────────
 
+  @Audit({ action: 'user.create_guest', category: AC.USER, pick: ['username'], describe: (c) => `Created the guest "${String(c.body.username ?? '')}"` })
   @Post('createguest')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -171,6 +174,7 @@ export class AuthController {
   }
 
   // ITEM 2: Convert a guest to a registered account
+  @Audit({ action: 'user.convert_guest', category: AC.USER, targetUser: { param: 'id' }, pick: ['username'], describe: (c) => `Converted guest ${c.target} into the account @${String(c.body.username ?? '')}` })
   @Patch('convert-guest/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -182,6 +186,7 @@ export class AuthController {
   // ROLE MANAGEMENT
   // ──────────────────────────────────────────────
 
+  @Audit({ action: 'user.roles', category: AC.USER, targetUser: { param: 'id' }, pick: ['roles'], describe: (c) => `Set ${c.target}'s roles to ${((c.body.roles as string[]) ?? []).join(', ') || 'none'}` })
   @Patch('roles/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -194,6 +199,7 @@ export class AuthController {
   // ──────────────────────────────────────────────
 
   // ITEM 4: Admin manually creates a registered user
+  @Audit({ action: 'user.create', category: AC.USER, pick: ['username', 'roles'], describe: (c) => `Created the account @${String(c.body.username ?? '')}` })
   @Post('users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -202,6 +208,7 @@ export class AuthController {
   }
 
   // ITEM 4: Admin edits a user's profile (username / email / password)
+  @Audit({ action: 'user.update_profile', category: AC.USER, targetUser: { param: 'id' }, describe: (c) => `Edited ${c.target}'s account (${c.fields.join(', ') || 'no changes'})` })
   @Patch('users/:id/profile')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -210,6 +217,7 @@ export class AuthController {
   }
 
   // ITEM 1: Admin permanently deletes a user (preserves match history)
+  @Audit({ action: 'user.delete', category: AC.USER, targetUser: { param: 'id' }, describe: (c) => `Deleted the account ${c.target}` })
   @Delete('users/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

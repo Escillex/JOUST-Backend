@@ -19,6 +19,8 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('games')
 export class GameController {
@@ -37,6 +39,7 @@ export class GameController {
    *  clash, but keeping it here documents that it is not an :id route. */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
+  @Audit({ action: 'game.request', category: AC.CATALOG, tournament: { body: 'tournamentId' }, pick: ['name', 'tournamentId'], describe: (c) => `Requested the game "${String(c.body.name ?? '')}"${c.body.tournamentId ? ` for ${c.t}` : ''}` })
   @Post('request')
   request(@Body() dto: RequestGameDto, @Req() req: any) {
     return this.service.request(dto, {
@@ -57,6 +60,7 @@ export class GameController {
   /** PATCH /games/requests/:id — resolve or dismiss a request. ADMIN only. */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'game.request_resolve', category: AC.CATALOG, pick: ['status'], describe: (c) => `Marked a game request ${String(c.body.status ?? '').toLowerCase()}` })
   @Patch('requests/:id')
   resolveRequest(@Param('id') id: string, @Body() dto: ResolveRequestDto) {
     return this.service.resolveRequest(id, dto);
@@ -71,6 +75,7 @@ export class GameController {
   /** POST /games — ADMIN only */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'game.create', category: AC.CATALOG, pick: ['name'], describe: (c) => `Added the game "${String(c.body.name ?? '')}"` })
   @Post()
   create(@Body() dto: CreateGameDto, @Req() req: any) {
     const userId = req.user?.id ?? req.user?.sub;
@@ -80,6 +85,7 @@ export class GameController {
   /** PATCH /games/:id — ADMIN only */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'game.update', category: AC.CATALOG, subject: { model: 'game', param: 'id' }, describe: (c) => `Edited the game "${c.subject}" (${c.fields.join(', ') || 'no changes'})` })
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateGameDto) {
     return this.service.update(id, dto);
@@ -88,6 +94,7 @@ export class GameController {
   /** DELETE /games/:id — ADMIN only */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'game.delete', category: AC.CATALOG, subject: { model: 'game', param: 'id' }, describe: (c) => `Deleted the game "${c.subject}"` })
   @Delete(':id')
   delete(@Param('id') id: string) {
     return this.service.delete(id);

@@ -35,6 +35,8 @@ import { TournamentAccess } from 'src/guards/decorators/tournament-access.decora
 import { checkTournamentAccess } from 'src/guards/tournament-access.util';
 import { PrismaService } from 'prisma/prisma.service';
 import { Role } from '@prisma/client';
+import { Audit } from '../../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('tournaments/:tournamentId/participants')
 export class ParticipantController {
@@ -44,6 +46,7 @@ export class ParticipantController {
   ) {}
 
   // POST /tournaments/:tournamentId/participants/join
+  @Audit({ action: 'participant.join', category: AC.PARTICIPANT, tournament: { param: 'tournamentId' }, targetUser: { body: 'userId' }, describe: (c) => (c.self ? `Joined ${c.t}` : `Added ${c.target} to ${c.t}`) })
   @Post('join')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
@@ -78,6 +81,7 @@ export class ParticipantController {
   // F7. Guests are an organizer tool now — only tournament staff may register one.
   // Online self-registration is for account holders (the /join route above); the
   // organizer runs the walk-in desk. (Previously this was fully unauthenticated.)
+  @Audit({ action: 'participant.add_guest', category: AC.PARTICIPANT, tournament: { param: 'tournamentId' }, pick: ['username'], describe: (c) => `Added guest "${String(c.body.username ?? '')}" to ${c.t}` })
   @Post('guest')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -97,6 +101,7 @@ export class ParticipantController {
   // Stays reachable without a login so guests can be removed at the registration
   // desk, but the token is read when present so the service can tell a player
   // removing themselves from a stranger removing them.
+  @Audit({ action: 'participant.remove', category: AC.PARTICIPANT, tournament: { param: 'tournamentId' }, targetUser: { body: 'userId' }, describe: (c) => (c.self ? `Left ${c.t}` : `Removed ${c.target} from ${c.t}`) })
   @Delete('leave')
   @UseGuards(OptionalJwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -121,6 +126,7 @@ export class ParticipantController {
   }
 
   // PATCH /tournaments/:tournamentId/participants/:userId/seed
+  @Audit({ action: 'participant.seed', category: AC.PARTICIPANT, tournament: { param: 'tournamentId' }, targetUser: { param: 'userId' }, pick: ['seed'], describe: (c) => `Set ${c.target}'s seed to ${String(c.body.seed)} in ${c.t}` })
   @Patch(':userId/seed')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -136,6 +142,7 @@ export class ParticipantController {
   // POST /tournaments/:tournamentId/participants/:userId/forfeit
   // The RolesGuard only proves the caller is an organizer at all; the service
   // additionally checks that they own this specific tournament (or are ADMIN).
+  @Audit({ action: 'participant.forfeit', category: AC.PARTICIPANT, tournament: { param: 'tournamentId' }, targetUser: { param: 'userId' }, describe: (c) => `Forfeited ${c.target} in ${c.t}` })
   @Post(':userId/forfeit')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -150,6 +157,7 @@ export class ParticipantController {
   }
 
   // POST /tournaments/:tournamentId/participants/:userId/replace
+  @Audit({ action: 'participant.replace', category: AC.PARTICIPANT, tournament: { param: 'tournamentId' }, targetUser: { param: 'userId' }, pick: ['substituteUserId', 'guestName'], describe: (c) => `Replaced ${c.target} in ${c.t}${c.body.guestName ? ` with guest "${String(c.body.guestName)}"` : ' with another player'}` })
   @Post(':userId/replace')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

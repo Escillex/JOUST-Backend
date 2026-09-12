@@ -156,6 +156,10 @@ export class ConvertGuestDto {
   public password!: string;
 }
 
+/** Long enough for a sentence or two about yourself; short enough that the
+ *  profile header stays a header. */
+export const BIO_MAX_LENGTH = 300;
+
 export class UpdateProfileDto {
   @IsOptional()
   @IsString()
@@ -169,6 +173,12 @@ export class UpdateProfileDto {
   @IsString()
   @MaxLength(50)
   public displayName?: string;
+
+  /** Empty string clears it. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(BIO_MAX_LENGTH, { message: `Bio can be at most ${BIO_MAX_LENGTH} characters.` })
+  public bio?: string;
 
   @IsOptional()
   @IsEmail()

@@ -14,6 +14,8 @@ import { BackupModule } from '../src/backup/backup.module';
 import { BackupService } from '../src/backup/backup.service';
 import { SettingsAdminModule } from '../src/settings/settings-admin.module';
 import { AwardModule } from '../src/award/award.module';
+import { AuditModule } from '../src/audit/audit.module';
+import { AuditService } from '../src/audit/audit.service';
 import { AwardService } from '../src/award/award.service';
 
 // Temporary check: compiling ParticipantModule resolves it plus everything it
@@ -64,6 +66,20 @@ describe('DI graph', () => {
       .compile();
 
     expect(moduleRef.get(AwardService)).toBeDefined();
+    await moduleRef.close();
+  });
+
+  // Registers an app-wide interceptor; a missing import here would fail every
+  // request, not just the audit view.
+  it('AuditModule resolves its global interceptor and admin controller', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [AuditModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({ $connect: jest.fn(), $disconnect: jest.fn() })
+      .compile();
+
+    expect(moduleRef.get(AuditService)).toBeDefined();
     await moduleRef.close();
   });
 });

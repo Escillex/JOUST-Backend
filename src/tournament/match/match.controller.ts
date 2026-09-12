@@ -17,6 +17,8 @@ import { Roles } from '../../guards/decorators/roles.decorator';
 import { TournamentAccessGuard } from '../../guards/tournament-access.guard';
 import { TournamentAccess } from '../../guards/decorators/tournament-access.decorator';
 import { Role } from '@prisma/client';
+import { Audit, matchText } from '../../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('matches')
 export class MatchController {
@@ -25,6 +27,7 @@ export class MatchController {
   // POST /matches/:id/submit
   // Recording a result is a management action: only staff of the match's own
   // tournament may do it. Reads below stay public for spectators.
+  @Audit({ action: 'match.result', category: AC.MATCH, tournament: { matchParam: 'id' }, targetUser: { body: 'winnerId' }, pick: ['winnerId'], describe: (c) => (c.body.winnerId ? `Recorded ${c.target} as the winner of ${matchText(c)} in ${c.t}` : `Recorded a draw in ${matchText(c)} in ${c.t}`) })
   @Post(':id/submit')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -38,6 +41,7 @@ export class MatchController {
   }
 
   // POST /matches/:id/game-result
+  @Audit({ action: 'match.game_result', category: AC.MATCH, tournament: { matchParam: 'id' }, targetUser: { body: 'gameWinnerId' }, pick: ['gameWinnerId'], describe: (c) => `Recorded a game won by ${c.target} in ${matchText(c)} in ${c.t}` })
   @Post(':id/game-result')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -53,6 +57,7 @@ export class MatchController {
   // POST /matches/:id/start
   // Organizer-driven activation: nothing auto-activates any more, so staff start
   // each match explicitly. PENDING → ONGOING and notifies both players.
+  @Audit({ action: 'match.start', category: AC.MATCH, tournament: { matchParam: 'id' }, describe: (c) => `Started ${matchText(c)} in ${c.t}` })
   @Post(':id/start')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

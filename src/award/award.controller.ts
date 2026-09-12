@@ -27,6 +27,8 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 /** Artwork is resized to at most 1200x300 or 512x512, so a larger upload buys
  *  nothing; the images module sets no limit of its own. */
@@ -47,6 +49,7 @@ export class AwardCatalogController {
     return this.awards.listCatalog(includeArchived === 'true');
   }
 
+  @Audit({ action: 'award.create', category: AC.AWARD, pick: ['name', 'kind'], describe: (c) => `Created the ${String(c.body.kind ?? 'award').toLowerCase()} "${String(c.body.name ?? '')}"` })
   @Post()
   @UseInterceptors(ART_UPLOAD)
   create(
@@ -57,11 +60,13 @@ export class AwardCatalogController {
     return this.awards.create(dto, file, callerId(req));
   }
 
+  @Audit({ action: 'award.update', category: AC.AWARD, subject: { model: 'award', param: 'id' }, pick: ['archived'], describe: (c) => (c.body.archived === true ? `Archived the award "${c.subject}"` : c.body.archived === false ? `Unarchived the award "${c.subject}"` : `Edited the award "${c.subject}" (${c.fields.join(', ')})`) })
   @Patch(':id')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAwardDto) {
     return this.awards.update(id, dto);
   }
 
+  @Audit({ action: 'award.image', category: AC.AWARD, subject: { model: 'award', param: 'id' }, describe: (c) => `Replaced the artwork of "${c.subject}"` })
   @Post(':id/image')
   @UseInterceptors(ART_UPLOAD)
   replaceImage(
@@ -71,6 +76,7 @@ export class AwardCatalogController {
     return this.awards.replaceImage(id, file);
   }
 
+  @Audit({ action: 'award.delete', category: AC.AWARD, subject: { model: 'award', param: 'id' }, describe: (c) => `Deleted the award "${c.subject}"` })
   @Delete(':id')
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.awards.remove(id);
@@ -89,6 +95,7 @@ export class AwardGrantController {
     return this.awards.grantsFor(userId);
   }
 
+  @Audit({ action: 'award.grant', category: AC.AWARD, targetUser: { param: 'userId' }, subject: { model: 'award', body: 'awardId' }, pick: ['awardId', 'note'], describe: (c) => `Gave "${c.subject}" to ${c.target}` })
   @Post()
   grant(
     @Param('userId', ParseUUIDPipe) userId: string,
@@ -98,6 +105,7 @@ export class AwardGrantController {
     return this.awards.grant(userId, dto, callerId(req));
   }
 
+  @Audit({ action: 'award.revoke', category: AC.AWARD, targetUser: { param: 'userId' }, subject: { model: 'userAward', param: 'grantId' }, describe: (c) => `Revoked "${c.subject}" from ${c.target}` })
   @Delete(':grantId')
   revoke(
     @Param('userId', ParseUUIDPipe) userId: string,

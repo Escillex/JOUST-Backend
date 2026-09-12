@@ -19,6 +19,8 @@ import { TournamentAccessGuard } from '../guards/tournament-access.guard';
 import { TournamentAccess } from '../guards/decorators/tournament-access.decorator';
 import { Role } from '@prisma/client';
 import { ImagesService } from './images.service';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('images')
 export class ImagesController {
@@ -59,6 +61,7 @@ export class ImagesController {
 
   // ─── TOURNAMENT BANNER ──────────────────────────────────────────
 
+  @Audit({ action: 'tournament.banner', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Changed the banner of ${c.t}` })
   @Post('banner/:tournamentId')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -71,6 +74,7 @@ export class ImagesController {
     return this.imagesService.updateBanner(tournamentId, file);
   }
 
+  @Audit({ action: 'tournament.banner_remove', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Removed the banner of ${c.t}` })
   @Delete('banner/:tournamentId')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -81,6 +85,7 @@ export class ImagesController {
 
   // ─── SITE ASSETS ───────────────────────────────────────────────
 
+  @Audit({ action: 'system.asset', category: AC.SYSTEM, describe: (c) => `Uploaded the site asset "${c.params.key}"` })
   @Post('assets/:key')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -93,6 +98,7 @@ export class ImagesController {
     return this.imagesService.upsertAsset(key, file, label);
   }
 
+  @Audit({ action: 'system.asset_remove', category: AC.SYSTEM, describe: (c) => `Removed the site asset "${c.params.key}"` })
   @Delete('assets/:key')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

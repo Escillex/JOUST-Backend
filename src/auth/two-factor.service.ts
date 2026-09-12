@@ -276,12 +276,24 @@ export class TwoFactorService {
    *  survive a restart is far safer than one persisted in a table. */
   static enforcementOverride: string | null = null;
 
+  /**
+   * The effective mode. Nothing stored means 'off' (see settings.keys.ts); a
+   * stored value that is not a recognised mode still resolves to 'all' — a
+   * garbled setting should fail closed, not quietly disable the second factor.
+   */
   async enforcementMode(): Promise<'all' | 'staff' | 'off'> {
-    const mode =
+    const raw =
       TwoFactorService.enforcementOverride ??
       (await this.settings.get('TWO_FACTOR_ENFORCEMENT')) ??
-      'all';
+      'off';
+    const mode = raw.trim().toLowerCase();
     return mode === 'off' || mode === 'staff' ? mode : 'all';
+  }
+
+  /** 'off' means email is not used to gate anything — neither sign-in codes
+   *  nor the address check at registration — so a site with no mail works. */
+  async emailRequired(): Promise<boolean> {
+    return (await this.enforcementMode()) !== 'off';
   }
 
   async isRequiredFor(user: {

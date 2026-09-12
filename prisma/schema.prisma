@@ -85,6 +85,18 @@ enum NotificationType {
   AWARD_RECEIVED
 }
 
+/// What kind of thing an audit entry records — the admin dashboard filters on it.
+enum AuditCategory {
+  TOURNAMENT
+  PARTICIPANT
+  MATCH
+  STAFF
+  USER
+  AWARD
+  CATALOG
+  SYSTEM
+}
+
 /// A medal is a square a user may pin (up to three) to their profile; a plaque
 /// is a 4:1 strip shown under their name (one, of their choosing). Called
 /// "plaque" rather than "banner" on purpose: banner already means both the
@@ -115,6 +127,9 @@ model User {
   /// this way: a stable handle for addressing, a changeable name for showing.
   /// Accounts that predate the split kept their old spaced username here.
   displayName String?
+  /// A short public "about" line on the profile (todo.md obj. 4.2). Plain text,
+  /// at most BIO_MAX_LENGTH characters — rendered as text, never as HTML.
+  bio                    String?
   // URL-friendly public handle derived from username (e.g. "swift-falcon").
   // Unique like Tournament.slug; profile links resolve by slug OR legacy UUID so
   // old links never break. Generated on create and re-derived on username change.
@@ -167,6 +182,8 @@ model User {
   /// Google's stable account id (`sub` in its ID token) once this account is
   /// linked to Google sign-in. Matched before email, which can change.
   googleId String? @unique
+
+  auditEntries   AuditLog[]  @relation("AuditActor")
 
   awardsCreated  Award[]     @relation("AwardsCreated")
   awardsReceived UserAward[] @relation("AwardsReceived")
@@ -772,4 +789,34 @@ model TournamentOrganizer {
   @@unique([tournamentId, userId])
   // Serves "my pending invitations".
   @@index([userId, status])
+}
+
+/// One organizer or admin action, recorded after it succeeded (todo.md obj.
+/// 3.1). Names are SNAPSHOTS taken before the action ran, and the tournament and
+/// target have no foreign key, on purpose: the entry that says "deleted
+/// tournament X" must outlive X. Only the actor is a real relation, and it is
+/// SET NULL so deleting an admin's account does not erase what they did.
+///
+/// `metadata` holds only fields each route explicitly whitelists — never a
+/// request body wholesale, which would put passwords and the SMTP key here.
+model AuditLog {
+  id             String        @id @default(uuid())
+  createdAt      DateTime      @default(now())
+  actorId        String?
+  actor          User?         @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName      String
+  actorRoles     String[]
+  category       AuditCategory
+  action         String
+  summary        String
+  tournamentId   String?
+  tournamentName String?
+  targetUserId   String?
+  targetName     String?
+  metadata       Json?
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@index([tournamentId])
+  @@index([category, createdAt])
 }

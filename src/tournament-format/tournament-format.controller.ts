@@ -18,6 +18,8 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
 import { Role } from '@prisma/client';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('tournament-formats')
 export class TournamentFormatController {
@@ -38,6 +40,7 @@ export class TournamentFormatController {
   /** POST /tournament-formats — ADMIN only */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'format.create', category: AC.CATALOG, pick: ['name', 'system'], describe: (c) => `Created the format preset "${String(c.body.name ?? '')}"` })
   @Post()
   create(@Body() dto: CreateTournamentFormatDto, @Req() req: any) {
     const userId = req.user?.id ?? req.user?.sub;
@@ -47,6 +50,7 @@ export class TournamentFormatController {
   /** PATCH /tournament-formats/:id — ADMIN only */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'format.update', category: AC.CATALOG, subject: { model: 'tournamentFormat', param: 'id' }, describe: (c) => `Edited the format preset "${c.subject}" (${c.fields.join(', ') || 'no changes'})` })
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -59,6 +63,7 @@ export class TournamentFormatController {
   /** DELETE /tournament-formats/:id — ADMIN only */
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
+  @Audit({ action: 'format.delete', category: AC.CATALOG, subject: { model: 'tournamentFormat', param: 'id' }, describe: (c) => `Deleted the format preset "${c.subject}"` })
   @Delete(':id')
   delete(@Param('id') id: string) {
     return this.service.delete(id);

@@ -22,6 +22,8 @@ import { RolesGuard } from 'src/guards/roles.guard';
 import { Roles } from 'src/guards/decorators/roles.decorator';
 import { TournamentAccessGuard } from 'src/guards/tournament-access.guard';
 import { TournamentAccess } from 'src/guards/decorators/tournament-access.decorator';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('tournaments/:tournamentId/organizers')
 export class OrganizerController {
@@ -42,6 +44,7 @@ export class OrganizerController {
   // Deliberately NOT access-guarded: the rule here is stricter than the guard,
   // since staff must not be able to recruit staff. The service checks the
   // creator directly.
+  @Audit({ action: 'staff.invite', category: AC.STAFF, tournament: { param: 'tournamentId' }, targetUser: { body: 'userId' }, describe: (c) => `Invited ${c.target} to co-organize ${c.t}` })
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -56,6 +59,7 @@ export class OrganizerController {
   }
 
   // DELETE /tournaments/:tournamentId/organizers/:userId
+  @Audit({ action: 'staff.revoke', category: AC.STAFF, tournament: { param: 'tournamentId' }, targetUser: { param: 'userId' }, describe: (c) => `Removed ${c.target} as a co-organizer of ${c.t}` })
   @Delete(':userId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

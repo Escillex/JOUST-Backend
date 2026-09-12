@@ -26,6 +26,8 @@ import { Roles } from '../../../guards/decorators/roles.decorator';
 import { TournamentAccessGuard } from '../../../guards/tournament-access.guard';
 import { TournamentAccess } from '../../../guards/decorators/tournament-access.decorator';
 import { Role } from '@prisma/client';
+import { Audit, matchText } from '../../../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
 
 @Controller('matches')
 export class TrackerController {
@@ -73,6 +75,7 @@ export class TrackerController {
    * Auth: staff of this match's tournament (creator or ADMIN)
    * Confirms result of current game → closes log → calls reportGameResult().
    */
+  @Audit({ action: 'match.tracker_game', category: AC.MATCH, tournament: { matchParam: 'id' }, describe: (c) => `Submitted a tracked game for ${matchText(c)} in ${c.t}` })
   @Post(':id/tracker/submit-game')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

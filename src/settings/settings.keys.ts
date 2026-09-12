@@ -35,10 +35,15 @@ export const SETTINGS = {
     default: 'JOUST <noreply@example.com>',
   },
   MAIL_REPLY_TO: { key: 'mail.replyTo', env: 'MAIL_REPLY_TO' },
+  /** OFF by default (2026-09-13): email is the second factor, and a fresh
+   *  deployment has no working mail until an admin configures SMTP. Defaulting
+   *  to 'all' meant a new install — or prod on first deploy — could not sign
+   *  anyone in, because every code went to a server log. Switch it on in
+   *  Admin → Settings once "Send test email" delivers. */
   TWO_FACTOR_ENFORCEMENT: {
     key: 'security.twoFactorEnforcement',
     env: 'TWO_FACTOR_ENFORCEMENT',
-    default: 'all',
+    default: 'off',
   },
   GOOGLE_SIGNIN_ENABLED: {
     key: 'security.googleSignIn',

@@ -17,6 +17,7 @@ import {
   AdminCreateUserDto,
   ConvertGuestDto,
   SignUpDto,
+  BIO_MAX_LENGTH,
   UpdateProfileDto,
   VerifyCodeDto,
 } from './dto/auth.dto';
@@ -26,6 +27,14 @@ import { isEmail } from './utils/check-input';
 import { Response } from 'express';
 import { Role, ParticipantStatus, TournamentStatus } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
+
+
+/** Trim, cap blank-line runs at one (a bio is a paragraph, not a layout), and
+ *  treat an empty result as "no bio". The length rule itself is the DTO's. */
+export function normalizeBio(bio: string): string | null {
+  const clean = bio.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return clean ? clean.slice(0, BIO_MAX_LENGTH) : null;
+}
 
 @Injectable()
 export class AuthService {
@@ -110,6 +119,16 @@ export class AuthService {
         emailVerified: false,
       },
     });
+
+    // With enforcement off, email gates nothing: the account is usable at once.
+    // It stays unverified, so if enforcement is switched on later the owner
+    // proves the address at their next sign-in (the path just below in SignIn).
+    if (!(await this.twoFactor.emailRequired())) {
+      return {
+        message: 'Account created. You can sign in now.',
+        verificationRequired: false,
+      };
+    }
 
     const issued = await this.twoFactor.issueCode(user, 'verify');
     return {
@@ -200,7 +219,11 @@ export class AuthService {
     // The password was right; that is one factor. Everything below decides
     // whether a session is issued now or only after a code is proved.
 
-    if (!foundUser.emailVerified && !foundUser.isGuest) {
+    if (
+      !foundUser.emailVerified &&
+      !foundUser.isGuest &&
+      (await this.twoFactor.emailRequired())
+    ) {
       // Registration was abandoned before the address was proved. Same code
       // machinery, different wording — the account is unusable until verified.
       const issued = await this.twoFactor.issueCode(foundUser, 'verify');
@@ -421,6 +444,10 @@ export class AuthService {
     const data: Record<string, any> = {};
     if (dto.username) data.username = dto.username;
     if (dto.email) data.email = dto.email;
+    // displayName was accepted by the DTO but silently dropped here; the admin
+    // path (updateProfile) always saved it. Same rule in both now.
+    if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
+    if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio);
     if (dto.password)
       data.hashedPassword = await this.hashPassword(dto.password);
 
@@ -431,6 +458,7 @@ export class AuthService {
         id: true,
         username: true,
         displayName: true,
+        bio: true,
         email: true,
         roles: true,
         avatarUrl: true,
@@ -463,6 +491,7 @@ export class AuthService {
         isGuest: true,
         avatarUrl: true,
         createdAt: true,
+        bio: true,
         googleId: true,
         hashedPassword: true,
       },
@@ -758,6 +787,7 @@ export class AuthService {
       // Empty string clears it, falling back to showing the handle.
       data.displayName = dto.displayName.trim() || null;
     }
+    if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio); // an admin clearing an abusive bio
     if (email) data.email = email;
     if (dto.password)
       data.hashedPassword = await this.hashPassword(dto.password);

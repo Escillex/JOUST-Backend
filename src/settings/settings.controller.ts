@@ -17,6 +17,9 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
 import type { AuthenticatedRequest } from '../guards/jwt-auth.guard';
+import { Audit } from '../audit/audit.decorator';
+import { AuditCategory as AC } from '@prisma/client';
+import { SETTINGS, type SettingName } from './settings.keys';
 
 /** Admin-only runtime configuration. Secrets are write-only: `GET` reports
  *  whether one is configured, never what it is. */
@@ -35,6 +38,7 @@ export class SettingsController {
     return this.settings.listForAdmin();
   }
 
+  @Audit({ action: 'system.setting', category: AC.SYSTEM, pickFn: (b) => (SETTINGS[b.name as SettingName] && 'secret' in SETTINGS[b.name as SettingName] ? { name: b.name } : { name: b.name, value: b.value }), describe: (c) => (c.body.value !== undefined ? `Changed ${String(c.body.name)} to "${String(c.body.value)}"` : `Changed ${String(c.body.name)} (a secret — the value is not recorded)`) })
   @Patch()
   async update(
     @Body() dto: UpdateSettingDto,
@@ -59,6 +63,7 @@ export class SettingsController {
    * flattened to "failed": "Invalid login: 535 authentication failed" tells you
    * the SMTP key is wrong; "failed" tells you nothing.
    */
+  @Audit({ action: 'system.test_email', category: AC.SYSTEM, describe: () => 'Sent a test email' })
   @Post('test-email')
   async testEmail(@Body() dto: TestEmailDto) {
     // Connect first. A wrong SMTP key fails here with the relay's own words,
