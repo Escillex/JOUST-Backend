@@ -11,6 +11,7 @@ import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { TestEmailDto, UpdateSettingDto } from './dto/settings.dto';
 import { MailService } from '../mail/mail.service';
+import { BackupJob } from '../backup/backup.job';
 import { testEmail as testEmailTemplate } from '../mail/templates';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
@@ -26,6 +27,7 @@ export class SettingsController {
   constructor(
     private readonly settings: SettingsService,
     private readonly mail: MailService,
+    private readonly backupJob: BackupJob,
   ) {}
 
   @Get()
@@ -40,6 +42,11 @@ export class SettingsController {
   ) {
     const userId = req.user.id || (req.user as any).sub;
     await this.settings.set(dto.name, dto.value, userId);
+    // The backup schedule is a setting, so changing it has to take effect now.
+    // Waiting for a restart would make the control a lie.
+    if (dto.name === 'BACKUP_ENABLED' || dto.name === 'BACKUP_CRON') {
+      await this.backupJob.reschedule();
+    }
     return { message: 'Setting updated' };
   }
 

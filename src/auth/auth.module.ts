@@ -2,6 +2,7 @@ import { requireJwtSecret, sessionExpiresIn } from '../config/security.config';
 import { Module } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { TwoFactorService } from './two-factor.service';
+import { GoogleAuthService } from './google-auth.service';
 import { AuthController } from './auth.controller';
 import { JwtModule, JwtSignOptions } from '@nestjs/jwt';
 import { PrismaModule } from 'prisma/prisma.module';
@@ -30,7 +31,7 @@ import { RolesGuard } from '../guards/roles.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, TwoFactorService, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, TwoFactorService, GoogleAuthService, JwtAuthGuard, RolesGuard],
   exports: [AuthService, TwoFactorService, JwtAuthGuard, RolesGuard, JwtModule], // export guards and service for use in other modules
 })
 export class AuthModule {}

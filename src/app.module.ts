@@ -21,6 +21,9 @@ import { OrganizerModule } from './organizer/organizer.module';
 import { SearchModule } from './search/search.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { SettingsModule } from './settings/settings.module';
+import { BackupModule } from './backup/backup.module';
+import { AwardModule } from './award/award.module';
+import { HealthModule } from './health/health.module';
 import { SettingsAdminModule } from './settings/settings-admin.module';
 import { MailModule } from './mail/mail.module';
 
@@ -49,6 +52,9 @@ import { MailModule } from './mail/mail.module';
     AnalyticsModule,
     SettingsModule,
     SettingsAdminModule,
+    BackupModule,
+    AwardModule,
+    HealthModule,
     MailModule,
   ],
 })

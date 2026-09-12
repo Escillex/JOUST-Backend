@@ -62,6 +62,12 @@ export class SettingsService {
     return value;
   }
 
+  /** Drop every cached value. Used after a restore, when the database the
+   *  cache was filled from has been replaced wholesale. */
+  clearCache(): void {
+    this.cache.clear();
+  }
+
   async getBoolean(name: SettingName): Promise<boolean> {
     const value = await this.get(name);
     return value === 'true' || value === '1';

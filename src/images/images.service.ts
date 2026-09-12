@@ -5,13 +5,15 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques';
+
 @Injectable()
 export class ImagesService {
   private readonly uploadRoot = path.join(process.cwd(), '..', 'images');
 
   constructor(private prisma: PrismaService) {
     // Ensure upload directories exist on startup
-    const subdirs = ['avatars', 'banners', 'assets'];
+    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques'];
     subdirs.forEach((sub) => {
       const dir = path.join(this.uploadRoot, sub);
       if (!fs.existsSync(dir)) {
@@ -22,7 +24,7 @@ export class ImagesService {
 
   async processAndSave(
     file: Express.Multer.File,
-    subdir: 'avatars' | 'banners' | 'assets',
+    subdir: ImageKind,
   ): Promise<string> {
     const id = uuidv4();
     const fileName = `${id}.webp`;
@@ -40,6 +42,26 @@ export class ImagesService {
     } else if (subdir === 'assets') {
       sharpInstance = sharpInstance.resize(1920, null, {
         withoutEnlargement: true,
+      });
+    } else if (subdir === 'medals') {
+      // CONTAIN onto a transparent square, never cover. Medals are round,
+      // shield-shaped, ribbon-hung — cropping one to a square cuts its edge
+      // off. 512 covers the largest display (192px) at 2x with headroom.
+      await sharpInstance
+        .resize(512, 512, {
+          fit: 'contain',
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        })
+        .webp({ quality: 85, alphaQuality: 90 })
+        .toFile(outPath);
+      return `/uploads/${subdir}/${fileName}`;
+    } else if (subdir === 'plaques') {
+      // 4:1, COVER from the centre: a plaque background is decorative, and the
+      // award's name is drawn over its middle by the frontend. 1200x300 is 2x
+      // the ~600px it can reach on a wide desktop header.
+      sharpInstance = sharpInstance.resize(1200, 300, {
+        fit: 'cover',
+        position: 'centre',
       });
     }
 

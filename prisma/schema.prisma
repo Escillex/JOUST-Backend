@@ -81,6 +81,17 @@ enum NotificationType {
   // A match's shared countdown timer reached zero. Sent to the tournament's
   // organizer(s) so they can act even if no browser was watching it.
   MATCH_TIMER_ENDED
+  // An admin gave this user a medal or plaque (todo.md obj. 4.1).
+  AWARD_RECEIVED
+}
+
+/// A medal is a square a user may pin (up to three) to their profile; a plaque
+/// is a 4:1 strip shown under their name (one, of their choosing). Called
+/// "plaque" rather than "banner" on purpose: banner already means both the
+/// tournament header image and the profile header image objective 4.2 wants.
+enum AwardKind {
+  MEDAL
+  PLAQUE
 }
 
 // ─── MODELS ──────────────────────────────────────────────────────
@@ -153,7 +164,62 @@ model User {
 
   settingsChanged SystemSetting[]
 
+  /// Google's stable account id (`sub` in its ID token) once this account is
+  /// linked to Google sign-in. Matched before email, which can change.
+  googleId String? @unique
+
+  awardsCreated  Award[]     @relation("AwardsCreated")
+  awardsReceived UserAward[] @relation("AwardsReceived")
+  awardsGiven    UserAward[] @relation("AwardsGiven")
+
   avatarUrl String? // path: /uploads/avatars/<uuid>.webp
+}
+
+/// The award catalog — what can be given. Admin-managed.
+model Award {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  kind        AwardKind
+  /// /uploads/medals/<uuid>.webp (512x512, alpha) or /uploads/plaques/<uuid>.webp (1200x300).
+  imageUrl    String
+  createdAt   DateTime  @default(now())
+  createdById String?
+  createdBy   User?     @relation("AwardsCreated", fields: [createdById], references: [id], onDelete: SetNull)
+  /// Archived awards can no longer be given, but stay on the profiles holding them.
+  archivedAt  DateTime?
+
+  grants UserAward[]
+
+  @@index([kind])
+}
+
+/// One award given to one person. Repeats are separate rows, each with its own
+/// date and note — "Champion" won three times is three grants, shown as x3.
+///
+/// Two invariants live in the migration as raw SQL, because Prisma cannot
+/// express them: pinSlot is CHECKed to 1..3, and a partial unique index allows
+/// at most one displayed plaque per user.
+model UserAward {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation("AwardsReceived", fields: [userId], references: [id], onDelete: Cascade)
+  awardId     String
+  /// Restrict: an award that has been given cannot be deleted from under the
+  /// people holding it. Archive it instead.
+  award       Award    @relation(fields: [awardId], references: [id], onDelete: Restrict)
+  awardedById String?
+  awardedBy   User?    @relation("AwardsGiven", fields: [awardedById], references: [id], onDelete: SetNull)
+  awardedAt   DateTime @default(now())
+  note        String?
+  /// 1-3 when this MEDAL is pinned to the profile; null otherwise.
+  pinSlot     Int?
+  /// True for the one PLAQUE shown under the user's name.
+  displayed   Boolean  @default(false)
+
+  @@unique([userId, pinSlot])
+  @@index([userId])
+  @@index([awardId])
 }
 
 // In-app inbox. Rows cascade with the user, so guest cleanup needs no special

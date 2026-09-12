@@ -11,10 +11,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { GoogleAuthService } from './google-auth.service';
 import {
   AdminCreateUserDto,
   AuthDto,
   ConvertGuestDto,
+  GoogleCredentialDto,
   RecoveryCodeDto,
   ResendCodeDto,
   SignUpDto,
@@ -33,7 +35,10 @@ import { Role } from '@prisma/client';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly google: GoogleAuthService,
+  ) {}
 
   // ──────────────────────────────────────────────
   // PUBLIC AUTH
@@ -84,6 +89,37 @@ export class AuthController {
   @Post('2fa/resend')
   resendCode(@Body() dto: ResendCodeDto) {
     return this.authService.resendCode(dto.challenge);
+  }
+
+  /** Which sign-in methods this site offers. Public: the sign-in page needs it
+   *  before anyone is signed in, and it carries nothing secret. */
+  @Get('providers')
+  providers() {
+    return this.google.providers();
+  }
+
+  /** Sign in (or sign up) with a Google ID token. No emailed code: Google has
+   *  already done its own second-factor check. */
+  @Post('google')
+  signInWithGoogle(
+    @Body() dto: GoogleCredentialDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.google.signIn(dto.credential, res);
+  }
+
+  @Post('google/link')
+  @UseGuards(JwtAuthGuard)
+  linkGoogle(@Req() req: AuthenticatedRequest, @Body() dto: GoogleCredentialDto) {
+    const userId = req.user.id || (req.user as any).sub;
+    return this.google.link(userId, dto.credential);
+  }
+
+  @Delete('google/link')
+  @UseGuards(JwtAuthGuard)
+  unlinkGoogle(@Req() req: AuthenticatedRequest) {
+    const userId = req.user.id || (req.user as any).sub;
+    return this.google.unlink(userId);
   }
 
   @Get('signout')

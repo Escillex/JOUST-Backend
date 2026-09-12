@@ -201,3 +201,12 @@ export class AdminCreateUserDto {
   @IsEnum(Role, { each: true })
   public roles?: Role[];
 }
+
+/** The ID token Google's sign-in script hands the browser. Verified server-side
+ *  against the Client ID in Admin → Settings. */
+export class GoogleCredentialDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(4096)
+  public credential!: string;
+}

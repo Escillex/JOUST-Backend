@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { MatchStatus, TournamentStatus } from '@prisma/client';
+import { PUBLIC_AWARD_SELECT, toPublicAward } from '../award/award.service';
 
 export interface UserStats {
   userId: string;
@@ -71,6 +72,16 @@ export class UserService {
       take: 50,
     });
 
+    // Every award, newest first. The profile derives the showcase (pinned
+    // medals, displayed plaque) from pinSlot/displayed, and groups repeats.
+    const awards = (
+      await this.prisma.userAward.findMany({
+        where: { userId: user.id },
+        orderBy: { awardedAt: 'desc' },
+        select: PUBLIC_AWARD_SELECT,
+      })
+    ).map(toPublicAward);
+
     const recentTournaments = participations
       .map((p) => ({
         id: p.tournament.id,
@@ -105,6 +116,7 @@ export class UserService {
           }
         : null,
       recentTournaments,
+      awards,
     };
   }
 

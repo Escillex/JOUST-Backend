@@ -179,7 +179,13 @@ export class AuthService {
     }
 
     if (!foundUser.hashedPassword) {
-      throw new UnauthorizedException('Invalid credentials');
+      // Created through Google sign-in and never given a password. Saying so
+      // beats "Invalid credentials", which reads as a wrong password.
+      throw new UnauthorizedException(
+        foundUser.googleId
+          ? 'This account signs in with Google. Use "Sign in with Google", or set a password from Edit Profile.'
+          : 'Invalid credentials',
+      );
     }
 
     const isPasswordValid = await this.verifyPassword(
@@ -232,9 +238,25 @@ export class AuthService {
     return this.completeSignIn(foundUser, res);
   }
 
+  /** A session for an identity proved some other way — Google sign-in, which
+   *  has already done its own second-factor check. Goes through the same
+   *  completeSignIn as every other path so the cookie is identical. */
+  async startSession(
+    user: {
+      id: string;
+      email: string | null;
+      roles: Role[];
+      username: string | null;
+      avatarUrl: string | null;
+    },
+    res: Response,
+  ) {
+    return this.completeSignIn(user, res);
+  }
+
   /** Issues the real session token and cookie. The single place a session is
-   *  minted, so every path — password-only, post-2FA, recovery code — sets the
-   *  cookie identically. */
+   *  minted, so every path — password-only, post-2FA, recovery code, Google —
+   *  sets the cookie identically. */
   private async completeSignIn(
     user: {
       id: string;
@@ -441,10 +463,15 @@ export class AuthService {
         isGuest: true,
         avatarUrl: true,
         createdAt: true,
+        googleId: true,
+        hashedPassword: true,
       },
     });
     if (!user) throw new NotFoundException('User not found');
-    return user;
+    // Reported as facts, never as values: the profile needs to know whether
+    // Google is connected and whether disconnecting would leave no way in.
+    const { googleId, hashedPassword, ...rest } = user;
+    return { ...rest, googleLinked: !!googleId, hasPassword: !!hashedPassword };
   }
 
   /** A full session token. Everything else the login flow issues (a 2FA
