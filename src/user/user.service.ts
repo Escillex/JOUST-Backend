@@ -83,6 +83,22 @@ export class UserService {
       })
     ).map(toPublicAward);
 
+    // The profile gallery (obj. 4.3): one live image per game.
+    const gallery = (
+      await this.prisma.galleryImage.findMany({
+        where: { userId: user.id, removedAt: null },
+        orderBy: { updatedAt: 'desc' },
+        include: { game: { select: { name: true } } },
+      })
+    ).map((g) => ({
+      id: g.id,
+      gameId: g.gameId,
+      gameName: g.game.name,
+      imageUrl: g.imageUrl,
+      caption: g.caption,
+      updatedAt: g.updatedAt.toISOString(),
+    }));
+
     const recentTournaments = participations
       .map((p) => ({
         id: p.tournament.id,
@@ -119,6 +135,7 @@ export class UserService {
         : null,
       recentTournaments,
       awards,
+      gallery,
     };
   }
 

@@ -9,7 +9,7 @@ describe('completeTournament idempotency', () => {
   let notificationsSpy: { notify: jest.Mock; notifyMany: jest.Mock };
   let realtimeSpy: { emitTournamentUpdated: jest.Mock };
 
-  const buildService = (status: string) => {
+  const buildService = (status: string, extra: Record<string, unknown> = {}) => {
     const prisma = {
       tournament: {
         findUnique: jest.fn().mockResolvedValue({
@@ -20,6 +20,7 @@ describe('completeTournament idempotency', () => {
           createdById: 'creator',
           participants: [],
           rounds: [],
+          ...extra,
         }),
         update: jest.fn().mockResolvedValue({ id: 't1', name: 'Summer Cup' }),
       },
@@ -80,6 +81,29 @@ describe('completeTournament idempotency', () => {
 
     expect(notificationsSpy.notify).not.toHaveBeenCalled();
     expect(realtimeSpy.emitTournamentUpdated).not.toHaveBeenCalled();
+  });
+
+  it('burns display names, not handles, into the finished bracket', async () => {
+    // Account deletion already burns the display name in; completion wrote the
+    // @handle, so one bracket could show "mira-calder" beside "Mira Calder".
+    const mira = { id: 'w1', username: 'mira-calder', displayName: 'Mira Calder', isGuest: false };
+    const tobias = { id: 'u2', username: 'tobias-renn', displayName: null, isGuest: false };
+    const { prisma, service } = buildService('ONGOING', {
+      participants: [
+        { userId: 'w1', user: mira, status: 'ACTIVE' },
+        { userId: 'u2', user: tobias, status: 'ACTIVE' },
+      ],
+      rounds: [{ roundNumber: 1, matches: [{ id: 'm1', player1: mira, player2: tobias, winner: mira, p1Name: null, p2Name: null, winnerName: null }] }],
+    });
+
+    await service.completeTournament('t1');
+
+    expect(prisma.match.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { p1Name: 'Mira Calder', p2Name: 'tobias-renn', winnerName: 'Mira Calder' } }),
+    );
+    expect(prisma.tournament.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ winnerName: 'Mira Calder' }) }),
+    );
   });
 
   it('proceeds normally for an ONGOING tournament', async () => {

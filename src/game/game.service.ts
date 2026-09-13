@@ -159,7 +159,7 @@ export class GameService {
   async delete(id: string) {
     const game = await this.prisma.game.findUnique({
       where: { id },
-      include: { _count: { select: { tournaments: true } } },
+      include: { _count: { select: { tournaments: true, galleryImages: true } } },
     });
     if (!game) throw new NotFoundException('Game not found');
     if (game.isBuiltin)
@@ -169,6 +169,13 @@ export class GameService {
     if (game._count.tournaments > 0) {
       throw new BadRequestException(
         `Cannot delete: ${game._count.tournaments} tournament(s) are using this game. Reassign them first.`,
+      );
+    }
+    // Gallery images point at their game with RESTRICT; say why here instead of
+    // surfacing a foreign-key error, and never delete people's pictures silently.
+    if (game._count.galleryImages > 0) {
+      throw new BadRequestException(
+        `Cannot delete: ${game._count.galleryImages} profile gallery image(s) are filed under this game.`,
       );
     }
 

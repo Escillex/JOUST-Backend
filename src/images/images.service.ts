@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques';
+export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques' | 'builds' | 'gallery';
 
 @Injectable()
 export class ImagesService {
@@ -13,7 +13,7 @@ export class ImagesService {
 
   constructor(private prisma: PrismaService) {
     // Ensure upload directories exist on startup
-    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques'];
+    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques', 'builds', 'gallery'];
     subdirs.forEach((sub) => {
       const dir = path.join(this.uploadRoot, sub);
       if (!fs.existsSync(dir)) {
@@ -30,7 +30,11 @@ export class ImagesService {
     const fileName = `${id}.webp`;
     const outPath = path.join(this.uploadRoot, subdir, fileName);
 
-    let sharpInstance = sharp(file.buffer);
+    // .rotate() with no argument applies the EXIF orientation first — phone
+    // photos are stored sideways with a tag saying so, and stripping metadata
+    // without honouring it leaves them sideways. Output carries NO metadata by
+    // default, which is the point for user photos: EXIF includes GPS.
+    let sharpInstance = sharp(file.buffer).rotate();
 
     // Context-aware resizing
     if (subdir === 'avatars') {
@@ -55,6 +59,13 @@ export class ImagesService {
         .webp({ quality: 85, alphaQuality: 90 })
         .toFile(outPath);
       return `/uploads/${subdir}/${fileName}`;
+    } else if (subdir === 'builds' || subdir === 'gallery') {
+      // Player photos of a deck or a build. 1600px on the long side keeps a
+      // decklist legible without shipping a 12-megapixel original.
+      sharpInstance = sharpInstance.resize(1600, 1600, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
     } else if (subdir === 'plaques') {
       // 4:1, COVER from the centre: a plaque background is decorative, and the
       // award's name is drawn over its middle by the frontend. 1200x300 is 2x

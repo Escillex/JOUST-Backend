@@ -14,6 +14,8 @@ describe('startTournament', () => {
     existingRound?: { matches: any[] } | null;
     generatedRound?: { matches: any[] } | null;
     generateThrows?: boolean;
+    tournamentConfig?: Record<string, unknown> | null;
+    formatConfig?: Record<string, unknown> | null;
   }) => {
     const generated = opts.generatedRound;
 
@@ -25,7 +27,8 @@ describe('startTournament', () => {
           .mockResolvedValueOnce({
             id: 't1',
             status: opts.status ?? 'OPEN',
-            format: { id: 'f1', system: 'SINGLE_ELIMINATION' },
+            config: opts.tournamentConfig ?? null,
+            format: { id: 'f1', system: 'SINGLE_ELIMINATION', config: opts.formatConfig ?? null },
             participants: PLAYERS.map((id) => ({
               id: `part-${id}`,
               userId: id,
@@ -94,6 +97,33 @@ describe('startTournament', () => {
       }),
     );
     expect(formats.initializeTournamentFormat).toHaveBeenCalledTimes(1);
+  });
+
+  // Config snapshotting (todo.md §4): from the moment it starts, a tournament
+  // owns a frozen copy of its rules, so editing the shared preset cannot change
+  // an event mid-flight.
+  it('snapshots the preset rules onto the tournament in the same claim', async () => {
+    const preset = { bestOf: 3, tieBreakerOrder: ['OMW', 'OOMW'] };
+    const { prisma, service } = buildService({ generatedRound: completeRound(), formatConfig: preset });
+    await service.startTournament('t1');
+    expect(prisma.tournament.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: 'OPEN' }),
+        data: expect.objectContaining({ status: 'ONGOING', config: preset }),
+      }),
+    );
+  });
+
+  it("never overwrites a tournament's own rules with the preset", async () => {
+    const own = { bestOf: 5 };
+    const { prisma, service } = buildService({
+      generatedRound: completeRound(),
+      tournamentConfig: own,
+      formatConfig: { bestOf: 1 },
+    });
+    await service.startTournament('t1');
+    const data = prisma.tournament.updateMany.mock.calls[0][0].data;
+    expect(data).toEqual({ status: 'ONGOING' });
   });
 
   it('refuses when another request already claimed the start', async () => {

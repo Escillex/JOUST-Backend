@@ -381,6 +381,7 @@ export class LeaderboardService {
     const entries: Omit<LeaderboardEntry, 'rank'>[] = participants.map((p) => ({
       userId: p.userId,
       username: p.user?.username ?? 'Guest',
+      displayName: p.user?.displayName ?? null,
       points: p.stats?.points ?? 0,
       wins: p.stats?.wins ?? 0,
       losses: p.stats?.losses ?? 0,

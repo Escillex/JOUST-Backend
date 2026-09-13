@@ -74,12 +74,15 @@ export class SearchService {
       .map((u) => ({
         id: u.id,
         username: u.username,
+        displayName: u.displayName,
         slug: u.slug,
         avatarUrl: u.avatarUrl,
         tournamentsPlayed: u.globalStats?.tournamentsPlayed ?? 0,
         tournamentsWon: u.globalStats?.tournamentsWon ?? 0,
         globalPoints: u.globalStats?.globalPoints ?? 0,
-        _starts: (u.username ?? '').toLowerCase().startsWith(lc) ? 0 : 1,
+        // Either name counts: "Mira" should rank Mira Calder first even though
+        // her handle is mira-calder and the display name is what people type.
+        _starts: [u.username, u.displayName].some((n) => (n ?? '').toLowerCase().startsWith(lc)) ? 0 : 1,
       }))
       .sort(
         (a, b) =>
@@ -150,6 +153,7 @@ export class SearchService {
           ? {
               id: t.winner.id,
               username: t.winner.username,
+              displayName: t.winner.displayName,
               slug: t.winner.slug,
               avatarUrl: t.winner.avatarUrl,
             }

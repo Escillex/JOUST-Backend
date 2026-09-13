@@ -17,6 +17,7 @@ import { StoreController } from '../src/store/store.controller';
 import { AwardCatalogController, AwardGrantController } from '../src/award/award.controller';
 import { SettingsController } from '../src/settings/settings.controller';
 import { BackupController } from '../src/backup/backup.controller';
+import { BuildController, GalleryController, ModerationController, ReportController } from '../src/content/content.controller';
 
 /**
  * The audit log is only worth having if it is complete and if it never leaks.
@@ -38,6 +39,11 @@ const EXEMPT: Record<string, string> = {
   'AuthController.linkGoogle': "a user managing their own account",
   'AuthController.unlinkGoogle': "a user managing their own account",
   'AuthController.updateMe': "a user editing their own profile",
+  'BuildController.submit': "a player submitting their own build",
+  'BuildController.withdraw': "a player withdrawing their own build",
+  'GalleryController.upsert': "a user editing their own gallery",
+  'GalleryController.remove': "a user deleting their own gallery image",
+  'ReportController.report': "recorded by hand only when filed by staff (a removal request)",
 };
 
 describe('audit coverage', () => {
@@ -46,10 +52,11 @@ describe('audit coverage', () => {
     InvitationController, AuthController, DevController, GameController,
     TournamentFormatController, StoreController, AwardCatalogController, AwardGrantController,
     SettingsController, BackupController,
+    BuildController, GalleryController, ReportController, ModerationController,
   ];
 
   for (const ctrl of controllers) {
-    const proto = ctrl.prototype as Record<string, unknown>;
+    const proto = ctrl.prototype as unknown as Record<string, unknown>;
     const writes = Object.getOwnPropertyNames(proto).filter((name) => {
       const fn = proto[name];
       return typeof fn === 'function' && WRITE.has(Reflect.getMetadata(METHOD_KEY, fn as object));

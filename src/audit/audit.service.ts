@@ -195,6 +195,46 @@ export class AuditService {
     }
   }
 
+  /**
+   * A hand-written entry, for the few actions whose audit-worthiness depends on
+   * who did them — e.g. a report is noise from a player but an organizer action
+   * ("requested removal") from staff. Same best-effort contract as commit().
+   */
+  async record(e: {
+    actor: Actor;
+    category: AuditCategory;
+    action: string;
+    summary: string;
+    tournamentId?: string | null;
+    tournamentName?: string | null;
+    targetUserId?: string | null;
+    targetName?: string | null;
+  }): Promise<void> {
+    try {
+      const actorId = e.actor.id || e.actor.sub || null;
+      const u = actorId
+        ? await this.prisma.user.findUnique({ where: { id: actorId }, select: { username: true, displayName: true } })
+        : null;
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          actorName: this.nameOf(u) ?? e.actor.username ?? 'Unknown user',
+          actorRoles: e.actor.roles ?? [],
+          category: e.category,
+          action: e.action,
+          summary: e.summary.slice(0, 500),
+          tournamentId: e.tournamentId ?? null,
+          tournamentName: e.tournamentName ?? null,
+          targetUserId: e.targetUserId ?? null,
+          targetName: e.targetName ?? null,
+          metadata: Prisma.JsonNull,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(`Audit record failed for ${e.action}: ${String(err)}`);
+    }
+  }
+
   /** The admin dashboard's read. Newest first, keyset-paged on (createdAt, id)
    *  so a busy log does not slow down as it grows. */
   async list(q: {

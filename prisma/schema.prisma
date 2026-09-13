@@ -83,6 +83,10 @@ enum NotificationType {
   MATCH_TIMER_ENDED
   // An admin gave this user a medal or plaque (todo.md obj. 4.1).
   AWARD_RECEIVED
+  // An organizer approved or rejected this player's tournament build (obj. 4.3).
+  BUILD_REVIEWED
+  // An admin removed this user's gallery image or build after a report.
+  CONTENT_REMOVED
 }
 
 /// What kind of thing an audit entry records — the admin dashboard filters on it.
@@ -95,6 +99,42 @@ enum AuditCategory {
   AWARD
   CATALOG
   SYSTEM
+  MODERATION
+}
+
+/// A tournament build (obj. 4.3): what a player brought, in a game-agnostic form.
+enum BuildKind {
+  IMAGE
+  TEXT
+  LINK
+}
+
+/// Only meaningful when the tournament requires builds — then organizers must
+/// approve each one before it counts or is shown to other players.
+enum BuildStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Who, besides the owner and staff, may see a tournament's builds.
+enum BuildVisibility {
+  PUBLIC
+  AFTER_COMPLETION
+  STAFF_ONLY
+}
+
+enum ReportReason {
+  SPAM
+  OFFENSIVE
+  NOT_A_BUILD
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
 }
 
 /// A medal is a square a user may pin (up to three) to their profile; a plaque
@@ -184,6 +224,10 @@ model User {
   googleId String? @unique
 
   auditEntries   AuditLog[]  @relation("AuditActor")
+  builds         TournamentBuild[] @relation("BuildOwner")
+  buildsReviewed TournamentBuild[] @relation("BuildReviewer")
+  galleryImages  GalleryImage[]
+  reportsFiled   ContentReport[]   @relation("ReportFiler")
 
   awardsCreated  Award[]     @relation("AwardsCreated")
   awardsReceived UserAward[] @relation("AwardsReceived")
@@ -296,6 +340,7 @@ model Game {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  galleryImages GalleryImage[]
 }
 
 // An organizer's request for a game not yet in the catalog (todo.md §5). A durable
@@ -439,6 +484,12 @@ model Tournament {
   // inviteToken UUID keeps working as a fallback, so old links never break.
   slug        String?          @unique
   isPrivate   Boolean          @default(false)
+  /// Build submissions (obj. 4.3). Off: optional, shown without review. On:
+  /// every active entrant must submit, and organizers approve each before start.
+  buildsRequired    Boolean         @default(false)
+  buildVisibility   BuildVisibility @default(AFTER_COMPLETION)
+  buildsLockAtStart Boolean         @default(true)
+  builds            TournamentBuild[]
   status      TournamentStatus @default(OPEN)
 
   // Format reference — points to admin-defined named ruleset
@@ -819,4 +870,86 @@ model AuditLog {
   @@index([actorId])
   @@index([tournamentId])
   @@index([category, createdAt])
+}
+
+/// What a player brought to one tournament (obj. 4.3) — an image, a plain-text
+/// decklist, or a link. One live build per entrant: the uniqueness is a PARTIAL
+/// index in the migration (only rows not removed), so a build an admin removed
+/// does not block the player from submitting a new one.
+model TournamentBuild {
+  id           String      @id @default(uuid())
+  tournamentId String
+  tournament   Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User        @relation("BuildOwner", fields: [userId], references: [id], onDelete: Cascade)
+  kind         BuildKind
+  imageUrl     String?
+  text         String?
+  url          String?
+  status       BuildStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   User?       @relation("BuildReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  /// Soft removal by an admin: hidden at once, purged after 30 days.
+  removedAt     DateTime?
+  removedById   String?
+  removalReason String?
+
+  reports ContentReport[]
+
+  @@index([tournamentId])
+  @@index([userId])
+}
+
+/// One image per game on a profile (obj. 4.3). Same partial-unique treatment as
+/// builds: a removed image does not hold the slot.
+model GalleryImage {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameId    String
+  /// RESTRICT: GameService refuses to delete a game that has gallery images,
+  /// with a message, rather than letting a delete wipe people's pictures.
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  imageUrl  String
+  caption   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  removedAt     DateTime?
+  removedById   String?
+  removalReason String?
+
+  reports ContentReport[]
+
+  @@index([userId])
+  @@index([gameId])
+}
+
+/// A report from a player, or a removal request from an organizer (fromStaff),
+/// against one gallery image or one build. Only admins act on them.
+model ContentReport {
+  id                String         @id @default(uuid())
+  galleryImageId    String?
+  galleryImage      GalleryImage?  @relation(fields: [galleryImageId], references: [id], onDelete: Cascade)
+  tournamentBuildId String?
+  tournamentBuild   TournamentBuild? @relation(fields: [tournamentBuildId], references: [id], onDelete: Cascade)
+  reporterId        String
+  reporter          User           @relation("ReportFiler", fields: [reporterId], references: [id], onDelete: Cascade)
+  reason            ReportReason
+  note              String?
+  /// Filed by an organizer or admin — sorts ahead of player reports.
+  fromStaff         Boolean        @default(false)
+  status            ReportStatus   @default(OPEN)
+  resolvedById      String?
+  resolvedAt        DateTime?
+  createdAt         DateTime       @default(now())
+
+  /// One report per person per item (Postgres treats NULLs as distinct, so the
+  /// unused column never collides).
+  @@unique([reporterId, galleryImageId])
+  @@unique([reporterId, tournamentBuildId])
+  @@index([status, createdAt])
 }

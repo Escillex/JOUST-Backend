@@ -24,6 +24,7 @@ import { SettingsModule } from './settings/settings.module';
 import { BackupModule } from './backup/backup.module';
 import { AwardModule } from './award/award.module';
 import { AuditModule } from './audit/audit.module';
+import { ContentModule } from './content/content.module';
 import { HealthModule } from './health/health.module';
 import { SettingsAdminModule } from './settings/settings-admin.module';
 import { MailModule } from './mail/mail.module';
@@ -56,6 +57,7 @@ import { MailModule } from './mail/mail.module';
     BackupModule,
     AwardModule,
     AuditModule,
+    ContentModule,
     HealthModule,
     MailModule,
   ],

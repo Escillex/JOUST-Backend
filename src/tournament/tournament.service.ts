@@ -29,6 +29,7 @@ import {
   OrganizerInviteStatus,
 } from '@prisma/client';
 import { JwtPayload } from 'src/guards/jwt-auth.guard';
+import { assertBuildsReady } from '../content/build.service';
 import { checkTournamentAccess } from 'src/guards/tournament-access.util';
 import { RealtimeGateway } from 'src/realtime/realtime.gateway';
 import {
@@ -469,6 +470,9 @@ export class TournamentService {
       throw new BadRequestException('Need at least 2 players');
     if (!tournament.format)
       throw new BadRequestException('Tournament has no format assigned');
+    // Mandatory builds (obj. 4.3): refuse to draw a bracket until every active
+    // entrant's build has been approved by an organizer.
+    if (tournament.buildsRequired) await assertBuildsReady(this.prisma, tournamentId);
 
     // Claim the start atomically. The check above is a fast path for a friendly
     // error; on its own it is a read-then-write race with a window as long as
@@ -476,9 +480,20 @@ export class TournamentService {
     // taps Start, the response never arrives, they tap again, and without this
     // both requests would generate their own bracket. Only one caller can move
     // the row out of OPEN, so only one generates.
+    //
+    // The same write SNAPSHOTS the rules. A tournament with no rules of its own
+    // used to read its format preset live for its whole life, so an admin
+    // editing (or deleting) a shared preset changed the rules of every event
+    // already running on it — bestOf, tie-breakers, points — mid-event. From the
+    // moment it starts, a tournament owns a frozen copy (todo.md §4).
     const claim = await this.prisma.tournament.updateMany({
       where: { id: tournamentId, status: TournamentStatus.OPEN },
-      data: { status: TournamentStatus.ONGOING },
+      data: {
+        status: TournamentStatus.ONGOING,
+        ...(tournament.config == null && tournament.format.config != null
+          ? { config: tournament.format.config as Prisma.InputJsonValue }
+          : {}),
+      },
     });
     if (claim.count === 0) {
       throw new BadRequestException('Tournament already started');
@@ -828,15 +843,20 @@ export class TournamentService {
           },
         });
 
-        // Snapshot match player names before guest purge
+        // Snapshot match player names before guest purge. The display name,
+        // not the @handle — the same rule account deletion uses when it burns a
+        // name in (auth.service), so a finished bracket never shows "mira-calder"
+        // in one match and "Mira Calder" in the next.
+        const shown = (u: { displayName: string | null; username: string | null } | null | undefined) =>
+          u ? u.displayName?.trim() || u.username || null : null;
         for (const round of tournament.rounds) {
           for (const match of round.matches) {
             await tx.match.update({
               where: { id: match.id },
               data: {
-                p1Name: match.player1?.username || match.p1Name,
-                p2Name: match.player2?.username || match.p2Name,
-                winnerName: match.winner?.username || match.winnerName,
+                p1Name: shown(match.player1) || match.p1Name,
+                p2Name: shown(match.player2) || match.p2Name,
+                winnerName: shown(match.winner) || match.winnerName,
               },
             });
           }
@@ -852,7 +872,7 @@ export class TournamentService {
             where: { id: tournamentId },
             data: {
               winnerId,
-              winnerName: winner?.username || 'Unknown',
+              winnerName: shown(winner) || 'Unknown',
             } as any,
           });
         }
@@ -1097,7 +1117,7 @@ export class TournamentService {
         // invite route are unauthenticated, so exposing creator/participant emails
         // let anyone with a tournament id enumerate them. Managers who need contact
         // details use GET /auth/users (organizer/admin only).
-        createdBy: { select: { id: true, username: true } },
+        createdBy: { select: { id: true, username: true, displayName: true, slug: true } },
         winner: {
           select: {
             id: true,
@@ -1143,7 +1163,7 @@ export class TournamentService {
         // invite route are unauthenticated, so exposing creator/participant emails
         // let anyone with a tournament id enumerate them. Managers who need contact
         // details use GET /auth/users (organizer/admin only).
-        createdBy: { select: { id: true, username: true } },
+        createdBy: { select: { id: true, username: true, displayName: true, slug: true } },
         winner: {
           select: {
             id: true,

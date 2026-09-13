@@ -15,6 +15,8 @@ import { BackupService } from '../src/backup/backup.service';
 import { SettingsAdminModule } from '../src/settings/settings-admin.module';
 import { AwardModule } from '../src/award/award.module';
 import { AuditModule } from '../src/audit/audit.module';
+import { ContentModule } from '../src/content/content.module';
+import { ModerationService } from '../src/content/moderation.service';
 import { AuditService } from '../src/audit/audit.service';
 import { AwardService } from '../src/award/award.service';
 
@@ -80,6 +82,18 @@ describe('DI graph', () => {
       .compile();
 
     expect(moduleRef.get(AuditService)).toBeDefined();
+    await moduleRef.close();
+  });
+
+  it('ContentModule resolves guards, images, notifications and the global audit service', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [ScheduleModule.forRoot(), AuditModule, ContentModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({ $connect: jest.fn(), $disconnect: jest.fn() })
+      .compile();
+
+    expect(moduleRef.get(ModerationService)).toBeDefined();
     await moduleRef.close();
   });
 });
