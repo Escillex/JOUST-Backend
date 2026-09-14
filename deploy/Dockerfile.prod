@@ -31,5 +31,12 @@ COPY --from=build /app/package.json ./
 # (the seed is guarded, so it only actually writes on a fresh DB).
 COPY --from=build /app/tsconfig.json ./
 COPY --from=build /app/tsconfig.build.json ./
+# ...and so does src/. The seed is TypeScript compiled on the fly by ts-node, and
+# it imports from src (generateUniqueUserSlug, since 2026-09-04). Without these
+# sources the seed dies with "Cannot find module '../src/user/user-slug.util'",
+# which fails the whole start command — `migrate deploy && db seed && node` — and
+# crash-loops the container. Shipping src costs nothing here: dist is the same
+# code compiled, and node_modules is deliberately unpruned anyway.
+COPY --from=build /app/src ./src
 EXPOSE 4000
 CMD ["node", "dist/src/main.js"]
