@@ -36,6 +36,8 @@ const EXEMPT: Record<string, string> = {
   'AuthController.submitRecovery': 'sign-in step',
   'AuthController.resendCode': 'sign-in step',
   'AuthController.signInWithGoogle': 'sign-in',
+  'AuthController.forcedPasswordChange':
+    'the last step of a sign-in — a user replacing a password set for them. The ADMIN action that caused it (creating the account, or resetting the password) is what the log records.',
   'AuthController.linkGoogle': "a user managing their own account",
   'AuthController.unlinkGoogle': "a user managing their own account",
   'AuthController.updateMe': "a user editing their own profile",

@@ -220,3 +220,16 @@ export class GoogleCredentialDto {
   @MaxLength(4096)
   public credential!: string;
 }
+
+/** Finishing a forced password change. The old password is not re-asked: it was
+ *  proved to obtain `changeToken`, which is single-purpose and short-lived. */
+export class ForcedPasswordChangeDto {
+  @IsNotEmpty()
+  @IsString()
+  public changeToken!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })
+  public newPassword!: string;
+}

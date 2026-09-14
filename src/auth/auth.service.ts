@@ -175,6 +175,71 @@ export class AuthService {
     }
   }
 
+  /** Proves a password was just verified, and authorises nothing else. Same
+   *  shape as the 2FA challenge above, and rejected by `JwtAuthGuard` for the
+   *  same reason: its purpose is not `session`. */
+  private async issuePasswordChangeToken(userId: string): Promise<string> {
+    return this.jwt.signAsync(
+      { id: userId, purpose: 'password_change' },
+      { expiresIn: '15m' },
+    );
+  }
+
+  private async readPasswordChangeToken(token: string): Promise<string> {
+    try {
+      const payload = await this.jwt.verifyAsync<{
+        id: string;
+        purpose?: string;
+      }>(token, { secret: requireJwtSecret() });
+      if (payload.purpose !== 'password_change' || !payload.id) {
+        throw new Error('wrong purpose');
+      }
+      return payload.id;
+    } catch {
+      throw new UnauthorizedException(
+        'That sign-in attempt has expired. Please sign in again.',
+      );
+    }
+  }
+
+  /**
+   * Replace a password that was set for you, and get the session you were
+   * denied.
+   *
+   * The old password is not asked for again — it was proved moments ago to get
+   * this token, and asking twice for a password the holder may have been handed
+   * on a slip of paper helps nobody. What IS refused is setting it back to the
+   * same value, which would make the whole exercise theatre.
+   */
+  async changeForcedPassword(
+    changeToken: string,
+    newPassword: string,
+    res: Response,
+  ) {
+    const userId = await this.readPasswordChangeToken(changeToken);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Account no longer exists');
+
+    if (
+      user.hashedPassword &&
+      (await this.verifyPassword(newPassword, user.hashedPassword))
+    ) {
+      throw new BadRequestException(
+        'Choose a password different from the one you were given.',
+      );
+    }
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        hashedPassword: await this.hashPassword(newPassword),
+        mustChangePassword: false,
+      },
+    });
+
+    return this.completeSignIn(updated, res);
+  }
+
   // ──────────────────────────────────────────────
   // SIGN IN
   // ──────────────────────────────────────────────
@@ -287,9 +352,23 @@ export class AuthService {
       roles: Role[];
       username: string | null;
       avatarUrl: string | null;
+      mustChangePassword?: boolean;
     },
     res: Response,
   ) {
+    // A password somebody else chose buys you one thing: the right to replace
+    // it. The diversion lives HERE rather than in SignIn so that every path —
+    // password-only, post-2FA, recovery code — is covered by construction; a
+    // future sign-in route cannot forget it. Google is exempt in practice, since
+    // an account created through Google has no password to be forced to change.
+    if (user.mustChangePassword) {
+      return {
+        passwordChangeRequired: true,
+        changeToken: await this.issuePasswordChangeToken(user.id),
+        message: 'Choose a new password to finish signing in.',
+      };
+    }
+
     const token = await this.generateToken(
       user.id,
       user.email,
@@ -448,8 +527,12 @@ export class AuthService {
     // path (updateProfile) always saved it. Same rule in both now.
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
     if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio);
-    if (dto.password)
+    if (dto.password) {
       data.hashedPassword = await this.hashPassword(dto.password);
+      // Choosing your own password satisfies the forced change, for the case
+      // where a flagged account still holds a session issued before the flag.
+      data.mustChangePassword = false;
+    }
 
     return this.prisma.user.update({
       where: { id: userId },
@@ -789,8 +872,13 @@ export class AuthService {
     }
     if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio); // an admin clearing an abusive bio
     if (email) data.email = email;
-    if (dto.password)
+    if (dto.password) {
       data.hashedPassword = await this.hashPassword(dto.password);
+      // An admin resetting a password is handing over a temporary one — the
+      // same situation as account creation, so the same rule. Self-service
+      // changes (updateMe) deliberately do not set this.
+      data.mustChangePassword = true;
+    }
 
     // Re-derive the profile handle when the username actually changes. Old links
     // still resolve via the UUID path, so a rename never 404s a shared link — it
@@ -842,6 +930,9 @@ export class AuthService {
         hashedPassword,
         roles: dto.roles && dto.roles.length > 0 ? dto.roles : [Role.PLAYER],
         isGuest: false,
+        // Whoever this is for did not choose this password, and an admin now
+        // knows it. It buys exactly one sign-in, spent on replacing it.
+        mustChangePassword: true,
       },
       select: {
         id: true,

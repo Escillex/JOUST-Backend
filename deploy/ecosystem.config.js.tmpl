@@ -16,6 +16,8 @@ module.exports = {
         PORT: '__BACKEND_PORT__',
         DATABASE_URL: '__DATABASE_URL__',
         JWT_SECRET: '__JWT_SECRET__',
+        // Encrypts the stored SMTP key and full backups; see compose.server.yml.
+        SETTINGS_ENCRYPTION_KEY: '__SETTINGS_ENCRYPTION_KEY__',
         ADMIN_PASSWORD: '__ADMIN_PASSWORD__',
         ALLOWED_ORIGINS: '__ALLOWED_ORIGINS__',
         SOCKET_ALLOWED_ORIGINS: '__SOCKET_ALLOWED_ORIGINS__',

@@ -17,6 +17,12 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
       - SOCKET_ALLOWED_ORIGINS=${SOCKET_ALLOWED_ORIGINS:-}
       - HOST_IP=${HOST_IP:-localhost}
+      # Encrypts secret settings (the SMTP key) and full database backups. Without
+      # it, saving an SMTP password fails outright and no backup can be written —
+      # both with a clear error, but only once somebody tries. setup.sh generates
+      # one into .env and never regenerates it: a changed key makes every existing
+      # backup unreadable.
+      - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
     # main.ts serves uploads from <cwd>/../images; the container runs in /app so
     # that resolves to /images. Bind the deploy-root images/ dir there. The path
     # is an ABSOLUTE var (set in .env by setup.sh) so the fragment can live inside

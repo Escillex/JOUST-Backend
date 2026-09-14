@@ -124,6 +124,11 @@ async function main() {
         hashedPassword,
         roles: [Role.ADMIN, Role.ORGANIZER, Role.PLAYER],
         isGuest: false,
+        // ADMIN_PASSWORD lives in a .env file, a compose file, and whatever
+        // shell history put it there. It gets this account through its first
+        // sign-in and no further: the first thing that sign-in asks for is a
+        // replacement.
+        mustChangePassword: true,
       },
     });
     console.log(`  ✅ Admin created: ${admin.username}`);

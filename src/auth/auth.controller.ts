@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import { GoogleAuthService } from './google-auth.service';
 import {
   AdminCreateUserDto,
+  ForcedPasswordChangeDto,
   AuthDto,
   ConvertGuestDto,
   GoogleCredentialDto,
@@ -84,6 +85,21 @@ export class AuthController {
     return this.authService.submitRecoveryCode(
       dto.challenge,
       dto.recoveryCode,
+      res,
+    );
+  }
+
+  /** Replace a password that was set for you. Unguarded by design: the caller
+   *  cannot hold a session yet — that is the whole point of the flag — and the
+   *  short-lived `changeToken` is the credential. */
+  @Post('password/forced-change')
+  forcedPasswordChange(
+    @Body() dto: ForcedPasswordChangeDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.authService.changeForcedPassword(
+      dto.changeToken,
+      dto.newPassword,
       res,
     );
   }

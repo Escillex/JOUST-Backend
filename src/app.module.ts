@@ -27,6 +27,7 @@ import { AuditModule } from './audit/audit.module';
 import { ContentModule } from './content/content.module';
 import { HealthModule } from './health/health.module';
 import { SettingsAdminModule } from './settings/settings-admin.module';
+import { SetupModule } from './setup/setup.module';
 import { MailModule } from './mail/mail.module';
 
 @Module({
@@ -54,6 +55,7 @@ import { MailModule } from './mail/mail.module';
     AnalyticsModule,
     SettingsModule,
     SettingsAdminModule,
+    SetupModule,
     BackupModule,
     AwardModule,
     AuditModule,

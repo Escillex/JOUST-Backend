@@ -14,7 +14,13 @@
 #   "modes" are just compositions of these answers.
 # ─────────────────────────────────────────────────────────────────────────────
 set -eu   # NB: no `pipefail` — early-exit pipes (grep -m1, awk … exit) mustn't fail the run
-cd "$(dirname "$0")"
+# The deploy root is where .env/deploy.conf are written and where the two app
+# repos sit side by side — normally this script's own directory. When it is
+# invoked through the root wrapper (which lives in the deploy root but execs
+# this file INSIDE the backend repo), $0 points into the repo instead, so the
+# wrapper passes the real root in. Getting this wrong makes repo detection fail
+# with "backend repo not found beside this dir".
+cd "${JOUST_DEPLOY_ROOT:-$(dirname "$0")}"
 ROOT="$PWD"
 
 c_bold=$'\033[1m'; c_dim=$'\033[2m'; c_grn=$'\033[32m'; c_red=$'\033[31m'; c_rst=$'\033[0m'
@@ -183,6 +189,11 @@ fi
 # ── preserve or generate secrets ─────────────────────────────────────────────
 JWT_SECRET=$(existing_env JWT_SECRET)
 [ -n "$JWT_SECRET" ] || JWT_SECRET=$(randb64 48)
+# Encrypts the SMTP key in the settings table and the .joustql backup payload.
+# PRESERVED, never regenerated: a new key cannot decrypt an old backup, so
+# rotating it silently destroys every snapshot taken before it.
+SETTINGS_KEY=$(existing_env SETTINGS_ENCRYPTION_KEY)
+[ -n "$SETTINGS_KEY" ] || SETTINGS_KEY=$(randb64 32)
 PG_PW=$(existing_env POSTGRES_PASSWORD)
 if [ -z "$PG_PW" ]; then PG_PW=$(randb64 32 | tr -dc 'A-Za-z0-9'); PG_PW=${PG_PW:0:24}; fi
 ADMIN_PW=$(existing_env ADMIN_PASSWORD)
@@ -412,6 +423,8 @@ POSTGRES_DB=joust
 DB_PORT=$DB_PORT
 
 JWT_SECRET="$JWT_SECRET"
+# Back this up somewhere else. Lose it and every encrypted backup is unreadable.
+SETTINGS_ENCRYPTION_KEY="$SETTINGS_KEY"
 ADMIN_PASSWORD="$ADMIN_PW"
 CF_TUNNEL_TOKEN="$CF_TUNNEL_TOKEN"
 TUNNEL_NAME=$TUNNEL_NAME
@@ -550,6 +563,7 @@ else
 	sed -e "s|__NODE_ENV__|$NODE_ENV|; s|__BACKEND_PORT__|$BACKEND_PORT|; s|__FRONTEND_PORT__|$FRONTEND_PORT|" \
 	    -e "s|__DATABASE_URL__|postgresql://joust:$PG_PW@localhost:5433/joust?schema=public|" \
 	    -e "s|__JWT_SECRET__|$JWT_SECRET|; s|__ADMIN_PASSWORD__|$ADMIN_PW|" \
+	    -e "s|__SETTINGS_ENCRYPTION_KEY__|$SETTINGS_KEY|" \
 	    -e "s|__ALLOWED_ORIGINS__|$ORIGINS|; s|__SOCKET_ALLOWED_ORIGINS__|$ORIGINS|; s|__HOST_IP__|$HOST_IP|" \
 	    -e "s|__SERVER_DIR__|$JOUST_SERVER_DIR|; s|__FRONTEND_DIR__|$JOUST_FRONTEND_DIR|" \
 	    "$JOUST_SERVER_DIR/deploy/ecosystem.config.js.tmpl" > ecosystem.config.js

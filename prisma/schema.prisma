@@ -189,6 +189,13 @@ model User {
   // otherwise be an unrecoverable lockout.
   twoFactorRecoveryCodes String[]
 
+  // A password somebody ELSE chose — the seeded admin, or an account an admin
+  // created or reset. The holder must replace it before they get a session: the
+  // sign-in mints a `password_change` token instead, which every guard rejects.
+  // Self-service password changes never set this; you do not need to be forced
+  // to replace a password you picked.
+  mustChangePassword Boolean @default(false)
+
   emailVerificationTokens EmailVerificationToken[]
   twoFactorCodes          TwoFactorCode[]
   trustedDevices          TrustedDevice[]
