@@ -33,6 +33,19 @@ export function twoFactorEmail(code: string) {
   );
 }
 
+export function passwordResetEmail(code: string) {
+  return wrap(
+    `${code} is your JOUST password reset code`,
+    [
+      `Your password reset code is: ${code}`,
+      '',
+      'It expires in 15 minutes and can be used once.',
+      '',
+      'If you did not ask to reset your password, ignore this email — nothing has changed.',
+    ].join('\n'),
+  );
+}
+
 export function testEmail() {
   return wrap(
     'JOUST test email',

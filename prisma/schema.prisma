@@ -482,7 +482,13 @@ model Tournament {
   name        String
   description String?
   maxPlayers  Int
-  prizePool   Float?
+  // Free text, not money (2026-09-15). Most prizes at this scale are physical —
+  // "Trophy + medal", "Booster box", "Bragging rights" — and a Float could only
+  // ever express the minority that are cash. Existing numbers were migrated to
+  // "$<n>" text. `prizeImageUrl` optionally shows what the prize actually is;
+  // the frontend turns the text into a link to it.
+  prizePool      String?
+  prizeImageUrl  String?
   entranceFee Float?
   venue       String?
   date        DateTime?

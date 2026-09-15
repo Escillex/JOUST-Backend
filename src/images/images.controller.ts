@@ -83,6 +83,30 @@ export class ImagesController {
     return this.imagesService.deleteBanner(tournamentId);
   }
 
+  // ─── TOURNAMENT PRIZE PICTURE ──────────────────────────────────
+
+  @Audit({ action: 'tournament.prize_image', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Changed the prize picture of ${c.t}` })
+  @Post('prize/:tournamentId')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadPrizeImage(
+    @Param('tournamentId') tournamentId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.imagesService.updatePrizeImage(tournamentId, file);
+  }
+
+  @Audit({ action: 'tournament.prize_image_remove', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Removed the prize picture of ${c.t}` })
+  @Delete('prize/:tournamentId')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
+  async deletePrizeImage(@Param('tournamentId') tournamentId: string) {
+    return this.imagesService.deletePrizeImage(tournamentId);
+  }
+
   // ─── SITE ASSETS ───────────────────────────────────────────────
 
   @Audit({ action: 'system.asset', category: AC.SYSTEM, describe: (c) => `Uploaded the site asset "${c.params.key}"` })

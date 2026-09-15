@@ -18,7 +18,6 @@ import {
 } from '@prisma/client';
 import { JwtPayload } from 'src/guards/jwt-auth.guard';
 import { checkTournamentAccess } from 'src/guards/tournament-access.util';
-import { generateUniqueUserSlug } from '../../user/user-slug.util';
 
 @Injectable()
 export class ParticipantService {
@@ -191,12 +190,17 @@ export class ParticipantService {
             );
           }
 
-          const guestSlug = await generateUniqueUserSlug(tx, username);
+          // No slug. A guest is a temporary row that the cleanup job deletes,
+          // and a public profile handle for one is both useless and costly: it
+          // takes a name out of the shared namespace ("swift-falcon") and keeps
+          // it out after the account is gone. Guests are addressed by id, which
+          // `GET /users/:handle/profile` resolves either way; `profileHref`
+          // already falls back to it. The replace path below never generated
+          // one, so this also makes the three guest-creation sites agree.
           const guestUser = await tx.user.create({
             data: {
               isGuest: true,
               username,
-              slug: guestSlug,
               roles: ['PLAYER'],
               expiresAt,
             },

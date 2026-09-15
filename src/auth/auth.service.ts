@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   requireJwtSecret,
   sessionCookieOptions,
@@ -35,6 +36,23 @@ export function normalizeBio(bio: string): string | null {
   const clean = bio.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   return clean ? clean.slice(0, BIO_MAX_LENGTH) : null;
 }
+
+/** Addresses that exist but can never receive mail: the seed's `.local` default
+ *  and IANA's reserved example domains. */
+function isUnroutableAddress(email: string | null): boolean {
+  if (!email) return true;
+  const domain = email.split('@')[1]?.toLowerCase() ?? '';
+  return (
+    !domain ||
+    domain.endsWith('.local') ||
+    domain === 'example.com' ||
+    domain === 'example.org' ||
+    domain === 'example.net'
+  );
+}
+
+/** Which step of a login a challenge token stands for. */
+type ChallengeStep = 'verify' | 'signin' | 'reset';
 
 @Injectable()
 export class AuthService {
@@ -146,28 +164,34 @@ export class AuthService {
    *  `JwtAuthGuard` rejects every purpose except `session`. */
   private async issueChallenge(
     userId: string,
-    kind: 'verify' | 'signin',
+    kind: ChallengeStep,
   ): Promise<string> {
     return this.jwt.signAsync(
       { id: userId, purpose: '2fa', step: kind },
-      { expiresIn: kind === 'verify' ? '15m' : '10m' },
+      { expiresIn: kind === 'signin' ? '10m' : '15m' },
     );
   }
 
-  /** Reads a challenge token back, refusing anything that is not one. */
+  /** Reads a challenge token back, refusing anything that is not one.
+   *  `expect` pins the step: a sign-in challenge must not be spendable on a
+   *  password reset, which would turn "prove you can read the inbox" into
+   *  "change the password" without the code the reset asked for. */
   private async readChallenge(
     challenge: string,
-  ): Promise<{ id: string; step: 'verify' | 'signin' }> {
+    expect?: ChallengeStep,
+  ): Promise<{ id: string; step: ChallengeStep }> {
     try {
       const payload = await this.jwt.verifyAsync<{
         id: string;
         purpose?: string;
-        step?: 'verify' | 'signin';
+        step?: ChallengeStep;
       }>(challenge, { secret: requireJwtSecret() });
       if (payload.purpose !== '2fa' || !payload.id) {
         throw new Error('wrong purpose');
       }
-      return { id: payload.id, step: payload.step ?? 'signin' };
+      const step = payload.step ?? 'signin';
+      if (expect && step !== expect) throw new Error('wrong step');
+      return { id: payload.id, step };
     } catch {
       throw new UnauthorizedException(
         'That sign-in attempt has expired. Please start again.',
@@ -203,6 +227,109 @@ export class AuthService {
   }
 
   /**
+   * Start a password reset.
+   *
+   * Always answers the same way, whether or not the account exists: an endpoint
+   * that says "no such user" is a free membership check for anyone with a list
+   * of addresses. The caller is told to check their inbox either way, and only
+   * a real account gets a code.
+   */
+  async requestPasswordReset(identifier: string) {
+    const user = await this.prisma.user.findFirst({
+      where: isEmail(identifier)
+        ? { email: { equals: identifier, mode: 'insensitive' } }
+        : { username: { equals: identifier, mode: 'insensitive' } },
+    });
+
+    // Guests have no password to reset and no inbox to reset it from.
+    const eligible = !!user && !user.isGuest && !!user.email;
+    if (eligible) await this.twoFactor.issueCode(user!, 'reset');
+
+    // The RESPONSE SHAPE has to match too, not just the message. Returning a
+    // challenge only for real accounts would make the presence of that field a
+    // free membership check for anyone with a list of addresses — so an
+    // ineligible identifier gets a challenge for an id that does not exist,
+    // which simply fails at the code step like a wrong code would.
+    return {
+      message:
+        'If that account exists, a reset code is on its way to its email address.',
+      challenge: await this.issueChallenge(
+        eligible ? user!.id : randomUUID(),
+        'reset',
+      ),
+    };
+  }
+
+  /**
+   * Finish a reset with the emailed code.
+   *
+   * Reuses the same hashed, single-use, five-attempt, throttled code machinery
+   * as the second factor — a reset code is a sign-in credential and gets the
+   * same treatment.
+   */
+  async resetPasswordWithCode(
+    challenge: string,
+    code: string,
+    newPassword: string,
+    res: Response,
+  ) {
+    const { id } = await this.readChallenge(challenge, 'reset');
+    const check = await this.twoFactor.checkCode(id, code);
+    if (!check.ok) {
+      throw new BadRequestException(this.codeFailureMessage(check.reason));
+    }
+    return this.applyNewPassword(id, newPassword, res);
+  }
+
+  /**
+   * Finish a reset with a recovery code instead.
+   *
+   * This is the door that survives a dead inbox — the case recovery codes were
+   * minted for. The code is spent on use, exactly as it is when skipping the
+   * second factor.
+   */
+  async resetPasswordWithRecovery(
+    identifier: string,
+    recoveryCode: string,
+    newPassword: string,
+    res: Response,
+  ) {
+    const user = await this.prisma.user.findFirst({
+      where: isEmail(identifier)
+        ? { email: { equals: identifier, mode: 'insensitive' } }
+        : { username: { equals: identifier, mode: 'insensitive' } },
+    });
+    const accepted =
+      user && !user.isGuest
+        ? await this.twoFactor.useRecoveryCode(user.id, recoveryCode)
+        : false;
+    if (!user || !accepted) {
+      throw new BadRequestException('That recovery code is not valid.');
+    }
+    return this.applyNewPassword(user.id, newPassword, res);
+  }
+
+  /** Shared tail of both reset paths. */
+  private async applyNewPassword(
+    userId: string,
+    newPassword: string,
+    res: Response,
+  ) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        hashedPassword: await this.hashPassword(newPassword),
+        // A reset satisfies a forced change: the password is now one they chose.
+        mustChangePassword: false,
+      },
+    });
+    // Every trusted device is revoked. If the reset was somebody else recovering
+    // a hijacked account, a remembered browser would otherwise still be inside.
+    await this.twoFactor.revokeDevices(userId);
+    return this.completeSignIn(user, res);
+  }
+
+  /**
    * Replace a password that was set for you, and get the session you were
    * denied.
    *
@@ -215,10 +342,33 @@ export class AuthService {
     changeToken: string,
     newPassword: string,
     res: Response,
+    email?: string,
   ) {
     const userId = await this.readPasswordChangeToken(changeToken);
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new UnauthorizedException('Account no longer exists');
+
+    // The seeded admin is born with `admin@joust.local`, an address that cannot
+    // receive anything — so switching two-factor on sends the only ADMIN
+    // account's codes into a void, and a seeded account has no recovery codes
+    // either. This screen is the one step such an account cannot skip, so it is
+    // where the address gets fixed.
+    const needsAddress = isUnroutableAddress(user.email);
+    if (needsAddress) {
+      if (!email || !isEmail(email)) {
+        throw new BadRequestException({
+          message:
+            'This account has no working email address. Enter one you can receive mail at.',
+          code: 'EMAIL_REQUIRED',
+        });
+      }
+      const taken = await this.prisma.user.findFirst({
+        where: { id: { not: userId }, email: { equals: email, mode: 'insensitive' } },
+      });
+      if (taken) {
+        throw new BadRequestException('That email address is already in use.');
+      }
+    }
 
     if (
       user.hashedPassword &&
@@ -234,6 +384,12 @@ export class AuthService {
       data: {
         hashedPassword: await this.hashPassword(newPassword),
         mustChangePassword: false,
+        // A new address is unproven until a code reaches it, so it is stored
+        // unverified: the next sign-in under `staff`/`all` enforcement asks for
+        // that code, and THAT is where recovery codes finally get minted.
+        ...(needsAddress && email
+          ? { email: email.trim().toLowerCase(), emailVerified: false, emailVerifiedAt: null }
+          : {}),
       },
     });
 
@@ -669,12 +825,11 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24); // 24-hour lifespan by default
 
-    const slug = await generateUniqueUserSlug(this.prisma, username);
+    // No slug for guests — see joinTournamentAsGuest.
     return this.prisma.user.create({
       data: {
         isGuest: true,
         username,
-        slug,
         roles: [Role.PLAYER],
         expiresAt,
       },

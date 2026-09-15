@@ -30,8 +30,12 @@ export class DevController {
   async batchAddGuests(
     @Param('tournamentId') tournamentId: string,
     @Body('count') count: number = 10,
+    // Names come from the caller so there is ONE guest-name pool
+    // (`new/app/utils/guestName.ts`) rather than a second copy here that would
+    // drift from it. Absent, the fallback below still produces something usable.
+    @Body('names') names?: string[],
   ) {
-    return this.devService.batchAddGuests(tournamentId, count);
+    return this.devService.batchAddGuests(tournamentId, count, names);
   }
 
   @Audit({ action: 'system.guest_expiry', category: AC.SYSTEM, pick: ['days'], describe: (c) => `Set guest expiry to ${String(c.body.days)} days` })

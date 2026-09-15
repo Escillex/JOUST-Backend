@@ -228,6 +228,51 @@ export class ForcedPasswordChangeDto {
   @IsString()
   public changeToken!: string;
 
+  /** Required only when the account's current address cannot receive mail. */
+  @IsOptional()
+  @IsEmail({}, { message: 'A valid email address is required.' })
+  public email?: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })
+  public newPassword!: string;
+}
+
+/** Starting a reset. Deliberately just the identifier: the response is the same
+ *  whether or not it matches, so nothing here can confirm an account exists. */
+export class ForgotPasswordDto {
+  @IsNotEmpty()
+  @IsString()
+  public identifier!: string;
+}
+
+/** Finishing a reset with the emailed code. */
+export class ResetPasswordDto {
+  @IsNotEmpty()
+  @IsString()
+  public challenge!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  public code!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })
+  public newPassword!: string;
+}
+
+/** Finishing a reset with a recovery code — the door that survives a dead inbox. */
+export class ResetWithRecoveryDto {
+  @IsNotEmpty()
+  @IsString()
+  public identifier!: string;
+
+  @IsNotEmpty()
+  @IsString()
+  public recoveryCode!: string;
+
   @IsNotEmpty()
   @IsString()
   @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })

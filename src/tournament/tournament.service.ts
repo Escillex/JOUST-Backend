@@ -257,6 +257,7 @@ export class TournamentService {
           description: dto.description,
           maxPlayers: dto.maxPlayers,
           prizePool: dto.prizePool,
+          prizeImageUrl: dto.prizeImageUrl,
           entranceFee: dto.entranceFee,
           venue: dto.venue,
           date: dto.date ? new Date(dto.date) : undefined,

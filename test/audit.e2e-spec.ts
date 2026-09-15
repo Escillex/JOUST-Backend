@@ -36,6 +36,12 @@ const EXEMPT: Record<string, string> = {
   'AuthController.submitRecovery': 'sign-in step',
   'AuthController.resendCode': 'sign-in step',
   'AuthController.signInWithGoogle': 'sign-in',
+  'AuthController.forgotPassword':
+    'self-service: asks for a reset code, and deliberately reveals nothing about whether the account exists',
+  'AuthController.resetPassword':
+    'the account holder resetting their own password with an emailed code — a sign-in step, not an operator action',
+  'AuthController.resetPasswordWithRecovery':
+    'the same, with a recovery code instead of the inbox',
   'AuthController.forcedPasswordChange':
     'the last step of a sign-in — a user replacing a password set for them. The ADMIN action that caused it (creating the account, or resetting the password) is what the log records.',
   'AuthController.linkGoogle': "a user managing their own account",

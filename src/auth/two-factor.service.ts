@@ -4,7 +4,11 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { SettingsService } from '../settings/settings.service';
-import { twoFactorEmail, verificationEmail } from '../mail/templates';
+import {
+  passwordResetEmail,
+  twoFactorEmail,
+  verificationEmail,
+} from '../mail/templates';
 
 /** Codes are short-lived on purpose; an inbox is not a vault. */
 const SIGNIN_CODE_TTL_MS = 10 * 60 * 1000;
@@ -17,7 +21,7 @@ const MAX_ATTEMPTS = 5;
 const RESEND_THROTTLE_MS = 60 * 1000;
 const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type CodeKind = 'signin' | 'verify';
+export type CodeKind = 'signin' | 'verify' | 'reset';
 
 export interface CodeIssue {
   sent: boolean;
@@ -90,7 +94,7 @@ export class TwoFactorService {
     }
 
     const code = this.generateCode();
-    const ttl = kind === 'verify' ? VERIFY_CODE_TTL_MS : SIGNIN_CODE_TTL_MS;
+    const ttl = kind === 'signin' ? SIGNIN_CODE_TTL_MS : VERIFY_CODE_TTL_MS;
 
     await this.prisma.$transaction([
       this.prisma.twoFactorCode.updateMany({
@@ -107,7 +111,11 @@ export class TwoFactorService {
     ]);
 
     const template =
-      kind === 'verify' ? verificationEmail(code) : twoFactorEmail(code);
+      kind === 'verify'
+        ? verificationEmail(code)
+        : kind === 'reset'
+          ? passwordResetEmail(code)
+          : twoFactorEmail(code);
     const result = await this.mail.send({ to: user.email, ...template });
     if (!result.delivered) {
       return {

@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques' | 'builds' | 'gallery';
+export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques' | 'builds' | 'gallery' | 'prizes';
 
 @Injectable()
 export class ImagesService {
@@ -13,7 +13,7 @@ export class ImagesService {
 
   constructor(private prisma: PrismaService) {
     // Ensure upload directories exist on startup
-    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques', 'builds', 'gallery'];
+    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques', 'builds', 'gallery', 'prizes'];
     subdirs.forEach((sub) => {
       const dir = path.join(this.uploadRoot, sub);
       if (!fs.existsSync(dir)) {
@@ -59,9 +59,10 @@ export class ImagesService {
         .webp({ quality: 85, alphaQuality: 90 })
         .toFile(outPath);
       return `/uploads/${subdir}/${fileName}`;
-    } else if (subdir === 'builds' || subdir === 'gallery') {
-      // Player photos of a deck or a build. 1600px on the long side keeps a
-      // decklist legible without shipping a 12-megapixel original.
+    } else if (subdir === 'builds' || subdir === 'gallery' || subdir === 'prizes') {
+      // Player photos of a deck or a build, or an organizer's photo of the prize
+      // on offer. 1600px on the long side keeps a decklist legible without
+      // shipping a 12-megapixel original.
       sharpInstance = sharpInstance.resize(1600, 1600, {
         fit: 'inside',
         withoutEnlargement: true,
@@ -176,6 +177,50 @@ export class ImagesService {
       where: { id: tournamentId },
       data: { bannerUrl: null },
       select: { id: true, bannerUrl: true },
+    });
+  }
+
+  // ─── TOURNAMENT PRIZE PICTURE ──────────────────────────────────
+
+  /** A photo of what is actually on offer. `prizePool` is free text — "Trophy"
+   *  means more when you can see which trophy — so the tournament page turns
+   *  that text into a link to this image. */
+  async updatePrizeImage(tournamentId: string, file: Express.Multer.File) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    // Save and commit before deleting the old one, so a failed upload cannot
+    // destroy the picture that is already there.
+    const newUrl = await this.processAndSave(file, 'prizes');
+    const updated = await this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { prizeImageUrl: newUrl },
+      select: { id: true, prizeImageUrl: true },
+    });
+
+    if (tournament.prizeImageUrl && tournament.prizeImageUrl !== newUrl) {
+      await this.deleteFile(tournament.prizeImageUrl);
+    }
+
+    return updated;
+  }
+
+  async deletePrizeImage(tournamentId: string) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+    });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    if (tournament.prizeImageUrl) {
+      await this.deleteFile(tournament.prizeImageUrl);
+    }
+
+    return this.prisma.tournament.update({
+      where: { id: tournamentId },
+      data: { prizeImageUrl: null },
+      select: { id: true, prizeImageUrl: true },
     });
   }
 

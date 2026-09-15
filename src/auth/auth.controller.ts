@@ -15,6 +15,9 @@ import { GoogleAuthService } from './google-auth.service';
 import {
   AdminCreateUserDto,
   ForcedPasswordChangeDto,
+  ForgotPasswordDto,
+  ResetPasswordDto,
+  ResetWithRecoveryDto,
   AuthDto,
   ConvertGuestDto,
   GoogleCredentialDto,
@@ -89,6 +92,43 @@ export class AuthController {
     );
   }
 
+  /**
+   * Ask for a reset code. Unguarded and deliberately uninformative: the reply is
+   * identical whether or not the account exists.
+   */
+  @Post('password/forgot')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.requestPasswordReset(dto.identifier);
+  }
+
+  /** Finish a reset with the emailed code. */
+  @Post('password/reset')
+  resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.authService.resetPasswordWithCode(
+      dto.challenge,
+      dto.code,
+      dto.newPassword,
+      res,
+    );
+  }
+
+  /** Finish a reset with a recovery code, for a dead inbox. */
+  @Post('password/reset-recovery')
+  resetPasswordWithRecovery(
+    @Body() dto: ResetWithRecoveryDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    return this.authService.resetPasswordWithRecovery(
+      dto.identifier,
+      dto.recoveryCode,
+      dto.newPassword,
+      res,
+    );
+  }
+
   /** Replace a password that was set for you. Unguarded by design: the caller
    *  cannot hold a session yet — that is the whole point of the flag — and the
    *  short-lived `changeToken` is the credential. */
@@ -101,6 +141,7 @@ export class AuthController {
       dto.changeToken,
       dto.newPassword,
       res,
+      dto.email,
     );
   }
 

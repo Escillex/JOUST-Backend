@@ -24,7 +24,13 @@ describe('forced password change', () => {
   const build = (user: Record<string, unknown>) => {
     const prisma: any = {
       user: {
-        findFirst: jest.fn().mockResolvedValue(user),
+        // `findFirst` is used for two different questions: "who is signing in?"
+        // and "is this address already taken by someone else?". The second
+        // carries `id: { not }` and must answer nobody, or every address looks
+        // taken by the very account trying to set it.
+        findFirst: jest.fn().mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.id?.not ? null : user),
+        ),
         findUnique: jest.fn().mockResolvedValue(user),
         update: jest.fn().mockImplementation(({ data }: any) =>
           Promise.resolve({ ...user, ...data }),
@@ -42,7 +48,7 @@ describe('forced password change', () => {
 
   const flagged = async (overrides: Record<string, unknown> = {}) => ({
     id: 'u1',
-    email: 'temp@example.com',
+    email: 'temp@hobbyplus.test',
     username: 'tempuser',
     avatarUrl: null,
     roles: ['PLAYER'],
@@ -107,6 +113,29 @@ describe('forced password change', () => {
     expect(result.token).toEqual(expect.any(String));
     expect(jwt.verify(result.token).purpose).toBe('session');
     expect(res.cookie).toHaveBeenCalled();
+  });
+
+  it('demands a working address when the account cannot receive mail', async () => {
+    // The seeded admin is born with `admin@joust.local`. Letting it through here
+    // is what strands the only ADMIN account the moment two-factor is switched
+    // on — its codes go nowhere and a seeded account has no recovery codes.
+    const { service, res } = build(await flagged({ email: 'admin@joust.local' }));
+    const { changeToken }: any = await service.SignIn(
+      { identifier: 'tempuser', password: 'GivenToMe123!' },
+      res,
+    );
+
+    await expect(
+      service.changeForcedPassword(changeToken, 'ChosenByMe456!', res),
+    ).rejects.toMatchObject({ response: { code: 'EMAIL_REQUIRED' } });
+
+    const ok: any = await service.changeForcedPassword(
+      changeToken,
+      'ChosenByMe456!',
+      res,
+      'real.admin@hobbyplus.test',
+    );
+    expect(ok.token).toEqual(expect.any(String));
   });
 
   it('refuses a 2FA challenge token in place of a change token', async () => {

@@ -46,10 +46,17 @@ export class CreateTournamentDto {
   @Max(128, { message: 'Tournament cannot exceed 128 players' })
   maxPlayers!: number;
 
-  @IsNumber()
-  @Min(0)
+  /** Free text — "Trophy", "₱2,000", "Booster box + medal". See schema. */
+  @IsString()
+  @MaxLength(120)
   @IsOptional()
-  prizePool?: number;
+  prizePool?: string;
+
+  /** An uploaded picture of the prize, served from /uploads/prizes. */
+  @IsString()
+  @MaxLength(300)
+  @IsOptional()
+  prizeImageUrl?: string;
 
   @IsNumber()
   @Min(0)

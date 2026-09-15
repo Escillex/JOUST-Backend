@@ -149,7 +149,7 @@ export class DevService {
     }
   }
 
-  async batchAddGuests(tournamentId: string, count: number) {
+  async batchAddGuests(tournamentId: string, count: number, names?: string[]) {
     await this.assertBulkGuestsAllowed();
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -158,7 +158,12 @@ export class DevService {
 
     const results: any[] = [];
     for (let i = 1; i <= count; i++) {
-      const name = `Guest_${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+      // "Swift Falcon" reads as a competitor on a bracket; "Guest_4X9K2" reads
+      // as a placeholder. The caller supplies the names from the shared pool;
+      // this fallback only runs when the endpoint is called directly.
+      const name =
+        names?.[i - 1]?.trim() ||
+        `Guest ${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       const res = await this.participantService.joinTournamentAsGuest(
         tournamentId,
         name,
