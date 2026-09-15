@@ -18,6 +18,7 @@ import { AwardCatalogController, AwardGrantController } from '../src/award/award
 import { SettingsController } from '../src/settings/settings.controller';
 import { BackupController } from '../src/backup/backup.controller';
 import { BuildController, GalleryController, ModerationController, ReportController } from '../src/content/content.controller';
+import { HomeController } from '../src/home/home.controller';
 
 /**
  * The audit log is only worth having if it is complete and if it never leaks.
@@ -61,6 +62,7 @@ describe('audit coverage', () => {
     TournamentFormatController, StoreController, AwardCatalogController, AwardGrantController,
     SettingsController, BackupController,
     BuildController, GalleryController, ReportController, ModerationController,
+    HomeController,
   ];
 
   for (const ctrl of controllers) {

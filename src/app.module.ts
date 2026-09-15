@@ -29,6 +29,7 @@ import { HealthModule } from './health/health.module';
 import { SettingsAdminModule } from './settings/settings-admin.module';
 import { SetupModule } from './setup/setup.module';
 import { MailModule } from './mail/mail.module';
+import { HomeModule } from './home/home.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { MailModule } from './mail/mail.module';
     ContentModule,
     HealthModule,
     MailModule,
+    HomeModule,
   ],
 })
 export class AppModule {}

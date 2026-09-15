@@ -19,6 +19,8 @@ import { ContentModule } from '../src/content/content.module';
 import { ModerationService } from '../src/content/moderation.service';
 import { AuditService } from '../src/audit/audit.service';
 import { AwardService } from '../src/award/award.service';
+import { HomeModule } from '../src/home/home.module';
+import { HomeService } from '../src/home/home.service';
 
 // Temporary check: compiling ParticipantModule resolves it plus everything it
 // now pulls in (MatchModule -> FormatsModule -> TournamentModule, RealtimeModule)
@@ -82,6 +84,20 @@ describe('DI graph', () => {
       .compile();
 
     expect(moduleRef.get(AuditService)).toBeDefined();
+    await moduleRef.close();
+  });
+
+  // The public GET is unguarded, but the two admin writes sit behind
+  // JwtAuthGuard — which needs JwtService from AuthModule.
+  it('HomeModule resolves its admin guards', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [HomeModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({ $connect: jest.fn(), $disconnect: jest.fn() })
+      .compile();
+
+    expect(moduleRef.get(HomeService)).toBeDefined();
     await moduleRef.close();
   });
 

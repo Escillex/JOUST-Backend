@@ -831,6 +831,25 @@ model StoreProduct {
   updatedAt   DateTime @updatedAt
 }
 
+// ─── HOME PAGE BLOCKS (docs/home-blocks-plan.md) ──────────────────
+
+/// One section of the public landing page: the hero, the store carousel, the
+/// tournament preview. One table rather than a model per section — the page is
+/// always fetched whole, every section's fields differ anyway, and adding a
+/// section should be a row, not a migration.
+///
+/// `content` is the section's editable text and images, shaped per `key` and
+/// whitelisted by `sanitizeContent` in HomeService before it is stored. A null
+/// or absent row falls back to the built-in defaults, so the landing page still
+/// renders on an empty database.
+model HomeBlock {
+  key       String   @id // "hero" | "shop" | "tournaments"
+  order     Int // ascending render order on the landing page
+  visible   Boolean  @default(true)
+  content   Json?
+  updatedAt DateTime @updatedAt
+}
+
 // Staff invited to co-manage one tournament. Only an ACCEPTED row grants access,
 // which is checked in checkTournamentAccess and nowhere else.
 model TournamentOrganizer {
