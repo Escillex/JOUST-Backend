@@ -1,11 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques' | 'builds' | 'gallery' | 'prizes';
+export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques' | 'builds' | 'gallery' | 'prizes' | 'games';
 
 @Injectable()
 export class ImagesService {
@@ -13,7 +13,7 @@ export class ImagesService {
 
   constructor(private prisma: PrismaService) {
     // Ensure upload directories exist on startup
-    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques', 'builds', 'gallery', 'prizes'];
+    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques', 'builds', 'gallery', 'prizes', 'games'];
     subdirs.forEach((sub) => {
       const dir = path.join(this.uploadRoot, sub);
       if (!fs.existsSync(dir)) {
@@ -54,6 +54,21 @@ export class ImagesService {
       await sharpInstance
         .resize(512, 512, {
           fit: 'contain',
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        })
+        .webp({ quality: 85, alphaQuality: 90 })
+        .toFile(outPath);
+      return `/uploads/${subdir}/${fileName}`;
+    } else if (subdir === 'games') {
+      // COVER to a square, and keep alpha. A game icon is shown at 14px beside a
+      // name and at 56px in the picker, always 1:1, so the crop is decided here
+      // rather than by whatever aspect the admin happened to upload. 256 is 2x
+      // the largest display with headroom; a logo on transparency stays
+      // transparent, which `webp({quality})` alone would not guarantee.
+      await sharpInstance
+        .resize(256, 256, {
+          fit: 'cover',
+          position: 'centre',
           background: { r: 0, g: 0, b: 0, alpha: 0 },
         })
         .webp({ quality: 85, alphaQuality: 90 })
@@ -221,6 +236,53 @@ export class ImagesService {
       where: { id: tournamentId },
       data: { prizeImageUrl: null },
       select: { id: true, prizeImageUrl: true },
+    });
+  }
+
+  // ─── GAME ICONS ────────────────────────────────────────────────
+
+  /** The catalog's 1:1 icon. `Game.iconUrl` has existed since games went
+   *  first-class but nothing ever wrote it, so every game rendered as text. */
+  async updateGameIcon(gameId: string, file: Express.Multer.File) {
+    const game = await this.prisma.game.findUnique({ where: { id: gameId } });
+    if (!game) throw new NotFoundException('Game not found');
+    // The retired "General" placeholder is not assignable and not editable
+    // anywhere else either (GameService.update refuses it).
+    if (game.isBuiltin) {
+      throw new BadRequestException('The retired system game cannot be modified');
+    }
+
+    // Save and commit before deleting the old one, so a failed upload cannot
+    // destroy the icon that is already there.
+    const newUrl = await this.processAndSave(file, 'games');
+    const updated = await this.prisma.game.update({
+      where: { id: gameId },
+      data: { iconUrl: newUrl },
+      select: { id: true, iconUrl: true },
+    });
+
+    if (game.iconUrl && game.iconUrl !== newUrl) {
+      await this.deleteFile(game.iconUrl);
+    }
+
+    return updated;
+  }
+
+  async deleteGameIcon(gameId: string) {
+    const game = await this.prisma.game.findUnique({ where: { id: gameId } });
+    if (!game) throw new NotFoundException('Game not found');
+    if (game.isBuiltin) {
+      throw new BadRequestException('The retired system game cannot be modified');
+    }
+
+    if (game.iconUrl) {
+      await this.deleteFile(game.iconUrl);
+    }
+
+    return this.prisma.game.update({
+      where: { id: gameId },
+      data: { iconUrl: null },
+      select: { id: true, iconUrl: true },
     });
   }
 

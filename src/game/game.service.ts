@@ -10,12 +10,14 @@ import { NotificationType, GameRequestStatus } from '@prisma/client';
 import { CreateGameDto } from './dto/create-game.dto';
 import { RequestGameDto } from './dto/request-game.dto';
 import { ResolveRequestDto } from './dto/resolve-request.dto';
+import { ImagesService } from '../images/images.service';
 
 @Injectable()
 export class GameService {
   constructor(
     private prisma: PrismaService,
     private notifications: NotificationService,
+    private images: ImagesService,
   ) {}
 
   /** List the games an organizer may actually choose — public, alphabetical.
@@ -177,6 +179,13 @@ export class GameService {
       throw new BadRequestException(
         `Cannot delete: ${game._count.galleryImages} profile gallery image(s) are filed under this game.`,
       );
+    }
+
+    // Drop the icon file with the row it belonged to, or /uploads/games fills
+    // up with images nothing points at. Best-effort: a missing or unreadable
+    // file must not fail a delete that already passed every real check.
+    if (game.iconUrl) {
+      await this.images.deleteFile(game.iconUrl).catch(() => undefined);
     }
 
     await this.prisma.game.delete({ where: { id } });

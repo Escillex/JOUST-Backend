@@ -223,6 +223,10 @@ model User {
   // NEW: global stats back-relation
   globalStats UserGlobalStats?
   gameStats   UserGameStats[]
+  /// The games this person says they play — self-declared, shown on the public
+  /// profile, and used to order the tournament browse list. Distinct from
+  /// `gameStats`, which is earned from actually playing.
+  games       UserGame[]
 
   notifications Notification[]
 
@@ -329,7 +333,7 @@ model Game {
   name        String  @unique // "Chess", "Beyblade", "General"
   slug        String? @unique // optional URL-friendly key
   description String?
-  iconUrl     String? // path: /uploads/assets/<uuid>.webp
+  iconUrl     String? // path: /uploads/games/<uuid>.webp (256x256, alpha kept)
 
   // Default tracking mode + rule defaults a format/tournament of this game can
   // inherit. Metadata for now (routing reads the resolved tournament config);
@@ -349,10 +353,28 @@ model Game {
   tournaments Tournament[]
   formats     TournamentFormat[]
   userStats   UserGameStats[]
+  players     UserGame[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   galleryImages GalleryImage[]
+}
+
+// A game a user says they play (todo.md obj. 4.2). Self-declared interest, not
+// earned history: it orders the tournament browse list and shows as a row of
+// icons on the public profile. An explicit join like UserGameStats and
+// GalleryImage — the schema has no implicit many-to-many anywhere.
+model UserGame {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  gameId String
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@id([userId, gameId])
+  @@index([gameId])
 }
 
 // An organizer's request for a game not yet in the catalog (todo.md §5). A durable

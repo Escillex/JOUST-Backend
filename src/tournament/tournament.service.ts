@@ -1200,6 +1200,12 @@ export class TournamentService {
                 username: true,
                 displayName: true,
                 isGuest: true,
+                // The roster on the tournament page links to profiles and shows
+                // faces. Both are already public on GET /users/:handle/profile,
+                // so neither adds a disclosure to this unauthenticated read —
+                // unlike email, which is deliberately absent above.
+                avatarUrl: true,
+                slug: true,
               },
             },
           },

@@ -8,6 +8,10 @@ import { MatchStatus, TournamentStatus } from '@prisma/client';
 import { PUBLIC_AWARD_SELECT, toPublicAward } from '../award/award.service';
 import { roundText } from '../audit/audit.decorator';
 import { systemOf } from '../Formats/format-config.helper';
+import {
+  GAMES_PLAYED_SELECT,
+  flattenGamesPlayed,
+} from '../game/games-played.helper';
 
 /** Tournaments per page of match history. A page is a handful of cards on a
  *  phone; a whole career in one response is what venue Wi-Fi chokes on. */
@@ -42,6 +46,7 @@ export class UserService {
         isGuest: true,
         roles: true,
         createdAt: true,
+        games: GAMES_PLAYED_SELECT,
       },
     });
     if (!user) throw new NotFoundException('User not found');
@@ -130,6 +135,9 @@ export class UserService {
       isGuest: user.isGuest,
       roles: user.roles,
       memberSince: user.createdAt,
+      // Self-declared, unlike `stats`, which is earned. Shown as a row of icons
+      // under the handle.
+      games: flattenGamesPlayed(user.games),
       stats: globalStats
         ? {
             tournamentsPlayed: globalStats.tournamentsPlayed,

@@ -15,7 +15,11 @@ describe('game assignment gate', () => {
     const prisma = {
       game: { findUnique: jest.fn().mockResolvedValue(game) },
     } as any;
-    return new GameService(prisma, { notifyAdmins: jest.fn() } as any);
+    return new GameService(
+      prisma,
+      { notifyAdmins: jest.fn() } as any,
+      { deleteFile: jest.fn() } as any,
+    );
   };
 
   describe('GameService.assertAssignable', () => {

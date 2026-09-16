@@ -14,6 +14,10 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { generateUniqueUserSlug } from '../user/user-slug.util';
 import {
+  GAMES_PLAYED_SELECT,
+  flattenGamesPlayed,
+} from '../game/games-played.helper';
+import {
   AuthDto,
   AdminCreateUserDto,
   ConvertGuestDto,
@@ -706,7 +710,26 @@ export class AuthService {
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
     if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio);
 
-    return this.prisma.user.update({
+    if (dto.gameIds !== undefined) {
+      // A guest has no profile to show this on and no session that outlives the
+      // tournament, so the list would be written and then deleted with them.
+      if (user.isGuest) {
+        throw new BadRequestException('Guest accounts cannot list games.');
+      }
+      // The catalog can change between the page loading and the save, so an id
+      // that names nothing is dropped rather than refused. The retired "General"
+      // placeholder is never listable for the same reason it is not assignable.
+      const known = await this.prisma.game.findMany({
+        where: { id: { in: dto.gameIds }, isBuiltin: false },
+        select: { id: true },
+      });
+      data.games = {
+        deleteMany: {},
+        create: known.map((g) => ({ gameId: g.id })),
+      };
+    }
+
+    const updated = await this.prisma.user.update({
       where: { id: userId },
       data,
       select: {
@@ -718,8 +741,10 @@ export class AuthService {
         email: true,
         roles: true,
         avatarUrl: true,
+        games: GAMES_PLAYED_SELECT,
       },
     });
+    return { ...updated, games: flattenGamesPlayed(updated.games) };
   }
 
   // ──────────────────────────────────────────────
@@ -750,13 +775,19 @@ export class AuthService {
         bio: true,
         googleId: true,
         hashedPassword: true,
+        games: GAMES_PLAYED_SELECT,
       },
     });
     if (!user) throw new NotFoundException('User not found');
     // Reported as facts, never as values: the profile needs to know whether
     // Google is connected and whether disconnecting would leave no way in.
     const { googleId, hashedPassword, ...rest } = user;
-    return { ...rest, googleLinked: !!googleId, hasPassword: !!hashedPassword };
+    return {
+      ...rest,
+      games: flattenGamesPlayed(user.games),
+      googleLinked: !!googleId,
+      hasPassword: !!hashedPassword,
+    };
   }
 
   /** A full session token. Everything else the login flow issues (a 2FA

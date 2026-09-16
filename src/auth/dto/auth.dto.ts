@@ -1,4 +1,5 @@
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -6,6 +7,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   MaxLength,
@@ -160,6 +162,11 @@ export class ConvertGuestDto {
  *  profile header stays a header. */
 export const BIO_MAX_LENGTH = 300;
 
+/** A ceiling on the self-declared games list. Nobody plays thirty games
+ *  competitively; the cap is there so one request cannot write an unbounded
+ *  number of join rows. */
+export const GAMES_PLAYED_MAX = 20;
+
 export class UpdateProfileDto {
   @IsOptional()
   @IsString()
@@ -209,6 +216,18 @@ export class UpdateMeDto {
   @IsString()
   @MaxLength(BIO_MAX_LENGTH, { message: `Bio can be at most ${BIO_MAX_LENGTH} characters.` })
   public bio?: string;
+
+  /** The games this person says they play. The WHOLE set every time — sending
+   *  `[]` clears it. Ids that name nothing, or name the retired system
+   *  placeholder, are ignored rather than refused: the catalog can change
+   *  between the page loading and the save. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(GAMES_PLAYED_MAX, {
+    message: `You can list at most ${GAMES_PLAYED_MAX} games.`,
+  })
+  @IsUUID('4', { each: true })
+  public gameIds?: string[];
 }
 
 /**

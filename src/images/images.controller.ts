@@ -107,6 +107,28 @@ export class ImagesController {
     return this.imagesService.deletePrizeImage(tournamentId);
   }
 
+  // ─── GAME ICON ─────────────────────────────────────────────────
+
+  @Audit({ action: 'game.icon', category: AC.CATALOG, subject: { model: 'game', param: 'gameId' }, describe: (c) => `Set the icon for the game "${c.subject}"` })
+  @Post('game/:gameId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadGameIcon(
+    @Param('gameId') gameId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.imagesService.updateGameIcon(gameId, file);
+  }
+
+  @Audit({ action: 'game.icon_remove', category: AC.CATALOG, subject: { model: 'game', param: 'gameId' }, describe: (c) => `Removed the icon for the game "${c.subject}"` })
+  @Delete('game/:gameId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  async deleteGameIcon(@Param('gameId') gameId: string) {
+    return this.imagesService.deleteGameIcon(gameId);
+  }
+
   // ─── SITE ASSETS ───────────────────────────────────────────────
 
   @Audit({ action: 'system.asset', category: AC.SYSTEM, describe: (c) => `Uploaded the site asset "${c.params.key}"` })
