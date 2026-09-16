@@ -474,14 +474,18 @@ export class LeaderboardService {
     const globalTieBreakerOrder: string[] = ['matchWinPct'];
     const sorted = this.sortEntries(entries, globalTieBreakerOrder);
 
+    // Dense ranking: a tie shares one number, and the next distinct tier is
+    // only ever one more than it — never `i + 1`, which would skip a number
+    // for every player folded into the tie above it (two players tied at
+    // #2 would otherwise push the next player to #4, with no #3 awarded).
     const ranked: GlobalLeaderboardEntry[] = [];
-    let currentRank = 1;
+    let currentRank = 0;
     for (let i = 0; i < sorted.length; i++) {
       if (
-        i > 0 &&
+        i === 0 ||
         this.rankChanged(sorted[i - 1], sorted[i], globalTieBreakerOrder)
       ) {
-        currentRank = i + 1;
+        currentRank += 1;
       }
       ranked.push({ rank: currentRank, ...sorted[i] });
     }

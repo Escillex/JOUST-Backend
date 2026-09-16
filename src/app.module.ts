@@ -6,6 +6,7 @@ import { TournamentModule } from './tournament/tournament.module';
 import { ParticipantModule } from './tournament/participant/participant.module';
 import { FormatsModule } from './Formats/formats.module';
 import { LeaderboardModule } from './leaderboard/leaderboard.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { JobsModule } from './jobs/jobs.module';
 import { UserModule } from './user/user.module';
 import { DevModule } from './dev/dev.module';
@@ -40,6 +41,7 @@ import { HomeModule } from './home/home.module';
     ParticipantModule,
     FormatsModule,
     LeaderboardModule,
+    DashboardModule,
     JobsModule,
     UserModule,
     DevModule,
