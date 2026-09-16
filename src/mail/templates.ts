@@ -46,6 +46,20 @@ export function passwordResetEmail(code: string) {
   );
 }
 
+export function accountChangeEmail(code: string) {
+  return wrap(
+    `${code} is your JOUST confirmation code`,
+    [
+      `Your code to confirm a change to your account is: ${code}`,
+      '',
+      'It expires in 15 minutes and can be used once. It is needed to change your',
+      'password or email address, make new recovery codes, or delete the account.',
+      '',
+      'If you did not ask for it, someone is signed in as you — change your password.',
+    ].join('\n'),
+  );
+}
+
 export function testEmail() {
   return wrap(
     'JOUST test email',

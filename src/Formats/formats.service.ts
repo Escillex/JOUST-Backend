@@ -19,7 +19,7 @@ import {
   Match,
   ParticipantStatus,
 } from '@prisma/client';
-import { effectiveRawConfig, resolveConfig } from './format-config.helper';
+import { effectiveRawConfig, resolveConfig, systemOf } from './format-config.helper';
 import { seedBracketSlots, shuffled } from './bracket-seeding.helper';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { completedMatchData } from '../tournament/match/match-completion.helper';
@@ -75,7 +75,7 @@ export class FormatsService {
     if (!match) return;
 
     const { tournament } = match.round;
-    const system = tournament.format?.system;
+    const system = systemOf(tournament);
 
     if (system === TournamentSystem.SINGLE_ELIMINATION) {
       if (match.nextMatchId && match.winnerId) {
@@ -233,7 +233,9 @@ export class FormatsService {
       where: { id: tournamentId },
       include: { participants: true, format: true },
     });
-    if (!tournament?.format) return;
+    // Not `!tournament.format`: a started tournament carries its own rules and
+    // system (snapshotted at start), so the preset may since have been deleted.
+    if (!tournament) return;
 
     const config = effectiveRawConfig(tournament);
     // Read through the phase with a root fallback, so a flat (un-nested) config is

@@ -123,7 +123,33 @@ describe('startTournament', () => {
     });
     await service.startTournament('t1');
     const data = prisma.tournament.updateMany.mock.calls[0][0].data;
-    expect(data).toEqual({ status: 'ONGOING' });
+    expect(data.config).toBeUndefined();
+    expect(data.status).toBe('ONGOING');
+  });
+
+  // The rest of the snapshot (2026-09-16): the bracket type and the preset's
+  // name are not part of the config, and without them a started tournament
+  // still fell apart when its preset was deleted.
+  it('snapshots the bracket type and the preset name as well', async () => {
+    const { prisma, service } = buildService({ generatedRound: completeRound() });
+    await service.startTournament('t1');
+    const data = prisma.tournament.updateMany.mock.calls[0][0].data;
+    expect(data.system).toBe('SINGLE_ELIMINATION');
+    expect('formatName' in data).toBe(true);
+  });
+
+  // The refusal now says which of the three things went wrong. "Already
+  // started" was printed for all of them, including the commonest by far: a
+  // tournament whose registration was never opened.
+  it.each([
+    ['UPCOMING', 'NOT_OPEN_YET'],
+    ['COMPLETED', 'ALREADY_COMPLETED'],
+    ['ONGOING', 'ALREADY_STARTED'],
+  ])('tells you that a %s tournament cannot be started, with %s', async (status, code) => {
+    const { prisma, service } = buildService({ claimCount: 0, generatedRound: completeRound() });
+    // The re-read after the failed claim reports the real status.
+    prisma.tournament.findUnique.mockResolvedValueOnce({ status });
+    await expect(service.startTournament('t1')).rejects.toMatchObject({ response: { code } });
   });
 
   it('refuses when another request already claimed the start', async () => {

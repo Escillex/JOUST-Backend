@@ -92,7 +92,9 @@ export class GoogleAuthService {
     };
   }
 
-  private async identify(credential: string): Promise<GoogleIdentity> {
+  /** Public so AccountService can accept "sign in with Google again" as proof
+   *  of a sensitive change — the same checks as a real Google sign-in. */
+  async identify(credential: string): Promise<GoogleIdentity> {
     const c = await this.config();
     if (!c.enabled || !c.clientId) {
       throw new ForbiddenException({

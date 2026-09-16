@@ -19,6 +19,23 @@ export class MailService {
 
   constructor(private readonly settings: SettingsService) {}
 
+  /**
+   * True when email actually leaves the building — SMTP chosen and its host,
+   * user and password filled in. The console transport only writes to the
+   * server log, so on a site without mail an emailed code could never arrive
+   * and must not be asked for (account changes fall back to the password).
+   */
+  async isConfigured(): Promise<boolean> {
+    const mode = (await this.settings.get('MAIL_TRANSPORT')) ?? 'console';
+    if (mode !== 'smtp') return false;
+    const [host, user, pass] = await Promise.all([
+      this.settings.get('MAIL_HOST'),
+      this.settings.get('MAIL_USER'),
+      this.settings.get('MAIL_PASS'),
+    ]);
+    return !!(host && user && pass);
+  }
+
   /** Built per send so a settings change takes effect without a restart. */
   private async transport(): Promise<MailTransport> {
     const mode = (await this.settings.get('MAIL_TRANSPORT')) ?? 'console';

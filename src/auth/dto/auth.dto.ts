@@ -190,6 +190,72 @@ export class UpdateProfileDto {
   public password?: string;
 }
 
+/** `PATCH /auth/me` — what a user may change about themselves with only a
+ *  session. Password and email are deliberately absent: they need proof (see
+ *  the account DTOs below), and the global ValidationPipe refuses them here. */
+export class UpdateMeDto {
+  @IsOptional()
+  @IsString()
+  @Length(3, 20)
+  @Matches(USERNAME_PATTERN, USERNAME_RULE)
+  public username?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  public displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(BIO_MAX_LENGTH, { message: `Bio can be at most ${BIO_MAX_LENGTH} characters.` })
+  public bio?: string;
+}
+
+/**
+ * Proof for a sensitive change to a signed-in account. Which one is needed is
+ * the server's call (`GET /auth/me/security` → `proof`): the emailed code when
+ * this site can send mail, otherwise the current password.
+ */
+export class AccountProofDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  public currentPassword?: string;
+
+  /** A fresh Google credential, for an account whose only way in is Google:
+   *  signing in with it again proves the change as well as a password would. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(4096)
+  public googleCredential?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'The code is the 6 digits from the email.' })
+  public code?: string;
+}
+
+export class ChangePasswordDto extends AccountProofDto {
+  @IsString()
+  @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })
+  @MaxLength(200)
+  public newPassword!: string;
+}
+
+export class ChangeEmailDto extends AccountProofDto {
+  @IsEmail({}, { message: 'Enter a valid email address.' })
+  @MaxLength(254)
+  public email!: string;
+}
+
+export class DeleteAccountDto extends AccountProofDto {
+  /** The username, typed out — a deletion you cannot undo should not be one
+   *  stray tap. */
+  @IsString()
+  @MaxLength(50)
+  public confirm!: string;
+}
+
 export class AdminCreateUserDto {
   @IsNotEmpty()
   @IsString()

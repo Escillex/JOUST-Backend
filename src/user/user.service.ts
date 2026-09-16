@@ -6,6 +6,13 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { MatchStatus, TournamentStatus } from '@prisma/client';
 import { PUBLIC_AWARD_SELECT, toPublicAward } from '../award/award.service';
+import { roundText } from '../audit/audit.decorator';
+import { systemOf } from '../Formats/format-config.helper';
+
+/** Tournaments per page of match history. A page is a handful of cards on a
+ *  phone; a whole career in one response is what venue Wi-Fi chokes on. */
+const HISTORY_PAGE = 8;
+const HISTORY_PAGE_MAX = 20;
 
 export interface UserStats {
   userId: string;
@@ -65,6 +72,7 @@ export class UserService {
             slug: true,
             date: true,
             createdAt: true,
+            system: true,
             format: { select: { system: true, name: true } },
             game: { select: { name: true } },
           },
@@ -106,7 +114,7 @@ export class UserService {
         slug: p.tournament.slug,
         date: (p.tournament.date ?? p.tournament.createdAt).toISOString(),
         placement: p.placement,
-        format: p.tournament.format?.system ?? null,
+        format: systemOf(p.tournament) ?? null,
         game: p.tournament.game?.name ?? null,
       }))
       .sort((a, b) => b.date.localeCompare(a.date))
@@ -225,6 +233,127 @@ export class UserService {
       winRate,
       tournamentsPlayed,
       rank,
+    };
+  }
+
+  /**
+   * A player's whole match history, grouped by tournament — newest tournament
+   * first, matches in round order inside each — and paged by tournament. Each
+   * match is told from this player's side (result, their score first, the
+   * opponent). Resolves by slug or UUID, like the profile.
+   *
+   * The profile's "recent matches" (getUserMatches) stays as it is: the last
+   * 15, flat. This is the page behind its "View all matches".
+   */
+  async getMatchHistory(handle: string, offset = 0, limit = HISTORY_PAGE) {
+    const user = await this.resolveUser(handle);
+    const take = Math.min(Math.max(1, Math.floor(limit) || HISTORY_PAGE), HISTORY_PAGE_MAX);
+    const skip = Math.max(0, Math.floor(offset) || 0);
+
+    const played = {
+      status: MatchStatus.COMPLETED,
+      isBye: false,
+      OR: [{ player1Id: user.id }, { player2Id: user.id }],
+    };
+
+    // Every tournament they played a real match in. Ordered here rather than in
+    // SQL because "when" is date ?? createdAt — the same rule the profile uses —
+    // and one person's tournaments are few enough to sort in memory.
+    const all = await this.prisma.tournament.findMany({
+      where: { rounds: { some: { matches: { some: played } } } },
+      select: { id: true, date: true, createdAt: true },
+    });
+    const when = (t: { date: Date | null; createdAt: Date }) => (t.date ?? t.createdAt).getTime();
+    const pageIds = all
+      .sort((a, b) => when(b) - when(a))
+      .slice(skip, skip + take)
+      .map((t) => t.id);
+
+    const [tournaments, matches, entries] = await Promise.all([
+      this.prisma.tournament.findMany({
+        where: { id: { in: pageIds } },
+        select: {
+          id: true,
+          name: true,
+          date: true,
+          createdAt: true,
+          status: true,
+          system: true,
+          format: { select: { system: true } },
+          game: { select: { name: true } },
+        },
+      }),
+      this.prisma.match.findMany({
+        where: { ...played, round: { tournamentId: { in: pageIds } } },
+        orderBy: [{ round: { roundNumber: 'asc' } }, { matchIndex: 'asc' }],
+        select: {
+          id: true,
+          player1Id: true,
+          player2Id: true,
+          player1Score: true,
+          player2Score: true,
+          winnerId: true,
+          p1Name: true,
+          p2Name: true,
+          completedAt: true,
+          createdAt: true,
+          round: { select: { roundNumber: true, tournamentId: true } },
+          player1: { select: { id: true, username: true, displayName: true, slug: true, avatarUrl: true } },
+          player2: { select: { id: true, username: true, displayName: true, slug: true, avatarUrl: true } },
+        },
+      }),
+      this.prisma.tournamentParticipant.findMany({
+        where: { userId: user.id, tournamentId: { in: pageIds } },
+        select: { tournamentId: true, placement: true },
+      }),
+    ]);
+
+    const byId = new Map(tournaments.map((t) => [t.id, t]));
+    const placement = new Map(entries.map((e) => [e.tournamentId, e.placement]));
+
+    const groups = pageIds.map((id) => {
+      const t = byId.get(id)!;
+      return {
+        tournament: {
+          id: t.id,
+          name: t.name,
+          date: (t.date ?? t.createdAt).toISOString(),
+          status: t.status,
+          format: systemOf(t) ?? null,
+          game: t.game?.name ?? null,
+          placement: placement.get(id) ?? null,
+        },
+        matches: matches
+          .filter((m) => m.round.tournamentId === id)
+          .map((m) => {
+            const mine = m.player1Id === user.id;
+            const opp = mine ? m.player2 : m.player1;
+            // A deleted opponent has no account left, only the name burned into
+            // the match (deleteUser); a guest or TBD has neither.
+            const oppName =
+              opp?.displayName || opp?.username || (mine ? m.p2Name : m.p1Name) || 'TBD';
+            return {
+              id: m.id,
+              round: m.round.roundNumber,
+              roundLabel: roundText(m.round.roundNumber),
+              result: m.winnerId === user.id ? 'win' : m.winnerId === null ? 'draw' : 'loss',
+              myScore: mine ? m.player1Score : m.player2Score,
+              oppScore: mine ? m.player2Score : m.player1Score,
+              opponent: opp
+                ? { id: opp.id, slug: opp.slug, name: oppName, avatarUrl: opp.avatarUrl }
+                : { id: null, slug: null, name: oppName, avatarUrl: null },
+              completedAt: (m.completedAt ?? m.createdAt).toISOString(),
+            };
+          }),
+      };
+    });
+
+    const next = skip + pageIds.length;
+    return {
+      totalTournaments: all.length,
+      offset: skip,
+      nextOffset: next < all.length ? next : null,
+      groups,
     };
   }
 

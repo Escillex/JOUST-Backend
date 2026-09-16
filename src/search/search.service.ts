@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
+import { systemOf } from '../Formats/format-config.helper';
 import { TournamentStatus } from '@prisma/client';
 
 /**
@@ -60,6 +61,7 @@ export class SearchService {
           status: true,
           date: true,
           game: { select: { name: true } },
+          system: true,
           format: { select: { system: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -102,7 +104,7 @@ export class SearchService {
         status: t.status as TournamentStatus,
         date: t.date ? t.date.toISOString() : null,
         game: t.game?.name ?? null,
-        format: t.format?.system ?? null,
+        format: systemOf(t) ?? null,
       })),
     };
   }

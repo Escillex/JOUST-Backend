@@ -40,7 +40,9 @@ describe('token purpose', () => {
   });
 
   describe('JwtAuthGuard', () => {
-    const guard = new JwtAuthGuard(jwt);
+    // No revocation stamp on this account, so the guard's check passes through.
+    const prisma: any = { user: { findUnique: jest.fn(async () => ({ sessionsValidFrom: null })) } };
+    const guard = new JwtAuthGuard(jwt, prisma);
 
     it('admits a session token', async () => {
       await expect(guard.canActivate(contextWith(sign('session')))).resolves.toBe(true);
@@ -82,5 +84,45 @@ describe('token purpose', () => {
       await guard.canActivate(ctx);
       expect(request.user?.id).toBe('u1');
     });
+  });
+});
+
+/**
+ * Sign out everywhere (2026-09-16). Sessions last seven days, and nothing could
+ * end one early — a stolen token outlived the password change meant to stop it.
+ */
+describe('JwtAuthGuard revocation', () => {
+  const secret = 'test-secret-that-is-definitely-long-enough-32';
+  process.env.JWT_SECRET = secret;
+  const jwt = new JwtService({ secret });
+
+  const ctx = (token: string) =>
+    ({ switchToHttp: () => ({ getRequest: () => ({ cookies: { token }, headers: {} }) }) }) as any;
+  const tokenIssuedAt = async (secondsAgo: number) =>
+    jwt.signAsync({ id: 'u1', email: null, username: null, roles: [], purpose: 'session', iat: Math.floor(Date.now() / 1000) - secondsAgo }, { secret });
+
+  const guardFor = (validFrom: Date | null) =>
+    new JwtAuthGuard(jwt, { user: { findUnique: async () => ({ sessionsValidFrom: validFrom }) } } as any);
+
+  beforeEach(() => JwtAuthGuard.forget('u1'));
+
+  it('refuses a token issued before the account signed out everywhere', async () => {
+    const guard = guardFor(new Date());
+    await expect(guard.canActivate(ctx(await tokenIssuedAt(60)))).rejects.toThrow('Signed out');
+  });
+
+  it('admits the replacement session issued in the stamped second (a password change)', async () => {
+    const guard = guardFor(new Date(Math.floor(Date.now() / 1000) * 1000));
+    await expect(guard.canActivate(ctx(await tokenIssuedAt(0)))).resolves.toBe(true);
+  });
+
+  it('refuses even this second’s tokens when the stamp is the next second (sign out everywhere)', async () => {
+    const guard = guardFor(new Date((Math.floor(Date.now() / 1000) + 1) * 1000));
+    await expect(guard.canActivate(ctx(await tokenIssuedAt(0)))).rejects.toThrow('Signed out');
+  });
+
+  it('admits everything when nothing has been revoked', async () => {
+    const guard = guardFor(null);
+    await expect(guard.canActivate(ctx(await tokenIssuedAt(60 * 60 * 24)))).resolves.toBe(true);
   });
 });

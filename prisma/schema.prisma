@@ -196,6 +196,11 @@ model User {
   // to replace a password you picked.
   mustChangePassword Boolean @default(false)
 
+  /// Sessions issued before this moment are void ("sign out everywhere", and
+  /// every other browser when the password changes). Checked by JwtAuthGuard
+  /// against the token's `iat`; null means nothing has been revoked.
+  sessionsValidFrom DateTime?
+
   emailVerificationTokens EmailVerificationToken[]
   twoFactorCodes          TwoFactorCode[]
   trustedDevices          TrustedDevice[]
@@ -466,8 +471,12 @@ model TournamentFormat {
   config      Json // all rules as JSON blob
   isBuiltin   Boolean          @default(false) // builtin formats cannot be deleted
 
-  createdById String
-  createdBy   User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  /// Nullable, SetNull: deleting the person who made a preset must not delete
+  /// the preset — tournaments that have not started still read it, and the ones
+  /// that have started keep their own copy either way (todo.md §4). Same rule
+  /// as Tournament.createdById.
+  createdById String?
+  createdBy   User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   tournaments Tournament[]
 
@@ -519,6 +528,15 @@ model Tournament {
 
   // Per-tournament rules override; when set, fully replaces format.config
   config Json?
+
+  /// Snapshotted at start, with `config` (todo.md §4). The bracket type and the
+  /// preset's name are NOT part of the config, so without these a tournament
+  /// still depended on its preset for its whole life — and deleting the preset,
+  /// or the person who made it, left it with no system at all. Null until the
+  /// tournament starts; read through `systemOf()`, which falls back to the live
+  /// format.
+  system     TournamentSystem?
+  formatName String?
 
   createdById String?
   createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)

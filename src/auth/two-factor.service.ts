@@ -5,6 +5,7 @@ import { PrismaService } from 'prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { SettingsService } from '../settings/settings.service';
 import {
+  accountChangeEmail,
   passwordResetEmail,
   twoFactorEmail,
   verificationEmail,
@@ -21,7 +22,9 @@ const MAX_ATTEMPTS = 5;
 const RESEND_THROTTLE_MS = 60 * 1000;
 const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type CodeKind = 'signin' | 'verify' | 'reset';
+/** `change` confirms a sensitive change to a signed-in account (password,
+ *  email, recovery codes, deletion) — see AccountService. */
+export type CodeKind = 'signin' | 'verify' | 'reset' | 'change';
 
 export interface CodeIssue {
   sent: boolean;
@@ -115,7 +118,9 @@ export class TwoFactorService {
         ? verificationEmail(code)
         : kind === 'reset'
           ? passwordResetEmail(code)
-          : twoFactorEmail(code);
+          : kind === 'change'
+            ? accountChangeEmail(code)
+            : twoFactorEmail(code);
     const result = await this.mail.send({ to: user.email, ...template });
     if (!result.delivered) {
       return {
@@ -270,11 +275,41 @@ export class TwoFactorService {
     return true;
   }
 
-  async revokeDevices(userId: string): Promise<number> {
+  /** Forget every remembered browser — or every one but `keepToken`'s, so the
+   *  person making a change here is not sent through a code on their own
+   *  device next time. */
+  async revokeDevices(userId: string, keepToken?: string): Promise<number> {
     const { count } = await this.prisma.trustedDevice.deleteMany({
-      where: { userId },
+      where: {
+        userId,
+        ...(keepToken
+          ? { tokenHash: { not: this.hashDeviceToken(keepToken) } }
+          : {}),
+      },
     });
     return count;
+  }
+
+  /** The account's remembered browsers, newest use first. `current` marks the
+   *  one making the request, from its `device` cookie. Expired rows are left
+   *  out; they already skip nothing. */
+  async listDevices(userId: string, currentToken?: string) {
+    const rows = await this.prisma.trustedDevice.findMany({
+      where: { userId, expiresAt: { gt: new Date() } },
+      orderBy: { lastUsedAt: 'desc' },
+      select: { id: true, userAgent: true, createdAt: true, lastUsedAt: true, expiresAt: true, tokenHash: true },
+    });
+    const current = currentToken ? this.hashDeviceToken(currentToken) : null;
+    return rows.map(({ tokenHash, ...d }) => ({ ...d, current: tokenHash === current }));
+  }
+
+  /** Forget one remembered browser. Scoped to the owner, so an id from
+   *  someone else's list does nothing. */
+  async forgetDevice(userId: string, deviceId: string): Promise<boolean> {
+    const { count } = await this.prisma.trustedDevice.deleteMany({
+      where: { id: deviceId, userId },
+    });
+    return count > 0;
   }
 
   // ─── Enforcement ────────────────────────────────────────────────────────

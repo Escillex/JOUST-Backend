@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { CreateTournamentFormatDto } from './dto/create-format.dto';
-import { Role } from '@prisma/client';
+import { Role, TournamentStatus } from '@prisma/client';
 import { configFieldsForSystem } from '../Formats/config-fields.helper';
 
 @Injectable()
@@ -116,17 +116,36 @@ export class TournamentFormatService {
     return this.withConfigFields(updated);
   }
 
-  /** Delete a non-builtin format that has no active tournaments — ADMIN only */
+  /**
+   * Delete a preset — ADMIN only.
+   *
+   * Only a tournament that has NOT started still depends on this row: from the
+   * moment one starts it owns a copy of the rules, the bracket type and this
+   * name (todo.md §4), and `Tournament.formatId` is SetNull. So the guard asks
+   * about UPCOMING and OPEN tournaments only; before the snapshot was complete
+   * it had to refuse while any tournament had ever used the preset, which made
+   * a preset used once permanently undeletable.
+   */
   async delete(id: string) {
     const fmt = await this.prisma.tournamentFormat.findUnique({
       where: { id },
-      include: { _count: { select: { tournaments: true } } },
+      select: { id: true },
     });
     if (!fmt) throw new NotFoundException('Format not found');
-    if (fmt._count.tournaments > 0) {
-      throw new BadRequestException(
-        `Cannot delete: ${fmt._count.tournaments} tournament(s) are using this format`,
-      );
+
+    const notStarted = await this.prisma.tournament.findMany({
+      where: {
+        formatId: id,
+        status: { in: [TournamentStatus.UPCOMING, TournamentStatus.OPEN] },
+      },
+      select: { id: true, name: true },
+    });
+    if (notStarted.length > 0) {
+      throw new BadRequestException({
+        code: 'FORMAT_IN_USE',
+        message: `Cannot delete: ${notStarted.length} tournament(s) that have not started are using this format. Started ones keep their own copy.`,
+        tournaments: notStarted,
+      });
     }
 
     await this.prisma.tournamentFormat.delete({ where: { id } });

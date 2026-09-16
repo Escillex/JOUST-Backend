@@ -11,6 +11,8 @@ import { FormatsService } from 'src/Formats/formats.service';
 import {
   effectiveRawConfig,
   resolveConfig,
+  systemOf,
+  withFormatSnapshot,
 } from 'src/Formats/format-config.helper';
 import { seedBracketSlots, shuffled } from 'src/Formats/bracket-seeding.helper';
 import { LeaderboardService } from 'src/leaderboard/leaderboard.service';
@@ -94,6 +96,9 @@ export class TournamentService {
       );
     }
 
+    if (targetStatus === TournamentStatus.ONGOING) {
+      await this.snapshotFormatIfMissing(tournamentId);
+    }
     const updated = await this.prisma.tournament.update({
       where: { id: tournamentId },
       data: { status: targetStatus },
@@ -104,10 +109,37 @@ export class TournamentService {
     return updated;
   }
 
+  /**
+   * Copy the preset's rules, bracket type and name onto a tournament that is
+   * becoming ONGOING, if it does not have them yet. `startTournament` does this
+   * inside its atomic claim; this covers the manual status route, which can
+   * also move OPEN → ONGOING — without it, such a tournament would still depend
+   * on a preset that may later be deleted (todo.md §4).
+   */
+  private async snapshotFormatIfMissing(tournamentId: string) {
+    const t = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { format: true },
+    });
+    if (!t?.format) return;
+    const data: Record<string, unknown> = {};
+    if (t.config == null && t.format.config != null) {
+      data.config = t.format.config as Prisma.InputJsonValue;
+    }
+    if (t.system == null) data.system = t.format.system;
+    if (t.formatName == null) data.formatName = t.format.name;
+    if (Object.keys(data).length > 0) {
+      await this.prisma.tournament.update({ where: { id: tournamentId }, data });
+    }
+  }
+
   async updateStatusInternal(
     tournamentId: string,
     targetStatus: TournamentStatus,
   ) {
+    if (targetStatus === TournamentStatus.ONGOING) {
+      await this.snapshotFormatIfMissing(tournamentId);
+    }
     const updated = await this.prisma.tournament.update({
       where: { id: tournamentId },
       data: { status: targetStatus },
@@ -442,6 +474,25 @@ export class TournamentService {
 
   // ─── START ───────────────────────────────────────────────────
 
+  /**
+   * Why a start was refused, in the words of what is actually wrong. Every
+   * refusal used to read "Tournament already started", which was misleading for
+   * the commonest case by far — a tournament whose registration was never
+   * opened, which has not started at all.
+   */
+  private startRefusal(status?: TournamentStatus) {
+    if (status === TournamentStatus.UPCOMING || status === TournamentStatus.PENDING) {
+      return {
+        code: 'NOT_OPEN_YET',
+        message: 'Open this tournament for registration before starting it.',
+      };
+    }
+    if (status === TournamentStatus.COMPLETED) {
+      return { code: 'ALREADY_COMPLETED', message: 'This tournament has already finished.' };
+    }
+    return { code: 'ALREADY_STARTED', message: 'This tournament has already started.' };
+  }
+
   async startTournament(tournamentId: string) {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -466,7 +517,7 @@ export class TournamentService {
 
     // Validate before claiming, so a rejected start never has to be undone.
     if (tournament.status !== TournamentStatus.OPEN)
-      throw new BadRequestException('Tournament already started');
+      throw new BadRequestException(this.startRefusal(tournament.status));
     if (tournament.participants.length < 2)
       throw new BadRequestException('Need at least 2 players');
     if (!tournament.format)
@@ -494,10 +545,22 @@ export class TournamentService {
         ...(tournament.config == null && tournament.format.config != null
           ? { config: tournament.format.config as Prisma.InputJsonValue }
           : {}),
+        // The bracket type and the preset's name travel with the rules: they
+        // are not part of the config, and a tournament that has started must
+        // not need its preset to still exist (todo.md §4).
+        ...(tournament.system == null ? { system: tournament.format.system } : {}),
+        ...(tournament.formatName == null ? { formatName: tournament.format.name } : {}),
       },
     });
     if (claim.count === 0) {
-      throw new BadRequestException('Tournament already started');
+      // The claim only matches OPEN. Saying "already started" for every miss
+      // was wrong for the commonest case by far: a tournament still UPCOMING,
+      // i.e. registration was never opened.
+      const now = await this.prisma.tournament.findUnique({
+        where: { id: tournamentId },
+        select: { status: true },
+      });
+      throw new BadRequestException(this.startRefusal(now?.status));
     }
 
     // How the field is drawn. RANDOM is the default: an event draws its bracket
@@ -769,9 +832,9 @@ export class TournamentService {
       placementPointsTopCut,
       placementPointsParticipation,
     } = config;
-    const isHybrid = tournamentWithFormat?.format?.system === 'HYBRID';
+    const isHybrid = systemOf(tournamentWithFormat) === 'HYBRID';
 
-    const system = tournamentWithFormat?.format?.system;
+    const system = systemOf(tournamentWithFormat);
 
     const pointsLeaderboard =
       await this.leaderboardService.getLeaderboard(tournamentId);
@@ -1150,7 +1213,7 @@ export class TournamentService {
     // controls on this instead of on the viewer's role, so what it renders
     // matches what the guards will actually permit.
     const access = await checkTournamentAccess(this.prisma, tournamentId, user);
-    return { ...tournament, canManage: access === 'ALLOWED' };
+    return { ...withFormatSnapshot(tournament), canManage: access === 'ALLOWED' };
   }
 
   async getTournamentByInviteToken(inviteToken: string) {
@@ -1223,7 +1286,59 @@ export class TournamentService {
       },
     });
     if (!tournament) throw new NotFoundException('Tournament not found');
-    return tournament;
+    return withFormatSnapshot(tournament);
+  }
+
+  /**
+   * Delete a tournament outright — the way back from one created by mistake,
+   * or started on the wrong day. There was no route at all before, so a typo in
+   * a name was permanent.
+   *
+   * A FINISHED tournament is refused: its placements are in players' profiles,
+   * and its points are already counted in their lifetime stats, which deleting
+   * the row would not undo. Anything not finished is fair game for its staff —
+   * nothing is awarded until completion.
+   *
+   * Children go first, in order: Prisma restricts a delete while rounds or
+   * participants still point at the tournament (builds, staff invitations and
+   * the per-match tracker rows cascade on their own).
+   */
+  async deleteTournament(tournamentId: string) {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        _count: { select: { participants: true, rounds: true } },
+      },
+    });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+
+    if (tournament.status === TournamentStatus.COMPLETED) {
+      throw new BadRequestException({
+        code: 'TOURNAMENT_COMPLETED',
+        message:
+          'A finished tournament cannot be deleted: its results are part of the players’ records and their points have already been counted.',
+      });
+    }
+
+    const matches = await this.prisma.match.count({
+      where: { round: { tournamentId } },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.match.deleteMany({ where: { round: { tournamentId } } });
+      await tx.round.deleteMany({ where: { tournamentId } });
+      await tx.tournamentParticipant.deleteMany({ where: { tournamentId } });
+      await tx.tournament.delete({ where: { id: tournamentId } });
+    });
+
+    return {
+      message: `"${tournament.name}" has been deleted.`,
+      participants: tournament._count.participants,
+      matches,
+    };
   }
 
   // ─── GET ALL ─────────────────────────────────────────────────
@@ -1312,7 +1427,7 @@ export class TournamentService {
         ? { AND: [manageableWhere, privacyWhere] }
         : (manageableWhere ?? privacyWhere);
 
-    return this.prisma.tournament.findMany({
+    const tournaments = await this.prisma.tournament.findMany({
       ...(where ? { where } : {}),
       orderBy: { createdAt: 'desc' },
       include: {
@@ -1356,5 +1471,6 @@ export class TournamentService {
         },
       },
     });
+    return tournaments.map(withFormatSnapshot);
   }
 }

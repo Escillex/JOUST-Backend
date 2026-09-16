@@ -1,6 +1,7 @@
 import { requireJwtSecret, sessionExpiresIn } from '../config/security.config';
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { AccountService } from './account.service';
 import { TwoFactorService } from './two-factor.service';
 import { GoogleAuthService } from './google-auth.service';
 import { AuthController } from './auth.controller';
@@ -8,6 +9,7 @@ import { JwtModule, JwtSignOptions } from '@nestjs/jwt';
 import { PrismaModule } from 'prisma/prisma.module';
 import { MailModule } from '../mail/mail.module';
 import { SettingsModule } from '../settings/settings.module';
+import { AuditModule } from '../audit/audit.module';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 
@@ -18,6 +20,9 @@ import { RolesGuard } from '../guards/roles.guard';
     // a module that cannot compile on its own is a module that cannot be tested.
     MailModule,
     SettingsModule,
+    // AccountService records a self-deletion by hand. forwardRef because
+    // AuditModule imports this module for the guard on its admin route.
+    forwardRef(() => AuditModule),
     JwtModule.register({
       secret: requireJwtSecret(),
       // Without this, session tokens never expired: the cookie lapsed after an
@@ -31,7 +36,7 @@ import { RolesGuard } from '../guards/roles.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, TwoFactorService, GoogleAuthService, JwtAuthGuard, RolesGuard],
+  providers: [AuthService, TwoFactorService, GoogleAuthService, AccountService, JwtAuthGuard, RolesGuard],
   exports: [AuthService, TwoFactorService, JwtAuthGuard, RolesGuard, JwtModule], // export guards and service for use in other modules
 })
 export class AuthModule {}

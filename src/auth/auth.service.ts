@@ -20,6 +20,7 @@ import {
   SignUpDto,
   BIO_MAX_LENGTH,
   UpdateProfileDto,
+  UpdateMeDto,
   VerifyCodeDto,
 } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
@@ -39,7 +40,7 @@ export function normalizeBio(bio: string): string | null {
 
 /** Addresses that exist but can never receive mail: the seed's `.local` default
  *  and IANA's reserved example domains. */
-function isUnroutableAddress(email: string | null): boolean {
+export function isUnroutableAddress(email: string | null): boolean {
   if (!email) return true;
   const domain = email.split('@')[1]?.toLowerCase() ?? '';
   return (
@@ -501,6 +502,18 @@ export class AuthService {
   /** Issues the real session token and cookie. The single place a session is
    *  minted, so every path — password-only, post-2FA, recovery code, Google —
    *  sets the cookie identically. */
+  /** A replacement session for THIS browser, after its own sessions were voided
+   *  (a password change). Sets the cookie and returns the token, so the caller
+   *  is not signed out by its own security action. */
+  async reissueSession(
+    user: { id: string; email: string | null; roles: Role[]; username: string | null; avatarUrl: string | null },
+    res: Response,
+  ): Promise<string> {
+    const token = await this.generateToken(user.id, user.email, user.roles, user.username, user.avatarUrl);
+    res.cookie('token', token, sessionCookieOptions(sessionLifetimeMs()));
+    return token;
+  }
+
   private async completeSignIn(
     user: {
       id: string;
@@ -640,7 +653,7 @@ export class AuthService {
     res.cookie('device', token, sessionCookieOptions(30 * 24 * 60 * 60 * 1000));
   }
 
-  private codeFailureMessage(reason: string): string {
+  codeFailureMessage(reason: string): string {
     if (reason === 'expired')
       return 'That code has expired. Request a new one.';
     if (reason === 'exhausted')
@@ -657,38 +670,41 @@ export class AuthService {
     return { message: 'You have Signed Out successfully' };
   }
 
-  async updateMe(userId: string, dto: UpdateProfileDto) {
+  /**
+   * A user editing their own profile: username, display name, bio. Password
+   * and email are NOT accepted here any more (UpdateMeDto) — they changed with
+   * nothing but a session, so a signed-in device left open was enough to take
+   * the account. They now go through AccountService, which asks for proof.
+   */
+  async updateMe(userId: string, dto: UpdateMeDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
-    if (dto.email || dto.username) {
+    const renaming = !!dto.username && dto.username !== user.username;
+    if (renaming) {
       const conflict = await this.prisma.user.findFirst({
         where: {
           id: { not: userId },
-          OR: [
-            ...(dto.email ? [{ email: dto.email }] : []),
-            ...(dto.username ? [{ username: dto.username }] : []),
-          ],
+          username: { equals: dto.username, mode: 'insensitive' },
         },
       });
       if (conflict) {
-        throw new BadRequestException('Username or email already taken');
+        throw new BadRequestException('That username is already taken.');
       }
     }
 
     const data: Record<string, any> = {};
-    if (dto.username) data.username = dto.username;
-    if (dto.email) data.email = dto.email;
+    if (renaming) {
+      data.username = dto.username;
+      // The profile address follows the name, as it already did for an admin
+      // rename. A self-rename used to keep the old address. Old UUID links
+      // still resolve; the old handle link does not.
+      data.slug = await generateUniqueUserSlug(this.prisma, dto.username!, userId);
+    }
     // displayName was accepted by the DTO but silently dropped here; the admin
     // path (updateProfile) always saved it. Same rule in both now.
     if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
     if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio);
-    if (dto.password) {
-      data.hashedPassword = await this.hashPassword(dto.password);
-      // Choosing your own password satisfies the forced change, for the case
-      // where a flagged account still holds a session issued before the flag.
-      data.mustChangePassword = false;
-    }
 
     return this.prisma.user.update({
       where: { id: userId },
@@ -697,6 +713,7 @@ export class AuthService {
         id: true,
         username: true,
         displayName: true,
+        slug: true,
         bio: true,
         email: true,
         roles: true,

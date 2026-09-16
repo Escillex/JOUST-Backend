@@ -13,13 +13,7 @@ import {
   NotificationType,
 } from '@prisma/client';
 import { NotificationService } from 'src/notification/notification.service';
-import {
-  effectiveRawConfig,
-  resolveConfig,
-  systemAllowsDraw,
-  winsNeeded,
-  type ByeResult,
-} from '../../Formats/format-config.helper';
+import { effectiveRawConfig, resolveConfig, systemAllowsDraw, winsNeeded, type ByeResult, systemOf } from '../../Formats/format-config.helper';
 import { completedMatchData } from './match-completion.helper';
 
 @Injectable()
@@ -55,7 +49,7 @@ export class MatchService {
           round: {
             select: {
               tournamentId: true,
-              tournament: { select: { format: { select: { system: true } } } },
+              tournament: { select: { system: true, format: { select: { system: true } } } },
             },
           },
           player1: { select: { id: true, isGuest: true } },
@@ -74,7 +68,7 @@ export class MatchService {
       // Win/loss/draw counters are deliberately NOT skipped — a win/loss record
       // matters in every system and feeds UserGlobalStats. Only the points
       // component is zeroed.
-      const system = match.round.tournament?.format?.system;
+      const system = systemOf(match.round.tournament);
       const pointsApply = !(
         system === 'SINGLE_ELIMINATION' ||
         system === 'DOUBLE_ELIMINATION' ||
@@ -421,7 +415,7 @@ export class MatchService {
       throw new BadRequestException('Draws are not allowed in this tournament');
 
     // The guard this method used to be missing (7.8 / 7.3).
-    if (!systemAllowsDraw(match.round.tournament.format?.system, match.phase)) {
+    if (!systemAllowsDraw(systemOf(match.round.tournament), match.phase)) {
       throw new BadRequestException(
         'Draws are not supported by this tournament system: a match here must ' +
           'produce a winner to advance the bracket.',
@@ -515,7 +509,7 @@ export class MatchService {
     // reasoning.
     if (
       !winnerId &&
-      !systemAllowsDraw(match.round.tournament.format?.system, match.phase)
+      !systemAllowsDraw(systemOf(match.round.tournament), match.phase)
     ) {
       throw new BadRequestException(
         'Draws are not supported by this tournament system: a match here must ' +

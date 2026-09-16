@@ -1,3 +1,4 @@
+import { TournamentSystem } from '@prisma/client';
 // Resolves a raw config JSON blob (from TournamentFormat.config)
 // into a typed, defaults-applied config object.
 
@@ -120,6 +121,63 @@ export function effectiveRawConfig(
     (tournament?.format?.config as Record<string, any>) ??
     {}
   );
+}
+
+/** The bracket type a tournament actually runs on: its own snapshot once it has
+ *  started, else the live preset. Mirrors `effectiveRawConfig`, and is the only
+ *  thing that should read `format.system` — a started tournament must not need
+ *  its preset to still exist (todo.md §4). */
+export function systemOf(
+  tournament:
+    | {
+        system?: TournamentSystem | null;
+        format?: { system?: TournamentSystem | null } | null;
+      }
+    | null
+    | undefined,
+): TournamentSystem | undefined {
+  return tournament?.system ?? tournament?.format?.system ?? undefined;
+}
+
+/** The preset's name as this tournament knows it: its snapshot, else the live
+ *  preset's. */
+export function formatNameOf(
+  tournament:
+    | { formatName?: string | null; format?: { name?: string | null } | null }
+    | null
+    | undefined,
+): string | null {
+  return tournament?.formatName ?? tournament?.format?.name ?? null;
+}
+
+/**
+ * Present a tournament's format as the tournament itself knows it: once it has
+ * started, its snapshotted bracket type and preset name stand in for the live
+ * preset — which may since have been renamed, changed, or deleted.
+ *
+ * Shaping the response here rather than at ~20 read sites keeps every consumer
+ * (bracket views, lobby, report, manage list, invite page) correct by default,
+ * including when `format` is null because the preset is gone.
+ */
+export function withFormatSnapshot<
+  T extends {
+    system?: TournamentSystem | null;
+    formatName?: string | null;
+    format?: { system?: TournamentSystem | null; name?: string | null } | null;
+  },
+>(tournament: T): T {
+  if (!tournament) return tournament;
+  const system = systemOf(tournament);
+  const name = formatNameOf(tournament);
+  if (!system && !name) return tournament;
+  return {
+    ...tournament,
+    format: {
+      ...(tournament.format ?? {}),
+      ...(system ? { system } : {}),
+      ...(name ? { name } : {}),
+    },
+  } as T;
 }
 
 export function resolveConfig(

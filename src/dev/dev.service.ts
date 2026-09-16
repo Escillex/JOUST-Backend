@@ -14,6 +14,7 @@ import { LeaderboardService } from '../leaderboard/leaderboard.service';
 import {
   effectiveRawConfig,
   resolveConfig,
+  systemOf,
 } from '../Formats/format-config.helper';
 import { TournamentStatus } from '@prisma/client';
 
@@ -111,7 +112,7 @@ export class DevService {
       }
 
       const config = resolveConfig(effectiveRawConfig(t));
-      const isHybrid = t.format?.system === 'HYBRID';
+      const isHybrid = systemOf(t) === 'HYBRID';
       const leaderboard = await this.leaderboardService.getLeaderboard(t.id);
       for (const entry of leaderboard) {
         if (!registered.some((p) => p.userId === entry.userId)) continue;

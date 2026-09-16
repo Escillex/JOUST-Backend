@@ -12,7 +12,12 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { GoogleAuthService } from './google-auth.service';
+import { AccountService } from './account.service';
 import {
+  AccountProofDto,
+  ChangeEmailDto,
+  ChangePasswordDto,
+  DeleteAccountDto,
   AdminCreateUserDto,
   ForcedPasswordChangeDto,
   ForgotPasswordDto,
@@ -24,6 +29,7 @@ import {
   RecoveryCodeDto,
   ResendCodeDto,
   SignUpDto,
+  UpdateMeDto,
   UpdateProfileDto,
   UpdateRolesDto,
   VerifyCodeDto,
@@ -44,6 +50,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly google: GoogleAuthService,
+    private readonly account: AccountService,
   ) {}
 
   // ──────────────────────────────────────────────
@@ -195,9 +202,95 @@ export class AuthController {
 
   @Patch('me')
   @UseGuards(JwtAuthGuard)
-  updateMe(@Req() req: AuthenticatedRequest, @Body() dto: UpdateProfileDto) {
+  updateMe(@Req() req: AuthenticatedRequest, @Body() dto: UpdateMeDto) {
     const userId = req.user.id || (req.user as any).sub;
     return this.authService.updateMe(userId, dto);
+  }
+
+  // ──────────────────────────────────────────────
+  // ACCOUNT SETTINGS — the signed-in user's own account. Anything that could
+  // hand the account to someone else needs proof (AccountService): an emailed
+  // code when this site sends mail, else the current password.
+  // ──────────────────────────────────────────────
+
+  private static deviceToken(req: AuthenticatedRequest): string | undefined {
+    return (req.cookies as Record<string, string | undefined>)?.['device'];
+  }
+
+  @Get('me/security')
+  @UseGuards(JwtAuthGuard)
+  accountSecurity(@Req() req: AuthenticatedRequest) {
+    return this.account.security(req.user.id, AuthController.deviceToken(req));
+  }
+
+  @Post('me/code')
+  @UseGuards(JwtAuthGuard)
+  sendAccountCode(@Req() req: AuthenticatedRequest) {
+    return this.account.sendCode(req.user.id);
+  }
+
+  /** Changing the password signs out everywhere else; this browser gets a
+   *  replacement token in the response (and its cookie), so the person who made
+   *  the change is not the one locked out. */
+  @Post('me/password')
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ChangePasswordDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    const { user, ...result } = await this.account.changePassword(
+      req.user.id,
+      dto,
+      AuthController.deviceToken(req),
+    );
+    const token = await this.authService.reissueSession(user, res);
+    return { ...result, token };
+  }
+
+  @Post('me/sign-out-everywhere')
+  @UseGuards(JwtAuthGuard)
+  async signOutEverywhere(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    const result = await this.account.signOutEverywhere(req.user.id);
+    res.clearCookie('token');
+    res.clearCookie('device');
+    return result;
+  }
+
+  @Post('me/email')
+  @UseGuards(JwtAuthGuard)
+  changeEmail(@Req() req: AuthenticatedRequest, @Body() dto: ChangeEmailDto) {
+    return this.account.changeEmail(req.user.id, dto);
+  }
+
+  @Post('me/recovery-codes')
+  @UseGuards(JwtAuthGuard)
+  newRecoveryCodes(@Req() req: AuthenticatedRequest, @Body() dto: AccountProofDto) {
+    return this.account.newRecoveryCodes(req.user.id, dto);
+  }
+
+  @Delete('me/devices/:id')
+  @UseGuards(JwtAuthGuard)
+  forgetDevice(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.account.forgetDevice(req.user.id, id);
+  }
+
+  /** POST, not DELETE: the proof travels in a body, which some proxies drop
+   *  from DELETE requests. */
+  @Post('me/delete')
+  @UseGuards(JwtAuthGuard)
+  async deleteMe(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: DeleteAccountDto,
+    @Res({ passthrough: true }) res: express.Response,
+  ) {
+    const result = await this.account.deleteSelf(req.user.id, dto);
+    res.clearCookie('token');
+    res.clearCookie('device');
+    return result;
   }
 
   // ──────────────────────────────────────────────

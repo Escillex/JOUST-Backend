@@ -7,6 +7,7 @@ import {
   Param,
   Body,
   Patch,
+  Delete,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -111,6 +112,15 @@ export class TournamentController {
   @HttpCode(HttpStatus.OK)
   async startTournament(@Param('id', ParseUUIDPipe) id: string) {
     return this.tournamentService.startTournament(id);
+  }
+
+  @Audit({ action: 'tournament.delete', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Deleted the tournament ${c.t}` })
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('id')
+  deleteTournament(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tournamentService.deleteTournament(id);
   }
 
   @Audit({ action: 'tournament.complete', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Completed ${c.t}` })
