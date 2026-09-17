@@ -33,6 +33,21 @@ export interface ConfigField {
  *  select of NONE turns that utility off; otherwise it names who may trigger it.
  *  See docs/shared-utilities-plan.md. Enforced server-side by MatchUtilityService,
  *  so these are real gates, not just UI hints (Core Rule 9). */
+/** Who may start a match. Not a `<tool>Who` select: NONE and PARTICIPANTS-only
+ *  are both nonsense here (nobody could start, or staff could not step in), so
+ *  this offers the two answers that mean something. */
+function matchStartField(): ConfigField {
+  return {
+    key: 'matchStartWho',
+    label: 'Who Starts a Match',
+    placeholder: 'STAFF_AND_PARTICIPANTS',
+    defaultValue: 'STAFF_AND_PARTICIPANTS',
+    type: 'select',
+    options: ['STAFF_AND_PARTICIPANTS', 'STAFF'],
+    help: 'STAFF_AND_PARTICIPANTS lets the two players start their own match when they sit down. STAFF keeps the strict, supervised flow where an organizer starts every match.',
+  };
+}
+
 function utilitiesFields(): ConfigField[] {
   const whoOptions = [
     'NONE',
@@ -159,10 +174,14 @@ function pointsRankedFields(includeSwissRounds: boolean): ConfigField[] {
     {
       key: 'tieBreakerOrder',
       label: 'Tiebreakers',
-      placeholder: 'omw, oomw, matchWinPct',
-      defaultValue: 'omw, oomw, matchWinPct',
+      placeholder: 'omw, gw, oomw',
+      defaultValue: 'omw, gw, oomw',
       type: 'array',
-      help: 'Comma-separated, most significant first. Valid: omw, oomw, matchWinPct, wins, losses. Blank uses the default order.',
+      help:
+        'Comma-separated, most significant first. Valid: omw (opponents\' match win %), ' +
+        'gw (your game win %), oomw (opponents\' opponents), ogw (opponents\' game win %), ' +
+        'matchWinPct, wins, losses. Blank uses omw, gw, oomw — the conventional order for ' +
+        'best-of-three formats.',
     },
     {
       key: 'byeResult',
@@ -261,7 +280,8 @@ export function configFieldsForSystem(
 ): ConfigField[] {
   // Utilities permissions apply to every system, so they are appended once here
   // rather than in each branch below.
-  return [...baseFieldsForSystem(system), ...utilitiesFields()];
+  return [...baseFieldsForSystem(system), matchStartField(),
+    ...utilitiesFields()];
 }
 
 function baseFieldsForSystem(system: TournamentSystem | string): ConfigField[] {

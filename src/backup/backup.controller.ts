@@ -11,6 +11,7 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
@@ -20,7 +21,12 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 import { BackupService } from './backup.service';
-import { CreateBackupDto, UpdateBackupDto } from './dto/backup.dto';
+import {
+  BackupPassphraseDto,
+  CreateBackupDto,
+  ResetDataDto,
+  UpdateBackupDto,
+} from './dto/backup.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../guards/decorators/roles.decorator';
@@ -56,6 +62,9 @@ export class BackupController {
       alias: dto.alias,
       description: dto.description,
       sanitized: dto.sanitized,
+      // Whitelisted @Audit `pick` above means this is never written to the
+      // audit log, which is the point: it is the key to the file.
+      passphrase: dto.passphrase,
       trigger: 'manual',
     });
   }
@@ -77,7 +86,10 @@ export class BackupController {
   @Audit({ action: 'backup.import', category: AC.SYSTEM, describe: (c) => `Imported a backup as ${String((c.result as { name?: string })?.name ?? 'a new file')}` })
   @Post('import')
   @UseInterceptors(FileInterceptor('file'))
-  async import(@UploadedFile() file: Express.Multer.File) {
+  async import(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: BackupPassphraseDto = {},
+  ) {
     if (!file) throw new BadRequestException('No file was uploaded.');
     if (!file.originalname.endsWith('.joustql')) {
       throw new BadRequestException(
@@ -88,7 +100,7 @@ export class BackupController {
     // the validator reads from a path, so stage it and let the service clean up.
     const staged = join(tmpdir(), `joust-import-${randomBytes(6).toString('hex')}.joustql`);
     await fs.writeFile(staged, file.buffer);
-    return this.backups.importFile(staged, file.originalname);
+    return this.backups.importFile(staged, file.originalname, dto.passphrase);
   }
 
   /**
@@ -100,8 +112,11 @@ export class BackupController {
    */
   @Audit({ action: 'backup.restore', category: AC.SYSTEM, describe: (c) => `Restored the database from ${c.params.name}` })
   @Post(':name/restore')
-  async restore(@Param('name') name: string) {
-    const result = await this.backups.restore(name);
+  async restore(
+    @Param('name') name: string,
+    @Body() dto: BackupPassphraseDto = {},
+  ) {
+    const result = await this.backups.restore(name, dto.passphrase);
     const restarting = this.backups.scheduleRestart();
     return {
       ...result,
@@ -109,6 +124,34 @@ export class BackupController {
       message: restarting
         ? 'Restored. The server is restarting to clear stale state.'
         : 'Restored. Reload the page.',
+    };
+  }
+
+  /**
+   * Empty the database, keeping the catalogues you would otherwise rebuild by
+   * hand. For debugging — a safety backup is taken first, unconditionally.
+   */
+  @Audit({ action: 'system.reset_data', category: AC.SYSTEM, pick: ['scope'], describe: (c) => `Reset the database (${String(c.body.scope ?? 'content')})` })
+  @Post('reset')
+  async reset(@Body() dto: ResetDataDto, @Req() req: any) {
+    const expected = this.backups.databaseName();
+    if (dto.confirm !== expected) {
+      throw new BadRequestException({
+        code: 'CONFIRM_MISMATCH',
+        message: `Type the database name "${expected}" to confirm. This deletes data and cannot be undone except from the safety backup.`,
+      });
+    }
+    const callerId = req.user?.sub || req.user?.id;
+    const result = await this.backups.resetData({
+      scope: dto.scope ?? 'content',
+      callerId,
+    });
+    return {
+      ...result,
+      message:
+        result.scope === 'everything'
+          ? 'Database emptied. Your own account and this server\'s settings were kept.'
+          : 'Tournament data cleared. Accounts and catalogues were kept.',
     };
   }
 

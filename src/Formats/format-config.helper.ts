@@ -75,6 +75,26 @@ export interface ResolvedConfig {
   // trigger each utility, resolved from config so it's configurable per
   // tournament/game rather than hardcoded. Enforced server-side by MatchUtilityService.
   utilities: UtilitiesConfig;
+
+  // Who may move a match from PENDING to ONGOING. Organizer-only start (F2,
+  // 2026-08-26) suits a supervised venue and gets in the way everywhere else:
+  // at a casual event the two players are sitting at the table and the
+  // organizer is not. Enforced server-side in MatchService.startMatch.
+  matchStartWho: MatchStartPerm;
+}
+
+/** Who may start a match. STAFF is the strict, supervised setting. */
+export type MatchStartPerm = 'STAFF' | 'STAFF_AND_PARTICIPANTS';
+
+const MATCH_START_PERMS: readonly MatchStartPerm[] = [
+  'STAFF',
+  'STAFF_AND_PARTICIPANTS',
+];
+
+function resolveMatchStart(raw: unknown): MatchStartPerm {
+  return MATCH_START_PERMS.includes(raw as MatchStartPerm)
+    ? (raw as MatchStartPerm)
+    : 'STAFF_AND_PARTICIPANTS';
 }
 
 /** Who may trigger a shared utility. NONE = the utility is off/hidden. */
@@ -280,6 +300,12 @@ export function resolveConfig(
         'STAFF',
       ),
     },
+
+    // Root first, like seedingMode and the utilities: who may start a match is
+    // a property of the event, not of a hybrid's Swiss phase.
+    matchStartWho: resolveMatchStart(
+      config?.matchStartWho ?? c.matchStartWho,
+    ),
   };
 }
 

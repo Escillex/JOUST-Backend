@@ -1,4 +1,10 @@
-import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import {
+  createHash,
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  scryptSync,
+} from 'crypto';
 import { promises as fs } from 'fs';
 import { requireSettingsKey } from '../settings/settings.crypto';
 
@@ -26,11 +32,49 @@ import { requireSettingsKey } from '../settings/settings.crypto';
 export const MAGIC = 'JOUSTQL1';
 const IV_BYTES = 12; // GCM standard
 
+/**
+ * Format 2 makes a backup PORTABLE.
+ *
+ * Format 1 encrypted the payload with this server's `SETTINGS_ENCRYPTION_KEY`,
+ * which meant a backup only ever opened on the machine that wrote it — correct
+ * for disaster recovery on one host, useless for the thing this is actually
+ * used for, which is moving a snapshot between prod, dev and a test instance
+ * (todo.md §6). Format 2 derives the key from a passphrase the operator
+ * supplies instead, so the file no longer depends on the server's environment.
+ *
+ * Format 1 files stay readable through the server-key path below: existing
+ * backups must not be orphaned by this change.
+ */
+export const CURRENT_FORMAT = 2;
+
+/** scrypt parameters. N=2^15 costs ~100ms and ~32MB per derivation, which is
+ *  irrelevant once per backup and expensive for an attacker guessing. */
+const KDF = { N: 1 << 15, r: 8, p: 1 } as const;
+const KDF_SALT_BYTES = 16;
+const KEY_BYTES = 32;
+
+export type BackupEncryption = 'none' | 'serverKey' | 'passphrase';
+
+/** Derive the file key from a passphrase. Exported for the spec. */
+export function deriveKey(
+  passphrase: string,
+  salt: Buffer,
+  params: { N: number; r: number; p: number } = KDF,
+): Buffer {
+  return scryptSync(passphrase, salt, KEY_BYTES, {
+    N: params.N,
+    r: params.r,
+    p: params.p,
+    // scrypt needs headroom above the default 32MB cap at these parameters.
+    maxmem: 256 * 1024 * 1024,
+  });
+}
+
 export type BackupTrigger = 'manual' | 'scheduled' | 'uploaded' | 'pre-restore';
 
 export interface JoustqlManifest {
-  /** Bumped only if the layout above changes incompatibly. */
-  format: 1;
+  /** 1 = payload keyed to the server. 2 = passphrase or plaintext. */
+  format: 1 | 2;
   createdAt: string;
   /** Database the dump was taken from — informational, restores are by URL. */
   database: string;
@@ -44,7 +88,14 @@ export interface JoustqlManifest {
   pinned: boolean;
   /** Addresses and credentials scrubbed (see sanitize.sql). */
   sanitized: boolean;
+  /** Kept for format 1, and for any reader that only asks "is this locked?". */
   encrypted: boolean;
+  /** Format 2 only: WHICH key opens it. Absent on format 1, where `encrypted`
+   *  always meant the server key. */
+  encryption?: BackupEncryption;
+  /** Format 2 + passphrase only: how to turn the passphrase back into the key.
+   *  Public by design — a KDF salt is not a secret. */
+  kdf?: { salt: string; N: number; r: number; p: number };
   /** Over the payload BEFORE encryption, so it verifies the dump itself
    *  rather than the envelope GCM already authenticates. */
   payloadSha256: string;
@@ -64,7 +115,8 @@ export class JoustqlError extends Error {
       | 'BAD_FORMAT'
       | 'CHECKSUM_MISMATCH'
       | 'SCHEMA_MISMATCH'
-      | 'DECRYPT_FAILED',
+      | 'DECRYPT_FAILED'
+      | 'PASSPHRASE_REQUIRED',
     message: string,
   ) {
     super(message);
@@ -86,22 +138,61 @@ export async function writeJoustql(
   payload: Buffer,
   meta: Omit<
     JoustqlManifest,
-    'format' | 'payloadSha256' | 'payloadBytes' | 'iv' | 'authTag' | 'encrypted'
-  > & { encrypt: boolean },
+    | 'format'
+    | 'payloadSha256'
+    | 'payloadBytes'
+    | 'iv'
+    | 'authTag'
+    | 'encrypted'
+    | 'encryption'
+    | 'kdf'
+  > & {
+    /** How to lock the payload. A passphrase makes the file portable; the
+     *  server key keeps it readable only here. */
+    encryption: BackupEncryption;
+    /** Required when `encryption` is 'passphrase'. */
+    passphrase?: string;
+  },
 ): Promise<JoustqlManifest> {
-  const { encrypt, ...rest } = meta;
+  const { encryption, passphrase, ...rest } = meta;
+
+  if (encryption !== 'none' && encryption !== 'serverKey' && encryption !== 'passphrase') {
+    // Guessing here is the dangerous option in both directions: default to
+    // 'none' and a full backup silently ships in the clear; default to a key
+    // and it is silently unreadable. So neither.
+    throw new JoustqlError(
+      'BAD_FORMAT',
+      `Unknown backup encryption mode "${String(encryption)}".`,
+    );
+  }
+  if (encryption === 'passphrase' && !passphrase) {
+    throw new JoustqlError(
+      'PASSPHRASE_REQUIRED',
+      'A passphrase is required to write an encrypted backup.',
+    );
+  }
+
   const manifest: JoustqlManifest = {
-    format: 1,
+    format: CURRENT_FORMAT,
     ...rest,
-    encrypted: encrypt,
+    encrypted: encryption !== 'none',
+    encryption,
     payloadSha256: sha256(payload),
     payloadBytes: payload.length,
   };
 
   let body = payload;
-  if (encrypt) {
+  if (encryption !== 'none') {
+    let key: Buffer;
+    if (encryption === 'passphrase') {
+      const salt = randomBytes(KDF_SALT_BYTES);
+      key = deriveKey(passphrase as string, salt);
+      manifest.kdf = { salt: salt.toString('base64'), ...KDF };
+    } else {
+      key = requireSettingsKey();
+    }
     const iv = randomBytes(IV_BYTES);
-    const cipher = createCipheriv('aes-256-gcm', requireSettingsKey(), iv);
+    const cipher = createCipheriv('aes-256-gcm', key, iv);
     body = Buffer.concat([cipher.update(payload), cipher.final()]);
     manifest.iv = iv.toString('base64');
     manifest.authTag = cipher.getAuthTag().toString('base64');
@@ -144,7 +235,7 @@ function parseHeader(head: Buffer): ParsedHeader {
   } catch {
     throw new JoustqlError('BAD_FORMAT', 'The backup manifest is not readable.');
   }
-  if (manifest.format !== 1) {
+  if (manifest.format !== 1 && manifest.format !== 2) {
     throw new JoustqlError(
       'BAD_FORMAT',
       `This backup uses format version ${manifest.format}, which this server does not understand.`,
@@ -172,6 +263,7 @@ export async function readManifest(path: string): Promise<JoustqlManifest> {
 /** Read and verify the payload, decrypting when needed. */
 export async function readPayload(
   path: string,
+  passphrase?: string,
 ): Promise<{ manifest: JoustqlManifest; payload: Buffer }> {
   const file = await fs.readFile(path);
   const { manifest, offset } = parseHeader(file.subarray(0, 8192));
@@ -184,21 +276,48 @@ export async function readPayload(
         'The backup is marked encrypted but carries no key material.',
       );
     }
+
+    // Format 1 predates `encryption`, and there it always meant the server key.
+    const how: BackupEncryption = manifest.encryption ?? 'serverKey';
+
+    let key: Buffer;
+    if (how === 'passphrase') {
+      if (!manifest.kdf) {
+        throw new JoustqlError(
+          'BAD_FORMAT',
+          'The backup says it is passphrase-encrypted but carries no key derivation parameters.',
+        );
+      }
+      if (!passphrase) {
+        // Distinct from a wrong passphrase: the caller can prompt rather than
+        // report a failure.
+        throw new JoustqlError(
+          'PASSPHRASE_REQUIRED',
+          'This backup is passphrase-protected. Enter the passphrase it was exported with.',
+        );
+      }
+      key = deriveKey(passphrase, Buffer.from(manifest.kdf.salt, 'base64'), manifest.kdf);
+    } else {
+      key = requireSettingsKey();
+    }
+
     try {
       const decipher = createDecipheriv(
         'aes-256-gcm',
-        requireSettingsKey(),
+        key,
         Buffer.from(manifest.iv, 'base64'),
       );
       decipher.setAuthTag(Buffer.from(manifest.authTag, 'base64'));
       payload = Buffer.concat([decipher.update(payload), decipher.final()]);
     } catch {
-      // Overwhelmingly the cause is a different SETTINGS_ENCRYPTION_KEY, so say
-      // that rather than "decryption failed" — it is the difference between a
-      // lost backup and one that opens on the machine that made it.
+      // GCM cannot tell a wrong key from a tampered file, but it can tell which
+      // key it was *meant* to use — and those need different answers from
+      // whoever is holding the file.
       throw new JoustqlError(
         'DECRYPT_FAILED',
-        'Could not decrypt this backup. It was encrypted with a different SETTINGS_ENCRYPTION_KEY than this server has.',
+        how === 'passphrase'
+          ? 'Could not decrypt this backup. The passphrase is wrong, or the file has been altered.'
+          : 'Could not decrypt this backup. It was encrypted with a different SETTINGS_ENCRYPTION_KEY than this server has.',
       );
     }
   }

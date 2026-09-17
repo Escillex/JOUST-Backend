@@ -36,7 +36,7 @@ describe('backups', () => {
     description: null,
     pinned: false,
     sanitized: false,
-    encrypt: true,
+    encryption: 'serverKey' as const,
     ...over,
   });
 
@@ -84,7 +84,7 @@ describe('backups', () => {
 
     it('detects a corrupted payload', async () => {
       const path = join(dir, 'e.joustql');
-      await writeJoustql(path, randomBytes(512), meta({ encrypt: false }));
+      await writeJoustql(path, randomBytes(512), meta({ encryption: 'none' as const }));
       const raw = await fs.readFile(path);
       raw[raw.length - 5] ^= 0xff; // flip a bit in the payload
       await fs.writeFile(path, raw);

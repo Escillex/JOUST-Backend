@@ -19,6 +19,11 @@ export interface LeaderboardEntry {
   matchWinPct: number;
   omw: number;
   oomw: number;
+  /** Games won / games played, across this tournament. In a best-of series
+   *  `Match.player1Score` IS games won, which is what this reads. */
+  gw: number;
+  /** The mean of this player's opponents' GW%, floored like OMW. */
+  ogw: number;
   avatarUrl?: string | null;
 }
 
@@ -28,8 +33,14 @@ export interface LeaderboardEntry {
  *  filled with the player's own `winRate` — two fields under opponent-strength
  *  names carrying a number that is not opponent strength at all. Real OMW/OOMW
  *  require an opponent graph, which only exists within a single tournament; the
- *  global board has no such graph, so the honest thing is to not claim it. */
-export type GlobalLeaderboardEntry = Omit<LeaderboardEntry, 'omw' | 'oomw'> & {
+ *  global board has no such graph, so the honest thing is to not claim it.
+ *
+ *  `gw`/`ogw` are omitted for the same reason as of 2026-09-16: GW% is counted
+ *  from per-match game scores, and `UserGlobalStats` keeps match totals only. */
+export type GlobalLeaderboardEntry = Omit<
+  LeaderboardEntry,
+  'omw' | 'oomw' | 'gw' | 'ogw'
+> & {
   tournamentsPlayed: number;
   avatarUrl?: string | null;
   slug?: string | null;
@@ -37,8 +48,11 @@ export type GlobalLeaderboardEntry = Omit<LeaderboardEntry, 'omw' | 'oomw'> & {
 
 /** Sortable entry: opponent tiebreakers are optional because the global board
  *  has no opponent graph to compute them from (7.2). */
-type SortableEntry = Omit<LeaderboardEntry, 'rank' | 'omw' | 'oomw'> &
-  Partial<Pick<LeaderboardEntry, 'omw' | 'oomw'>>;
+type SortableEntry = Omit<
+  LeaderboardEntry,
+  'rank' | 'omw' | 'oomw' | 'gw' | 'ogw'
+> &
+  Partial<Pick<LeaderboardEntry, 'omw' | 'oomw' | 'gw' | 'ogw'>>;
 
 @Injectable()
 export class LeaderboardService {
@@ -49,24 +63,24 @@ export class LeaderboardService {
   /**
    * Sorts leaderboard entries by points first, then by each tiebreaker
    * in the order specified by tieBreakerOrder. Falls back to
-   * ['omw', 'oomw', 'matchWinPct'] if no order is configured.
+   * ['omw', 'gw', 'oomw'] if no order is configured — the conventional order
+   * for best-of-three formats.
    */
   private sortEntries<T extends SortableEntry>(
     entries: T[],
     tieBreakerOrder: string[],
   ): T[] {
-    const tbGetters: Record<string, (e: T) => number> = {
-      omw: (e) => e.omw ?? 0,
-      oomw: (e) => e.oomw ?? 0,
-      matchWinPct: (e) => e.matchWinPct,
-      wins: (e) => e.wins,
-      losses: (e) => -e.losses, // fewer losses = better
-    };
+    const raw = LeaderboardService.tiebreakGetters<T>();
+    const tbGetters: Record<string, (e: T) => number> = Object.fromEntries(
+      Object.entries(raw).map(([key, get]) => [
+        key,
+        LeaderboardService.LOWER_IS_BETTER.has(key)
+          ? (e: T) => -get(e)
+          : get,
+      ]),
+    );
 
-    const order =
-      tieBreakerOrder.length > 0
-        ? tieBreakerOrder
-        : ['omw', 'oomw', 'matchWinPct'];
+    const order = LeaderboardService.tiebreakOrder(tieBreakerOrder);
 
     return [...entries].sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
@@ -93,18 +107,8 @@ export class LeaderboardService {
   ): boolean {
     if (prev.points !== curr.points) return true;
 
-    const order =
-      tieBreakerOrder.length > 0
-        ? tieBreakerOrder
-        : ['omw', 'oomw', 'matchWinPct'];
-
-    const getters: Record<string, (e: T) => number> = {
-      omw: (e) => e.omw ?? 0,
-      oomw: (e) => e.oomw ?? 0,
-      matchWinPct: (e) => e.matchWinPct,
-      wins: (e) => e.wins,
-      losses: (e) => e.losses,
-    };
+    const order = LeaderboardService.tiebreakOrder(tieBreakerOrder);
+    const getters = LeaderboardService.tiebreakGetters<T>();
 
     for (const tb of order) {
       const getter = getters[tb];
@@ -121,6 +125,43 @@ export class LeaderboardService {
   private static readonly MIN_OPPONENT_WIN_PCT = 1 / 3;
 
   /**
+   * The tiebreakers, in one place.
+   *
+   * There used to be three copies of this map — one in `sortEntries`, one in
+   * `rankChanged`, one in `tiebreakCriterion` — each with its own default
+   * order. Adding GW% to only the first made the table sort by one rule, award
+   * ranks by another and report a third; two players separated by GW% were
+   * sorted apart and then handed the same rank. Caught by game-win.spec.ts.
+   */
+  private static readonly DEFAULT_TIEBREAK_ORDER = ['omw', 'gw', 'oomw'];
+
+  private static tiebreakGetters<T extends SortableEntry>(): Record<
+    string,
+    (e: T) => number
+  > {
+    return {
+      omw: (e) => e.omw ?? 0,
+      oomw: (e) => e.oomw ?? 0,
+      gw: (e) => e.gw ?? 0,
+      ogw: (e) => e.ogw ?? 0,
+      matchWinPct: (e) => e.matchWinPct,
+      wins: (e) => e.wins,
+      losses: (e) => e.losses,
+    };
+  }
+
+  /** Tiebreakers where a SMALLER number is better. Only the sorter cares:
+   *  the equality checks in `rankChanged` and `tiebreakCriterion` compare
+   *  magnitudes, so direction is irrelevant to them. */
+  private static readonly LOWER_IS_BETTER = new Set(['losses']);
+
+  private static tiebreakOrder(configured: string[]): string[] {
+    return configured.length > 0
+      ? configured
+      : LeaderboardService.DEFAULT_TIEBREAK_ORDER;
+  }
+
+  /**
    * Opponent match-win percentage (OMW) and opponent's-opponent (OOMW) for every
    * player in a tournament, derived from completed matches.
    *
@@ -131,25 +172,60 @@ export class LeaderboardService {
    */
   private async computeOpponentTiebreakers(
     tournamentId: string,
-  ): Promise<Map<string, { omw: number; oomw: number }>> {
-    const matches = await this.prisma.match.findMany({
-      where: {
-        round: { tournamentId },
-        status: MatchStatus.COMPLETED,
-        isBye: false,
-      },
-      select: { player1Id: true, player2Id: true, winnerId: true },
-    });
+  ): Promise<Map<string, { omw: number; oomw: number; gw: number; ogw: number }>> {
+    const [matches, byes] = await Promise.all([
+      this.prisma.match.findMany({
+        where: {
+          round: { tournamentId },
+          status: MatchStatus.COMPLETED,
+          isBye: false,
+        },
+        select: {
+          player1Id: true,
+          player2Id: true,
+          winnerId: true,
+          // In a best-of series these are GAMES won, which is what GW% counts.
+          player1Score: true,
+          player2Score: true,
+        },
+      }),
+      // Byes are excluded from OPPONENT strength — there is no opponent to be
+      // strong — but they count toward your OWN game record, as Swiss rules
+      // require. Without this a player whose win was a bye has zero counted
+      // games and a GW% of 0, i.e. the artifact ranks them last for having been
+      // given a free win. Seen on trinity: Rafael Costa, 3 points, gw=0.000.
+      this.prisma.match.findMany({
+        where: {
+          round: { tournamentId },
+          status: MatchStatus.COMPLETED,
+          isBye: true,
+        },
+        select: { winnerId: true, player1Score: true, player2Score: true },
+      }),
+    ]);
 
     const opponents = new Map<string, string[]>();
     const played = new Map<string, number>();
     const won = new Map<string, number>();
+    // Game counters, separate from the match counters above.
+    const gamesWon = new Map<string, number>();
+    const gamesPlayed = new Map<string, number>();
 
     const bump = (map: Map<string, number>, key: string) =>
       map.set(key, (map.get(key) ?? 0) + 1);
+    const add = (map: Map<string, number>, key: string, n: number) =>
+      map.set(key, (map.get(key) ?? 0) + n);
 
     for (const m of matches) {
       if (!m.player1Id || !m.player2Id) continue;
+
+      // A match reported without game detail still scores 1–0, so `total` is
+      // never 0 for a completed non-bye match and GW% stays defined.
+      const total = m.player1Score + m.player2Score;
+      add(gamesWon, m.player1Id, m.player1Score);
+      add(gamesWon, m.player2Id, m.player2Score);
+      add(gamesPlayed, m.player1Id, total);
+      add(gamesPlayed, m.player2Id, total);
 
       opponents.set(m.player1Id, [
         ...(opponents.get(m.player1Id) ?? []),
@@ -165,6 +241,16 @@ export class LeaderboardService {
       if (m.winnerId) bump(won, m.winnerId);
     }
 
+    // A bye credits the player its recorded score, and nothing to any
+    // opponent: it never enters `opponents`, so it cannot inflate anybody's
+    // OMW or OGW.
+    for (const b of byes) {
+      if (!b.winnerId) continue;
+      const won = Math.max(b.player1Score, b.player2Score, 1);
+      add(gamesWon, b.winnerId, won);
+      add(gamesPlayed, b.winnerId, won);
+    }
+
     // Pass 1: each player's own win rate, floored.
     const winPct = new Map<string, number>();
     for (const [userId, count] of played) {
@@ -175,6 +261,15 @@ export class LeaderboardService {
       );
     }
 
+    // Pass 1b: each player's own GAME win rate. Floored the same way, because
+    // it is used as an opponent-strength input below for exactly the same
+    // reason: a player on 0% would otherwise drag their opponents down.
+    const gwPct = new Map<string, number>();
+    for (const [userId, total] of gamesPlayed) {
+      const raw = total > 0 ? (gamesWon.get(userId) ?? 0) / total : 0;
+      gwPct.set(userId, Math.max(raw, LeaderboardService.MIN_OPPONENT_WIN_PCT));
+    }
+
     // Pass 2: OMW is the mean of your opponents' win rates.
     const omw = new Map<string, number>();
     for (const [userId, list] of opponents) {
@@ -183,12 +278,31 @@ export class LeaderboardService {
     }
 
     // Pass 3: OOMW is the mean of your opponents' OMW, so it needs pass 2 first.
-    const result = new Map<string, { omw: number; oomw: number }>();
-    for (const [userId, list] of opponents) {
+    // OGW is the mean of your opponents' GW, which needs pass 1b.
+    const result = new Map<
+      string,
+      { omw: number; oomw: number; gw: number; ogw: number }
+    >();
+    // Every player who appears ANYWHERE, not just those with opponents: a
+    // player whose only completed match was a bye is absent from `opponents`
+    // entirely, and iterating that map alone left them with no entry, so their
+    // credited bye games fell back to a GW% of 0.
+    const everyone = new Set<string>([...opponents.keys(), ...gamesPlayed.keys()]);
+    for (const userId of everyone) {
+      const list = opponents.get(userId) ?? [];
       const total = list.reduce((sum, id) => sum + (omw.get(id) ?? 0), 0);
+      const totalGw = list.reduce((sum, id) => sum + (gwPct.get(id) ?? 0), 0);
       result.set(userId, {
         omw: omw.get(userId) ?? 0,
         oomw: list.length > 0 ? total / list.length : 0,
+        // The player's OWN game win rate is reported unfloored — the floor
+        // exists to stop a weak opponent dragging someone else down, and has
+        // no business rewriting your own record.
+        gw:
+          (gamesPlayed.get(userId) ?? 0) > 0
+            ? (gamesWon.get(userId) ?? 0) / (gamesPlayed.get(userId) as number)
+            : 0,
+        ogw: list.length > 0 ? totalGw / list.length : 0,
       });
     }
 
@@ -207,21 +321,9 @@ export class LeaderboardService {
   ): string | null {
     if (a.points !== b.points) return 'points';
 
-    const order =
-      tieBreakerOrder.length > 0
-        ? tieBreakerOrder
-        : ['omw', 'oomw', 'matchWinPct'];
-
-    const getters: Record<
-      string,
-      (e: Omit<LeaderboardEntry, 'rank'>) => number
-    > = {
-      omw: (e) => e.omw,
-      oomw: (e) => e.oomw,
-      matchWinPct: (e) => e.matchWinPct,
-      wins: (e) => e.wins,
-      losses: (e) => e.losses,
-    };
+    const order = LeaderboardService.tiebreakOrder(tieBreakerOrder);
+    const getters =
+      LeaderboardService.tiebreakGetters<Omit<LeaderboardEntry, 'rank'>>();
 
     for (const tb of order) {
       const getter = getters[tb];
@@ -389,19 +491,22 @@ export class LeaderboardService {
       matchWinPct: p.stats?.winRate ?? 0,
       omw: opponentStats.get(p.userId)?.omw ?? 0,
       oomw: opponentStats.get(p.userId)?.oomw ?? 0,
+      gw: opponentStats.get(p.userId)?.gw ?? 0,
+      ogw: opponentStats.get(p.userId)?.ogw ?? 0,
       avatarUrl: p.user?.avatarUrl ?? null,
     }));
 
     const sorted = this.sortEntries(entries, tieBreakerOrder);
 
+    // DENSE ranking, matching the global board's 2026-09-16 change: a tie at
+    // #2 reads "#2, #2" and the next distinct player is #3, not #4. This used
+    // to be competition ranking (`i + 1`), so the same application ranked ties
+    // two different ways depending on which table you were looking at.
     const ranked: LeaderboardEntry[] = [];
-    let currentRank = 1;
+    let currentRank = 0;
     for (let i = 0; i < sorted.length; i++) {
-      if (
-        i > 0 &&
-        this.rankChanged(sorted[i - 1], sorted[i], tieBreakerOrder)
-      ) {
-        currentRank = i + 1;
+      if (i === 0 || this.rankChanged(sorted[i - 1], sorted[i], tieBreakerOrder)) {
+        currentRank += 1;
       }
       ranked.push({ rank: currentRank, ...sorted[i] });
     }

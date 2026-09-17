@@ -8,10 +8,11 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { MatchService } from './match.service';
 import { SubmitResultDto, GameResultDto } from './dto/match.dto';
-import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
+import { JwtAuthGuard, type AuthenticatedRequest } from '../../guards/jwt-auth.guard';
 import { RolesGuard } from '../../guards/roles.guard';
 import { Roles } from '../../guards/decorators/roles.decorator';
 import { TournamentAccessGuard } from '../../guards/tournament-access.guard';
@@ -55,16 +56,20 @@ export class MatchController {
   }
 
   // POST /matches/:id/start
-  // Organizer-driven activation: nothing auto-activates any more, so staff start
-  // each match explicitly. PENDING → ONGOING and notifies both players.
+  // Nothing auto-activates: a match is started explicitly. WHO may do that is a
+  // per-tournament rule (`matchStartWho`), so this route cannot be closed by a
+  // guard the way it was — staff always may, and the two players may when the
+  // tournament says so. Same shape as player self-scoring: the guard admits any
+  // signed-in caller and `MatchService.startMatch` decides.
   @Audit({ action: 'match.start', category: AC.MATCH, tournament: { matchParam: 'id' }, describe: (c) => `Started ${matchText(c)} in ${c.t}` })
   @Post(':id/start')
-  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
-  @Roles(Role.ORGANIZER, Role.ADMIN)
-  @TournamentAccess('match:id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async startMatch(@Param('id', ParseUUIDPipe) id: string) {
-    return this.matchService.startMatch(id);
+  async startMatch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.matchService.startMatch(id, req.user);
   }
 
   // POST /matches/:id/draw was REMOVED (plan 7.3, 2026-07-31).

@@ -116,7 +116,8 @@ export class BackupService {
     return url.toString();
   }
 
-  private databaseName(): string {
+  /** Public: the reset route asks for it as a typed confirmation. */
+  databaseName(): string {
     try {
       return new URL(this.databaseUrl()).pathname.replace(/^\//, '') || 'joust';
     } catch {
@@ -211,8 +212,16 @@ export class BackupService {
     description?: string | null;
     trigger: BackupTrigger;
     sanitized?: boolean;
+    /**
+     * Supplied for a full backup that has to be readable somewhere else
+     * (todo.md §6). Without one, a full backup falls back to the server key and
+     * is therefore only restorable on THIS server — still the right default for
+     * the scheduled job, which has nobody to prompt.
+     */
+    passphrase?: string | null;
   }): Promise<BackupListEntry> {
     const sanitized = !!opts.sanitized;
+    const passphrase = opts.passphrase?.trim() || null;
     const tmp = join(tmpdir(), `joust-dump-${randomBytes(6).toString('hex')}.pgc`);
 
     try {
@@ -238,14 +247,16 @@ export class BackupService {
         sanitized,
         // A sanitized export holds nothing worth encrypting, and it is the copy
         // meant to be handed to someone else — a file needing a key is a bad
-        // demo artefact.
-        encrypt: !sanitized,
+        // demo artefact. A full backup is locked either to a passphrase (and so
+        // can travel) or, with none given, to this server's key.
+        encryption: sanitized ? 'none' : passphrase ? 'passphrase' : 'serverKey',
+        passphrase: passphrase ?? undefined,
       });
 
       this.logger.log(
         `Backup created: ${name} (${manifest.payloadBytes} bytes, ${
           sanitized ? 'sanitized' : 'full'
-        }, trigger=${opts.trigger})`,
+        }, encryption=${manifest.encryption}, trigger=${opts.trigger})`,
       );
       await this.prune();
       const stat = await fs.stat(path);
@@ -277,7 +288,8 @@ export class BackupService {
       const count = Number(leaked.match(/\d+/)?.[0] ?? '0');
       if (count > 0) {
         throw new Error(
-          `Sanitization left ${count} real address(es) in the export — refusing to write it.`,
+          `Sanitization left ${count} item(s) that should have been scrubbed ` +
+            `(addresses, environment settings or image references) — refusing to write it.`,
         );
       }
 
@@ -389,9 +401,13 @@ export class BackupService {
   // ─── Importing / restoring ──────────────────────────────────────────────
 
   /** Validate an uploaded file, then keep it as an ordinary entry. */
-  async importFile(tempPath: string, originalName: string): Promise<BackupListEntry> {
+  async importFile(
+    tempPath: string,
+    originalName: string,
+    passphrase?: string,
+  ): Promise<BackupListEntry> {
     try {
-      const { manifest } = await readPayload(tempPath);
+      const { manifest } = await readPayload(tempPath, passphrase);
       const name = `joust-${this.stamp()}${this.slug(
         manifest.alias ?? 'imported',
       )}.joustql`;
@@ -425,14 +441,17 @@ export class BackupService {
    * A pre-restore backup is taken first and unconditionally: the single worst
    * outcome here is restoring the wrong file and having nothing to go back to.
    */
-  async restore(name: string): Promise<{ replacedBy: string; safetyCopy: string | null }> {
+  async restore(
+    name: string,
+    passphrase?: string,
+  ): Promise<{ replacedBy: string; safetyCopy: string | null }> {
     await this.assertRestoreAllowed();
     const path = await this.resolveFile(name);
 
     let manifest: JoustqlManifest;
     let payload: Buffer;
     try {
-      ({ manifest, payload } = await readPayload(path));
+      ({ manifest, payload } = await readPayload(path, passphrase));
     } catch (err) {
       if (err instanceof JoustqlError) {
         throw new BadRequestException({ message: err.message, code: err.code });
@@ -459,11 +478,21 @@ export class BackupService {
       safety = copy.name;
     }
 
+    // Read this server's OWN environment settings before the restore replaces
+    // them, and write them back after. Mail, Google and backup configuration
+    // belong to whichever machine is running, not to the snapshot: without this
+    // a snapshot from elsewhere silently repoints this server's mail, and a
+    // snapshot from a machine whose SETTINGS_ENCRYPTION_KEY differs leaves
+    // secrets here that this server cannot decrypt at all (todo.md §6).
+    const preserved = await this.environmentSettings();
+
     const tmp = join(tmpdir(), `joust-restore-${randomBytes(6).toString('hex')}.pgc`);
     try {
       await fs.writeFile(tmp, payload);
       await this.prisma.$disconnect(); // an open pool holds locks --clean trips on
       await this.pgRestore(this.databaseUrl(), tmp);
+      await this.prisma.$connect().catch(() => undefined);
+      await this.restoreEnvironmentSettings(preserved);
       // Every cached value just became a value from a different database. This
       // matters even when the process is about to exit: if it is not PID 1 it
       // will not exit, and stale settings would outlive the restore.
@@ -473,6 +502,140 @@ export class BackupService {
     } finally {
       await fs.rm(tmp, { force: true });
       await this.prisma.$connect().catch(() => undefined);
+    }
+  }
+
+  /**
+   * Empty the database for debugging, keeping the things you would have to
+   * rebuild by hand.
+   *
+   * Deliberately NOT "drop and re-migrate": the schema stays exactly as the
+   * running code expects it, so the app is usable the moment this returns. It
+   * discovers tables from the catalogue rather than carrying a hardcoded list,
+   * so a table added next month is emptied too — for a reset, wiping something
+   * new is right and missing it silently is not.
+   *
+   * Requires the same switch as a restore, takes the same automatic safety
+   * copy, and never deletes the administrator who asked.
+   */
+  async resetData(opts: {
+    scope: 'content' | 'everything';
+    callerId: string;
+  }): Promise<{ scope: string; tablesCleared: number; safetyCopy: string | null }> {
+    await this.assertRestoreAllowed();
+
+    const safetyCopy = (
+      await this.create({
+        trigger: 'pre-restore',
+        description: `Automatic safety copy taken before a "${opts.scope}" data reset`,
+      })
+    ).name;
+
+    // Catalogues and configuration a debugging reset should not force you to
+    // rebuild. `everything` keeps only what the server itself needs to run.
+    const keep =
+      opts.scope === 'everything'
+        ? ['User', 'SystemSetting', 'HomeBlock', '_prisma_migrations']
+        : [
+            'User',
+            'Game',
+            'TournamentFormat',
+            'Award',
+            'StoreProduct',
+            'SiteAsset',
+            'SystemSetting',
+            'HomeBlock',
+            '_prisma_migrations',
+          ];
+
+    const url = this.databaseUrl();
+    const listed = await this.psql(
+      url,
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;`,
+    );
+    const tables = listed
+      .split('\n')
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0 && !keep.includes(t))
+      .filter((t) => t !== 'tablename' && !t.startsWith('--') && !t.match(/^\(\d+ rows\)$/));
+
+    if (tables.length > 0) {
+      // One statement: TRUNCATE is transactional, so a failure leaves the
+      // database untouched rather than half-emptied.
+      const quoted = tables.map((t) => `"public"."${t}"`).join(', ');
+      await this.psql(url, `TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE;`);
+    }
+
+    if (opts.scope === 'everything') {
+      // "User" is kept out of the truncate purely so this row can survive —
+      // an admin who wipes the database must still be able to sign in.
+      await this.psql(
+        url,
+        `DELETE FROM "User" WHERE "id" <> '${opts.callerId.replace(/'/g, "''")}';`,
+      );
+    }
+
+    this.settings.clearCache();
+    this.logger.warn(
+      `Data reset (${opts.scope}): cleared ${tables.length} table(s), safety copy ${safetyCopy}`,
+    );
+    return { scope: opts.scope, tablesCleared: tables.length, safetyCopy };
+  }
+
+  /** Settings that describe the SERVER rather than the data. */
+  private static readonly ENVIRONMENT_SETTING_PREFIXES = [
+    'mail.',
+    'backup.',
+    'security.google',
+  ];
+  private static readonly ENVIRONMENT_SETTING_KEYS = ['setup.completedAt'];
+
+  private isEnvironmentSetting(key: string): boolean {
+    return (
+      BackupService.ENVIRONMENT_SETTING_PREFIXES.some((p) => key.startsWith(p)) ||
+      BackupService.ENVIRONMENT_SETTING_KEYS.includes(key)
+    );
+  }
+
+  private async environmentSettings() {
+    try {
+      const rows = await this.prisma.systemSetting.findMany();
+      return rows.filter((r) => this.isEnvironmentSetting(r.key));
+    } catch (err) {
+      // Never block a restore over this — losing the preserved settings is
+      // recoverable from Admin → Settings; a refused restore may not be.
+      this.logger.warn(`Could not read environment settings before restore: ${String(err)}`);
+      return [];
+    }
+  }
+
+  private async restoreEnvironmentSettings(
+    rows: { key: string; value: string; encrypted: boolean; updatedById: string | null }[],
+  ): Promise<void> {
+    for (const row of rows) {
+      try {
+        await this.prisma.systemSetting.upsert({
+          where: { key: row.key },
+          create: {
+            key: row.key,
+            value: row.value,
+            encrypted: row.encrypted,
+            updatedById: row.updatedById,
+          },
+          update: {
+            value: row.value,
+            encrypted: row.encrypted,
+            updatedById: row.updatedById,
+          },
+        });
+      } catch (err) {
+        this.logger.warn(`Could not restore the setting "${row.key}": ${String(err)}`);
+      }
+    }
+    if (rows.length > 0) {
+      this.logger.log(
+        `Kept ${rows.length} environment setting(s) belonging to this server across the restore.`,
+      );
     }
   }
 }

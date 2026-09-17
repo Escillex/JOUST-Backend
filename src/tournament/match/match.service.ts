@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   forwardRef,
   Inject,
@@ -15,6 +16,8 @@ import {
 import { NotificationService } from 'src/notification/notification.service';
 import { effectiveRawConfig, resolveConfig, systemAllowsDraw, winsNeeded, type ByeResult, systemOf } from '../../Formats/format-config.helper';
 import { completedMatchData } from './match-completion.helper';
+import { checkTournamentAccess } from '../../guards/tournament-access.util';
+import type { JwtPayload } from '../../guards/jwt-auth.guard';
 
 @Injectable()
 export class MatchService {
@@ -911,12 +914,51 @@ export class MatchService {
    * every format. Byes/walkovers never reach here — they resolve automatically and
    * have no game to start. Idempotent on an already-started match.
    */
-  async startMatch(matchId: string) {
+  /**
+   * PENDING → ONGOING.
+   *
+   * `requesterId` is supplied when the caller is not known to be staff. Who may
+   * do this is a per-tournament rule (`matchStartWho`), defaulting to the two
+   * players plus staff: organizer-only start suits a supervised venue and gets
+   * in the way at a casual one, where the players are at the table and the
+   * organizer is not. Enforced here rather than in the guard for the same
+   * reason player self-scoring is — the answer depends on the tournament's
+   * configuration, which a guard does not read.
+   */
+  async startMatch(matchId: string, user?: JwtPayload) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       include: { round: { select: { tournamentId: true } } },
     });
     if (!match) throw new NotFoundException('Match not found');
+
+    if (user) {
+      const isStaff =
+        (await checkTournamentAccess(
+          this.prisma,
+          match.round.tournamentId,
+          user,
+        )) === 'ALLOWED';
+
+      if (!isStaff) {
+        if (match.player1Id !== user.id && match.player2Id !== user.id)
+          throw new ForbiddenException(
+            'Only a player in this match may start it',
+          );
+
+        const tournament = await this.prisma.tournament.findUnique({
+          where: { id: match.round.tournamentId },
+        });
+        const { matchStartWho } = resolveConfig(
+          effectiveRawConfig(tournament),
+          match.phase ?? undefined,
+        );
+        if (matchStartWho !== 'STAFF_AND_PARTICIPANTS')
+          throw new ForbiddenException(
+            'An organizer starts each match in this tournament',
+          );
+      }
+    }
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
     if (match.isBye)
