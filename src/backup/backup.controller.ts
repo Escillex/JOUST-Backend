@@ -55,7 +55,13 @@ export class BackupController {
     };
   }
 
-  @Audit({ action: 'backup.create', category: AC.SYSTEM, pick: ['alias', 'sanitized'], describe: (c) => `Created a ${c.body.sanitized ? 'sanitized export' : 'backup'}${c.body.alias ? ` "${String(c.body.alias)}"` : ''}` })
+  @Audit({
+    action: 'backup.create',
+    category: AC.SYSTEM,
+    pick: ['alias', 'sanitized'],
+    describe: (c) =>
+      `Created a ${c.body.sanitized ? 'sanitized export' : 'backup'}${c.body.alias ? ` "${String(c.body.alias)}"` : ''}`,
+  })
   @Post()
   async create(@Body() dto: CreateBackupDto) {
     return this.backups.create({
@@ -69,7 +75,12 @@ export class BackupController {
     });
   }
 
-  @Audit({ action: 'backup.update', category: AC.SYSTEM, pick: ['alias', 'pinned'], describe: (c) => `Updated the backup ${c.params.name}` })
+  @Audit({
+    action: 'backup.update',
+    category: AC.SYSTEM,
+    pick: ['alias', 'pinned'],
+    describe: (c) => `Updated the backup ${c.params.name}`,
+  })
   @Patch(':name')
   async update(@Param('name') name: string, @Body() dto: UpdateBackupDto) {
     return this.backups.update(name, dto);
@@ -83,7 +94,12 @@ export class BackupController {
     res.sendFile(path);
   }
 
-  @Audit({ action: 'backup.import', category: AC.SYSTEM, describe: (c) => `Imported a backup as ${String((c.result as { name?: string })?.name ?? 'a new file')}` })
+  @Audit({
+    action: 'backup.import',
+    category: AC.SYSTEM,
+    describe: (c) =>
+      `Imported a backup as ${String((c.result as { name?: string })?.name ?? 'a new file')}`,
+  })
   @Post('import')
   @UseInterceptors(FileInterceptor('file'))
   async import(
@@ -98,7 +114,10 @@ export class BackupController {
     }
     // The interceptor holds the upload in memory (as the images module does);
     // the validator reads from a path, so stage it and let the service clean up.
-    const staged = join(tmpdir(), `joust-import-${randomBytes(6).toString('hex')}.joustql`);
+    const staged = join(
+      tmpdir(),
+      `joust-import-${randomBytes(6).toString('hex')}.joustql`,
+    );
     await fs.writeFile(staged, file.buffer);
     return this.backups.importFile(staged, file.originalname, dto.passphrase);
   }
@@ -110,7 +129,11 @@ export class BackupController {
    * restart is coming so it can poll /health, instead of the request dying
    * mid-flight and looking like a failure.
    */
-  @Audit({ action: 'backup.restore', category: AC.SYSTEM, describe: (c) => `Restored the database from ${c.params.name}` })
+  @Audit({
+    action: 'backup.restore',
+    category: AC.SYSTEM,
+    describe: (c) => `Restored the database from ${c.params.name}`,
+  })
   @Post(':name/restore')
   async restore(
     @Param('name') name: string,
@@ -131,7 +154,13 @@ export class BackupController {
    * Empty the database, keeping the catalogues you would otherwise rebuild by
    * hand. For debugging — a safety backup is taken first, unconditionally.
    */
-  @Audit({ action: 'system.reset_data', category: AC.SYSTEM, pick: ['scope'], describe: (c) => `Reset the database (${String(c.body.scope ?? 'content')})` })
+  @Audit({
+    action: 'system.reset_data',
+    category: AC.SYSTEM,
+    pick: ['scope'],
+    describe: (c) =>
+      `Reset the database (${String(c.body.scope ?? 'content')})`,
+  })
   @Post('reset')
   async reset(@Body() dto: ResetDataDto, @Req() req: any) {
     const expected = this.backups.databaseName();
@@ -150,12 +179,16 @@ export class BackupController {
       ...result,
       message:
         result.scope === 'everything'
-          ? 'Database emptied. Your own account and this server\'s settings were kept.'
+          ? "Database emptied. Your own account and this server's settings were kept."
           : 'Tournament data cleared. Accounts and catalogues were kept.',
     };
   }
 
-  @Audit({ action: 'backup.delete', category: AC.SYSTEM, describe: (c) => `Deleted the backup ${c.params.name}` })
+  @Audit({
+    action: 'backup.delete',
+    category: AC.SYSTEM,
+    describe: (c) => `Deleted the backup ${c.params.name}`,
+  })
   @Delete(':name')
   async remove(@Param('name') name: string) {
     await this.backups.remove(name);

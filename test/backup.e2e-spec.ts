@@ -79,12 +79,18 @@ describe('backups', () => {
     it('refuses a file that is not a backup', async () => {
       const path = join(dir, 'd.joustql');
       await fs.writeFile(path, Buffer.from('PGDMP not really'));
-      await expect(readPayload(path)).rejects.toMatchObject({ code: 'NOT_JOUSTQL' });
+      await expect(readPayload(path)).rejects.toMatchObject({
+        code: 'NOT_JOUSTQL',
+      });
     });
 
     it('detects a corrupted payload', async () => {
       const path = join(dir, 'e.joustql');
-      await writeJoustql(path, randomBytes(512), meta({ encryption: 'none' as const }));
+      await writeJoustql(
+        path,
+        randomBytes(512),
+        meta({ encryption: 'none' as const }),
+      );
       const raw = await fs.readFile(path);
       raw[raw.length - 5] ^= 0xff; // flip a bit in the payload
       await fs.writeFile(path, raw);
@@ -123,7 +129,11 @@ describe('backups', () => {
   describe('the service', () => {
     const build = (settings: Record<string, string>) => {
       const svc = new BackupService(
-        { $connect: jest.fn(), $disconnect: jest.fn(), $queryRawUnsafe: jest.fn() } as any,
+        {
+          $connect: jest.fn(),
+          $disconnect: jest.fn(),
+          $queryRawUnsafe: jest.fn(),
+        } as any,
         {
           get: jest.fn(async (n: string) => settings[n] ?? null),
           getBoolean: jest.fn(async (n: string) => settings[n] === 'true'),
@@ -156,7 +166,12 @@ describe('backups', () => {
     it('rolls off the oldest, and never a pinned one', async () => {
       const svc = build({ BACKUP_DIR: dir, BACKUP_RETENTION: '2' });
       // Four backups, oldest first; the oldest is pinned.
-      const stamps = ['20260901-010000', '20260902-010000', '20260903-010000', '20260904-010000'];
+      const stamps = [
+        '20260901-010000',
+        '20260902-010000',
+        '20260903-010000',
+        '20260904-010000',
+      ];
       for (const [i, stamp] of stamps.entries()) {
         await writeJoustql(
           join(dir, `joust-${stamp}.joustql`),
@@ -183,7 +198,9 @@ describe('backups', () => {
       const svc = build({ BACKUP_DIR: dir });
       const junk = join(dir, 'upload.joustql');
       await fs.writeFile(junk, Buffer.from('-- just some SQL'));
-      await expect(svc.importFile(junk, 'upload.joustql')).rejects.toMatchObject({
+      await expect(
+        svc.importFile(junk, 'upload.joustql'),
+      ).rejects.toMatchObject({
         response: { code: 'NOT_JOUSTQL' },
       });
     });

@@ -28,13 +28,17 @@ describe('forced password change', () => {
         // and "is this address already taken by someone else?". The second
         // carries `id: { not }` and must answer nobody, or every address looks
         // taken by the very account trying to set it.
-        findFirst: jest.fn().mockImplementation((args: any) =>
-          Promise.resolve(args?.where?.id?.not ? null : user),
-        ),
+        findFirst: jest
+          .fn()
+          .mockImplementation((args: any) =>
+            Promise.resolve(args?.where?.id?.not ? null : user),
+          ),
         findUnique: jest.fn().mockResolvedValue(user),
-        update: jest.fn().mockImplementation(({ data }: any) =>
-          Promise.resolve({ ...user, ...data }),
-        ),
+        update: jest
+          .fn()
+          .mockImplementation(({ data }: any) =>
+            Promise.resolve({ ...user, ...data }),
+          ),
       },
     };
     const twoFactor: any = {
@@ -119,7 +123,9 @@ describe('forced password change', () => {
     // The seeded admin is born with `admin@joust.local`. Letting it through here
     // is what strands the only ADMIN account the moment two-factor is switched
     // on — its codes go nowhere and a seeded account has no recovery codes.
-    const { service, res } = build(await flagged({ email: 'admin@joust.local' }));
+    const { service, res } = build(
+      await flagged({ email: 'admin@joust.local' }),
+    );
     const { changeToken }: any = await service.SignIn(
       { identifier: 'tempuser', password: 'GivenToMe123!' },
       res,
@@ -150,7 +156,9 @@ describe('forced password change', () => {
   });
 
   it('leaves an ordinary account alone', async () => {
-    const { service, res } = build(await flagged({ mustChangePassword: false }));
+    const { service, res } = build(
+      await flagged({ mustChangePassword: false }),
+    );
     const result: any = await service.SignIn(
       { identifier: 'tempuser', password: 'GivenToMe123!' },
       res,

@@ -17,22 +17,39 @@ function prismaWith(matches: any[], participants: any[], byes: any[] = []) {
   return {
     match: {
       // Two queries now: real matches, then byes (own record only).
-      findMany: jest.fn().mockImplementation((args: any) =>
-        Promise.resolve(args?.where?.isBye === true ? byes : matches),
-      ),
+      findMany: jest
+        .fn()
+        .mockImplementation((args: any) =>
+          Promise.resolve(args?.where?.isBye === true ? byes : matches),
+        ),
     },
-    tournamentParticipant: { findMany: jest.fn().mockResolvedValue(participants) },
+    tournamentParticipant: {
+      findMany: jest.fn().mockResolvedValue(participants),
+    },
     tournament: {
-      findUnique: jest.fn().mockResolvedValue({ id: T, config: {}, format: { config: {} } }),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue({ id: T, config: {}, format: { config: {} } }),
     },
   } as any;
 }
 
-function participant(userId: string, points: number, wins: number, losses: number) {
+function participant(
+  userId: string,
+  points: number,
+  wins: number,
+  losses: number,
+) {
   return {
     userId,
     user: { username: userId, displayName: null, avatarUrl: null },
-    stats: { points, wins, losses, draws: 0, winRate: wins / Math.max(1, wins + losses) },
+    stats: {
+      points,
+      wins,
+      losses,
+      draws: 0,
+      winRate: wins / Math.max(1, wins + losses),
+    },
     tournament: { id: T, config: {}, format: { config: {} } },
   };
 }
@@ -43,7 +60,15 @@ describe('GW% / OGW%', () => {
     // 66.7% / 33.3%. Reading the wrong column makes these identical.
     const service = new LeaderboardService(
       prismaWith(
-        [{ player1Id: 'a', player2Id: 'b', winnerId: 'a', player1Score: 2, player2Score: 1 }],
+        [
+          {
+            player1Id: 'a',
+            player2Id: 'b',
+            winnerId: 'a',
+            player1Score: 2,
+            player2Score: 1,
+          },
+        ],
         [participant('a', 3, 1, 0), participant('b', 0, 0, 1)],
       ),
     );
@@ -63,7 +88,15 @@ describe('GW% / OGW%', () => {
     // worth the 33% floor, exactly as OMW treats a winless opponent.
     const service = new LeaderboardService(
       prismaWith(
-        [{ player1Id: 'a', player2Id: 'b', winnerId: 'a', player1Score: 2, player2Score: 0 }],
+        [
+          {
+            player1Id: 'a',
+            player2Id: 'b',
+            winnerId: 'a',
+            player1Score: 2,
+            player2Score: 0,
+          },
+        ],
         [participant('a', 3, 1, 0), participant('b', 0, 0, 1)],
       ),
     );
@@ -84,8 +117,20 @@ describe('GW% / OGW%', () => {
     // Rafael Costa, 3 points, gw=0.000).
     const service = new LeaderboardService(
       prismaWith(
-        [{ player1Id: 'a', player2Id: 'b', winnerId: 'a', player1Score: 2, player2Score: 1 }],
-        [participant('a', 3, 1, 0), participant('b', 0, 0, 1), participant('c', 3, 1, 0)],
+        [
+          {
+            player1Id: 'a',
+            player2Id: 'b',
+            winnerId: 'a',
+            player1Score: 2,
+            player2Score: 1,
+          },
+        ],
+        [
+          participant('a', 3, 1, 0),
+          participant('b', 0, 0, 1),
+          participant('c', 3, 1, 0),
+        ],
         [{ winnerId: 'c', player1Score: 1, player2Score: 0 }],
       ),
     );
@@ -107,8 +152,20 @@ describe('GW% / OGW%', () => {
     const service = new LeaderboardService(
       prismaWith(
         [
-          { player1Id: 'a', player2Id: 'x', winnerId: 'a', player1Score: 2, player2Score: 0 },
-          { player1Id: 'b', player2Id: 'y', winnerId: 'b', player1Score: 2, player2Score: 1 },
+          {
+            player1Id: 'a',
+            player2Id: 'x',
+            winnerId: 'a',
+            player1Score: 2,
+            player2Score: 0,
+          },
+          {
+            player1Id: 'b',
+            player2Id: 'y',
+            winnerId: 'b',
+            player1Score: 2,
+            player2Score: 1,
+          },
         ],
         [
           participant('b', 3, 1, 0),
@@ -136,8 +193,20 @@ describe('GW% / OGW%', () => {
     // two different ways.
     const service = new LeaderboardService(
       prismaWith(
-        [{ player1Id: 'a', player2Id: 'b', winnerId: null, player1Score: 1, player2Score: 1 }],
-        [participant('a', 3, 1, 0), participant('b', 3, 1, 0), participant('c', 0, 0, 1)],
+        [
+          {
+            player1Id: 'a',
+            player2Id: 'b',
+            winnerId: null,
+            player1Score: 1,
+            player2Score: 1,
+          },
+        ],
+        [
+          participant('a', 3, 1, 0),
+          participant('b', 3, 1, 0),
+          participant('c', 0, 0, 1),
+        ],
       ),
     );
 
@@ -161,11 +230,11 @@ describe('GW% / OGW%', () => {
       ogw: 0.5,
     };
 
-    const decided = service.tiebreakCriterion(
-      base,
-      { ...base, gw: 0.6 },
-      ['omw', 'gw', 'oomw'],
-    );
+    const decided = service.tiebreakCriterion(base, { ...base, gw: 0.6 }, [
+      'omw',
+      'gw',
+      'oomw',
+    ]);
     expect(decided).toBe('gw');
   });
 });

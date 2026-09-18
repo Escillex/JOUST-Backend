@@ -138,14 +138,13 @@ export class DevService {
     };
   }
 
-  /** Refuses unless bulk guest creation has been explicitly allowed in settings.
+  /** Refuses unless participant addition has been explicitly allowed in settings.
    *  Enforced here rather than only in the UI — a hidden button is not a
    *  restriction, and this endpoint mints real user rows in a loop. */
   private async assertBulkGuestsAllowed() {
     if (!(await this.settings.getBoolean('DEV_BULK_GUESTS'))) {
       throw new ForbiddenException(
-        'Bulk guest generation is disabled. Enable it in Admin → Dev Tools before using it. ' +
-          'Adding guests individually to a roster is a normal organizer action and is unaffected.',
+        'Bulk guest creation is disabled. Enable "Allow Bulk Guest Creation" in Admin → Settings before using it.',
       );
     }
   }

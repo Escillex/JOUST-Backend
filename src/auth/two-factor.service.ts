@@ -297,10 +297,20 @@ export class TwoFactorService {
     const rows = await this.prisma.trustedDevice.findMany({
       where: { userId, expiresAt: { gt: new Date() } },
       orderBy: { lastUsedAt: 'desc' },
-      select: { id: true, userAgent: true, createdAt: true, lastUsedAt: true, expiresAt: true, tokenHash: true },
+      select: {
+        id: true,
+        userAgent: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        tokenHash: true,
+      },
     });
     const current = currentToken ? this.hashDeviceToken(currentToken) : null;
-    return rows.map(({ tokenHash, ...d }) => ({ ...d, current: tokenHash === current }));
+    return rows.map(({ tokenHash, ...d }) => ({
+      ...d,
+      current: tokenHash === current,
+    }));
   }
 
   /** Forget one remembered browser. Scoped to the owner, so an id from

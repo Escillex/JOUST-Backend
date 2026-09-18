@@ -74,15 +74,24 @@ export class GoogleAuthService {
    *  design — Google's script needs it in the browser. */
   async providers() {
     const c = await this.config();
-    return { google: { enabled: c.enabled, clientId: c.enabled ? c.clientId : null } };
+    return {
+      google: { enabled: c.enabled, clientId: c.enabled ? c.clientId : null },
+    };
   }
 
   /** Network call to Google's keys; separated so tests can substitute it. */
-  async verifyCredential(credential: string, clientId: string): Promise<GoogleIdentity> {
+  async verifyCredential(
+    credential: string,
+    clientId: string,
+  ): Promise<GoogleIdentity> {
     const client = new OAuth2Client(clientId);
-    const ticket = await client.verifyIdToken({ idToken: credential, audience: clientId });
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: clientId,
+    });
     const p = ticket.getPayload();
-    if (!p?.sub || !p.email) throw new Error('Google token carried no identity');
+    if (!p?.sub || !p.email)
+      throw new Error('Google token carried no identity');
     return {
       sub: p.sub,
       email: p.email,
@@ -107,11 +116,15 @@ export class GoogleAuthService {
     try {
       id = await this.verifyCredential(credential, c.clientId);
     } catch {
-      throw new UnauthorizedException('Google could not confirm that sign-in. Please try again.');
+      throw new UnauthorizedException(
+        'Google could not confirm that sign-in. Please try again.',
+      );
     }
 
     if (!id.emailVerified) {
-      throw new UnauthorizedException("That Google account's email address is not verified.");
+      throw new UnauthorizedException(
+        "That Google account's email address is not verified.",
+      );
     }
     if (c.allowedDomain && (id.hd ?? '').toLowerCase() !== c.allowedDomain) {
       throw new ForbiddenException({
@@ -125,13 +138,18 @@ export class GoogleAuthService {
   async signIn(credential: string, res: Response) {
     const id = await this.identify(credential);
 
-    const linked = await this.prisma.user.findUnique({ where: { googleId: id.sub } });
+    const linked = await this.prisma.user.findUnique({
+      where: { googleId: id.sub },
+    });
     if (linked) {
       return { ...(await this.auth.startSession(linked, res)), via: 'google' };
     }
 
     const byEmail = await this.prisma.user.findFirst({
-      where: { email: { equals: id.email, mode: 'insensitive' }, isGuest: false },
+      where: {
+        email: { equals: id.email, mode: 'insensitive' },
+        isGuest: false,
+      },
     });
     if (byEmail) {
       if (byEmail.hashedPassword) {
@@ -143,9 +161,17 @@ export class GoogleAuthService {
       }
       const user = await this.prisma.user.update({
         where: { id: byEmail.id },
-        data: { googleId: id.sub, emailVerified: true, emailVerifiedAt: new Date() },
+        data: {
+          googleId: id.sub,
+          emailVerified: true,
+          emailVerifiedAt: new Date(),
+        },
       });
-      return { ...(await this.auth.startSession(user, res)), via: 'google', linked: true };
+      return {
+        ...(await this.auth.startSession(user, res)),
+        via: 'google',
+        linked: true,
+      };
     }
 
     const username = await this.uniqueUsername(id.email);
@@ -163,21 +189,31 @@ export class GoogleAuthService {
         // one later from Edit Profile.
       },
     });
-    return { ...(await this.auth.startSession(user, res)), via: 'google', created: true };
+    return {
+      ...(await this.auth.startSession(user, res)),
+      via: 'google',
+      created: true,
+    };
   }
 
   /** Connect Google to the signed-in account — the path the refusal above
    *  points password users to. */
   async link(userId: string, credential: string) {
     const id = await this.identify(credential);
-    const holder = await this.prisma.user.findUnique({ where: { googleId: id.sub } });
+    const holder = await this.prisma.user.findUnique({
+      where: { googleId: id.sub },
+    });
     if (holder && holder.id !== userId) {
       throw new ConflictException({
         code: 'GOOGLE_ALREADY_LINKED',
-        message: 'That Google account is already connected to a different account.',
+        message:
+          'That Google account is already connected to a different account.',
       });
     }
-    await this.prisma.user.update({ where: { id: userId }, data: { googleId: id.sub } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { googleId: id.sub },
+    });
     return { googleLinked: true, email: id.email };
   }
 
@@ -193,7 +229,10 @@ export class GoogleAuthService {
         'Set a password before disconnecting Google — otherwise there would be no way to sign in.',
       );
     }
-    await this.prisma.user.update({ where: { id: userId }, data: { googleId: null } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { googleId: null },
+    });
     return { googleLinked: false };
   }
 
@@ -203,7 +242,10 @@ export class GoogleAuthService {
    * case-insensitively — "Paul" and "paul" are the same person here.
    */
   private async uniqueUsername(email: string): Promise<string> {
-    let base = email.split('@')[0].replace(/[^A-Za-z0-9._-]/g, '').slice(0, 16);
+    let base = email
+      .split('@')[0]
+      .replace(/[^A-Za-z0-9._-]/g, '')
+      .slice(0, 16);
     if (base.length < 3) base = `${base}player`.slice(0, 16);
     for (let n = 1; ; n++) {
       const candidate = n === 1 ? base : `${base}${n}`.slice(0, 20);

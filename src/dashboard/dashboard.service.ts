@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { LeaderboardService } from '../leaderboard/leaderboard.service';
 import { roundText } from '../audit/audit.decorator';
-import { MatchStatus, ParticipantStatus, TournamentStatus } from '@prisma/client';
+import {
+  MatchStatus,
+  ParticipantStatus,
+  TournamentStatus,
+} from '@prisma/client';
 
 /**
  * Everything the signed-in home page draws, in one response.
@@ -67,7 +71,11 @@ export class DashboardService {
   ) {}
 
   /** Runs a section, and swallows its failure into a fallback. */
-  private async safe<T>(label: string, run: () => Promise<T>, fallback: T): Promise<T> {
+  private async safe<T>(
+    label: string,
+    run: () => Promise<T>,
+    fallback: T,
+  ): Promise<T> {
     try {
       return await run();
     } catch (err) {
@@ -96,7 +104,15 @@ export class DashboardService {
         this.safe('store', () => this.store(), { items: 0, featured: null }),
       ]);
 
-    return { entries, openToJoin, record, boards, collection, community, store };
+    return {
+      entries,
+      openToJoin,
+      record,
+      boards,
+      collection,
+      community,
+      store,
+    };
   }
 
   /**
@@ -137,7 +153,9 @@ export class DashboardService {
     // Standings are computed per tournament from the same per-participant stats
     // the standings table reads, so a lane can never disagree with the page it
     // links to. Dense ranking, matching the leaderboard's 2026-09-16 change.
-    const positions = await this.positions(participations.map((p) => p.tournamentId));
+    const positions = await this.positions(
+      participations.map((p) => p.tournamentId),
+    );
 
     return participations
       .map((p): DashboardEntry => {
@@ -145,7 +163,11 @@ export class DashboardService {
         const round = t.rounds[0] ?? null;
         const match = round?.matches[0] ?? null;
         const amPlayer1 = match?.player1Id === userId;
-        const other = match ? (amPlayer1 ? match.player2 : match.player1) : null;
+        const other = match
+          ? amPlayer1
+            ? match.player2
+            : match.player1
+          : null;
 
         return {
           id: t.id,
@@ -157,7 +179,9 @@ export class DashboardService {
           placement: p.placement,
           fieldSize: t._count.participants,
           maxPlayers: t.maxPlayers,
-          round: round ? { number: round.roundNumber, label: roundText(round.roundNumber) } : null,
+          round: round
+            ? { number: round.roundNumber, label: roundText(round.roundNumber) }
+            : null,
           myMatch: match
             ? {
                 id: match.id,
@@ -165,7 +189,9 @@ export class DashboardService {
                 isBye: match.isBye,
                 opponent: other ?? null,
                 myScore: amPlayer1 ? match.player1Score : match.player2Score,
-                opponentScore: amPlayer1 ? match.player2Score : match.player1Score,
+                opponentScore: amPlayer1
+                  ? match.player2Score
+                  : match.player1Score,
               }
             : null,
           standing: p.stats
@@ -184,9 +210,11 @@ export class DashboardService {
         const act = (e: DashboardEntry) =>
           e.myMatch && e.myMatch.status !== MatchStatus.COMPLETED ? 0 : 1;
         if (act(a) !== act(b)) return act(a) - act(b);
-        const live = (e: DashboardEntry) => (e.status === TournamentStatus.ONGOING ? 0 : 1);
+        const live = (e: DashboardEntry) =>
+          e.status === TournamentStatus.ONGOING ? 0 : 1;
         if (live(a) !== live(b)) return live(a) - live(b);
-        const when = (e: DashboardEntry) => (e.date ? new Date(e.date).getTime() : Infinity);
+        const when = (e: DashboardEntry) =>
+          e.date ? new Date(e.date).getTime() : Infinity;
         return when(a) - when(b);
       });
   }
@@ -205,13 +233,22 @@ export class DashboardService {
   }
 
   /** participantId -> dense rank by points within its tournament. */
-  private async positions(tournamentIds: string[]): Promise<Map<string, number>> {
+  private async positions(
+    tournamentIds: string[],
+  ): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (tournamentIds.length === 0) return out;
 
     const rows = await this.prisma.tournamentParticipant.findMany({
-      where: { tournamentId: { in: tournamentIds }, status: ParticipantStatus.ACTIVE },
-      select: { id: true, tournamentId: true, stats: { select: { points: true } } },
+      where: {
+        tournamentId: { in: tournamentIds },
+        status: ParticipantStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        tournamentId: true,
+        stats: { select: { points: true } },
+      },
     });
 
     const byTournament = new Map<string, { id: string; points: number }[]>();
@@ -295,7 +332,10 @@ export class DashboardService {
           myRank: me?.rank ?? null,
           myPoints: me?.points ?? null,
           leader: leader
-            ? { name: leader.displayName || leader.username, points: leader.points }
+            ? {
+                name: leader.displayName || leader.username,
+                points: leader.points,
+              }
             : null,
         };
       }),

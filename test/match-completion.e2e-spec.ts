@@ -46,8 +46,12 @@ describe('no match completion bypasses the helper', () => {
         // narrow to the update shape by requiring `data:` on the same line or the
         // literal to sit in an object that also names a writable column.
         if (/status:\s*MatchStatus\.COMPLETED/.test(line)) {
-          const context = src.split('\n').slice(Math.max(0, i - 6), i + 1).join('\n');
-          const isWrite = /\bdata:\s*\{[^}]*$/m.test(context) || /\bdata:\s*\{/.test(line);
+          const context = src
+            .split('\n')
+            .slice(Math.max(0, i - 6), i + 1)
+            .join('\n');
+          const isWrite =
+            /\bdata:\s*\{[^}]*$/m.test(context) || /\bdata:\s*\{/.test(line);
           if (isWrite) offenders.push(`${file.replace(SRC, 'src')}:${i + 1}`);
         }
       });

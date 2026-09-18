@@ -14,10 +14,22 @@ import {
   NotificationType,
 } from '@prisma/client';
 import { NotificationService } from 'src/notification/notification.service';
-import { effectiveRawConfig, resolveConfig, systemAllowsDraw, winsNeeded, type ByeResult, systemOf } from '../../Formats/format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+  systemAllowsDraw,
+  winsNeeded,
+  type ByeResult,
+  systemOf,
+} from '../../Formats/format-config.helper';
 import { completedMatchData } from './match-completion.helper';
 import { checkTournamentAccess } from '../../guards/tournament-access.util';
+import {
+  resolveScoreActor,
+  type ScoreActor,
+} from './scoring-permission.helper';
 import type { JwtPayload } from '../../guards/jwt-auth.guard';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
 
 @Injectable()
 export class MatchService {
@@ -26,6 +38,7 @@ export class MatchService {
     @Inject(forwardRef(() => FormatsService))
     private formatsService: FormatsService,
     private notifications: NotificationService,
+    private realtime: RealtimeGateway,
   ) {}
 
   private async updateMatchStats(
@@ -52,7 +65,9 @@ export class MatchService {
           round: {
             select: {
               tournamentId: true,
-              tournament: { select: { system: true, format: { select: { system: true } } } },
+              tournament: {
+                select: { system: true, format: { select: { system: true } } },
+              },
             },
           },
           player1: { select: { id: true, isGuest: true } },
@@ -391,7 +406,7 @@ export class MatchService {
    * the next slot forever, and in double elimination silently drops player 1
    * into losers with nobody advancing to winners.
    */
-  async reportDraw(matchId: string) {
+  async reportDraw(matchId: string, user?: JwtPayload) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
@@ -411,6 +426,10 @@ export class MatchService {
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
     if (match.isBye) throw new BadRequestException('Cannot draw a bye match');
+    if (match.reportedWinnerId && !match.winnerId)
+      throw new BadRequestException(
+        'This match is awaiting organizer verification of its result',
+      );
 
     const rawConfig = effectiveRawConfig(match.round.tournament);
     const config = resolveConfig(rawConfig, match.phase);
@@ -437,6 +456,21 @@ export class MatchService {
       );
     }
 
+    // Staff may record a draw on the spot. A player of the match may not: a
+    // draw carries no winner to defer into reportedWinnerId, so there would be
+    // nothing for an organizer to verify — it must be confirmed by staff.
+    const actor: ScoreActor = await resolveScoreActor(
+      this.prisma,
+      match,
+      user,
+      config.scoreSubmissionRule,
+    );
+    if (actor === 'PARTICIPANT') {
+      throw new ForbiddenException(
+        'A draw must be confirmed by an organizer',
+      );
+    }
+
     await this.prisma.match.update({
       where: { id: matchId },
       data: completedMatchData({ winnerId: null }),
@@ -450,6 +484,8 @@ export class MatchService {
 
     await this.formatsService.handleMatchCompletion(matchId);
 
+    this.realtime.emitTournamentUpdated(match.round.tournamentId);
+
     return {
       matchComplete: true,
       draw: true,
@@ -458,6 +494,164 @@ export class MatchService {
         player2: match.player2Score,
       },
     };
+  }
+  // ─── SELF-REPORT AND VERIFY (PLAYER SCORING) ────────────────
+
+  async selfReportResult(
+    matchId: string,
+    winnerId: string | undefined,
+    user: JwtPayload,
+  ) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: { round: { include: { tournament: true } } },
+    });
+    if (!match) throw new NotFoundException('Match not found');
+    if (match.status === MatchStatus.COMPLETED)
+      throw new BadRequestException('Match already completed');
+    if (match.player1Id !== user.id && match.player2Id !== user.id)
+      throw new ForbiddenException(
+        'Only a player in this match may report a score',
+      );
+    if (winnerId) {
+      const validPlayers = [match.player1Id, match.player2Id].filter(Boolean);
+      if (!validPlayers.includes(winnerId))
+        throw new BadRequestException('Winner must be in match');
+    }
+
+    const { scoreSubmissionRule } = resolveConfig(
+      effectiveRawConfig(match.round.tournament),
+      match.phase,
+    );
+    if (scoreSubmissionRule === 'STAFF_ONLY') {
+      throw new ForbiddenException(
+        'An organizer must submit scores in this tournament',
+      );
+    }
+
+    await this.prisma.match.update({
+      where: { id: matchId },
+      data: { reportedWinnerId: winnerId || null },
+    });
+
+    if (winnerId) {
+      await this.notifications.notifyTournamentOrganizers(
+        match.round.tournamentId,
+        {
+          type: NotificationType.SCORE_PENDING,
+          title: 'A player-scored result awaits your verification',
+          body: 'Open the match to review and verify the reported winner.',
+          link: `/tournaments/${match.round.tournamentId}/bracket`,
+        },
+      );
+    }
+
+    this.realtime.emitTournamentUpdated(match.round.tournamentId);
+
+    return { message: 'Score reported successfully, pending verification' };
+  }
+
+  async verifyResult(matchId: string) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+    });
+    if (!match) throw new NotFoundException('Match not found');
+    if (!match.reportedWinnerId)
+      throw new BadRequestException('No reported score to verify');
+
+    // This routes the verify step directly into the regular submitResult,
+    // which advances the bracket and finalizes stats. It will also automatically
+    // clear the reportedWinnerId because we updated completedMatchData.
+    return this.submitResult(matchId, match.reportedWinnerId);
+  }
+
+  async rejectReportedResult(matchId: string) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: { round: true },
+    });
+    if (!match) throw new NotFoundException('Match not found');
+    if (!match.reportedWinnerId)
+      throw new BadRequestException('No reported score to reject');
+    if (match.status === MatchStatus.COMPLETED)
+      throw new BadRequestException('Match already completed');
+
+    await this.prisma.match.update({
+      where: { id: matchId },
+      data: { reportedWinnerId: null },
+    });
+
+    await this.notifyPlayers(
+      match,
+      NotificationType.MATCH_RESULT,
+      'The reported score was rejected by the organizer. Please re-enter the correct result.',
+    );
+
+    this.realtime.emitTournamentUpdated(match.round.tournamentId);
+
+    return { message: 'Reported score rejected' };
+  }
+
+  async resetMatch(matchId: string) {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        round: {
+          include: {
+            tournament: {
+              include: { format: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!match) throw new NotFoundException('Match not found');
+    if (match.status !== MatchStatus.COMPLETED)
+      throw new BadRequestException('Only completed matches can be reset');
+
+    const rawConfig = effectiveRawConfig(match.round.tournament);
+    const config = resolveConfig(rawConfig, match.phase);
+
+    // Roll back stats awarded for this match
+    await this.updateMatchStats(matchId, {
+      pointsForWin: -config.swissPointsForWin,
+      pointsForDraw: -config.swissPointsForDraw,
+      pointsForLoss: -config.swissPointsForLoss,
+    });
+
+    // Revert match status and clear winner/timestamps
+    const reset = await this.prisma.match.update({
+      where: { id: matchId },
+      data: {
+        status: MatchStatus.ONGOING,
+        winnerId: null,
+        completedAt: null,
+        reportedWinnerId: null,
+      },
+    });
+
+    // If tournament was marked COMPLETED, reopen it as ONGOING
+    if (match.round.tournament.status === 'COMPLETED') {
+      await this.prisma.tournament.update({
+        where: { id: match.round.tournamentId },
+        data: {
+          status: 'ONGOING',
+          completedAt: null,
+          winnerId: null,
+        },
+      });
+    }
+
+    await this.notifyPlayers(
+      match,
+      NotificationType.MATCH_RESULT,
+      'Your match score has been reset by the organizer.',
+    );
+
+    this.realtime.emitTournamentUpdated(match.round.tournamentId);
+
+    return { message: 'Match score reset successfully', match: reset };
   }
 
   async submitResult(matchId: string, winnerId?: string) {
@@ -555,6 +749,8 @@ export class MatchService {
 
     await this.formatsService.handleMatchCompletion(matchId);
 
+    this.realtime.emitTournamentUpdated(match.round.tournament.id);
+
     return {
       message: 'Result submitted',
       match: completed,
@@ -579,8 +775,19 @@ export class MatchService {
    *   winsNeeded = 2
    *   Game 1 → p1 wins → score 1-0  (match ongoing)
    *   Game 2 → p1 wins → score 2-0  (match complete, p1 wins)
+   *
+   * Authorization: the caller is resolved to STAFF (always allowed, result
+   * final) or PARTICIPANT (a player of the match; only allowed when the
+   * tournament's scoreSubmissionRule allows player scoring). A participant's
+   * game that DECIDES the series is deferred instead of completed: the match
+   * stays ONGOING with reportedWinnerId set, and an organizer's
+   * POST /matches/:id/verify finalizes it.
    */
-  async reportGameResult(matchId: string, gameWinnerId: string) {
+  async reportGameResult(
+    matchId: string,
+    gameWinnerId: string,
+    user?: JwtPayload,
+  ) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
@@ -604,6 +811,13 @@ export class MatchService {
         'Cannot report game results for a bye match',
       );
 
+    // A player-driven result already sits awaiting review — the series is
+    // decided and nothing more may be recorded until staff verdict it.
+    if (match.reportedWinnerId && !match.winnerId)
+      throw new BadRequestException(
+        'This match is awaiting organizer verification of its result',
+      );
+
     const isP1 = gameWinnerId === match.player1Id;
     const isP2 = gameWinnerId === match.player2Id;
     if (!isP1 && !isP2)
@@ -615,6 +829,15 @@ export class MatchService {
     const config = resolveConfig(rawConfig, match.phase);
     const { bestOf } = config;
     const winsReq = winsNeeded(bestOf);
+
+    // Whoever this caller is, only staff submissions finalize on the spot; a
+    // participant triggering the deciding game defers (see the block below).
+    const actor: ScoreActor = await resolveScoreActor(
+      this.prisma,
+      match,
+      user,
+      config.scoreSubmissionRule,
+    );
 
     // Increment the winning player's game score
     const updated = await this.prisma.match.update({
@@ -633,6 +856,38 @@ export class MatchService {
       const matchWinnerId =
         p1Wins >= winsReq ? match.player1Id! : match.player2Id!;
 
+      if (actor === 'PARTICIPANT') {
+        // Player-driven series decision → pending verification, not completed.
+        // The score stands and the bracket holds; an organizer's verifyResult
+        // routes this winner through submitResult's normal finalize path.
+        await this.prisma.match.update({
+          where: { id: matchId },
+          data: { reportedWinnerId: matchWinnerId },
+        });
+
+        await this.notifications.notifyTournamentOrganizers(
+          match.round.tournamentId,
+          {
+            type: NotificationType.SCORE_PENDING,
+            title: 'A player-scored result awaits your verification',
+            body: 'Open the match to review and verify the reported winner.',
+            link: `/tournaments/${match.round.tournamentId}/bracket`,
+          },
+        );
+
+        this.realtime.emitTournamentUpdated(match.round.tournamentId);
+
+        return {
+          matchComplete: false,
+          pendingVerification: true,
+          winnerId: matchWinnerId,
+          reportedWinnerId: matchWinnerId,
+          score: { player1: p1Wins, player2: p2Wins },
+          bestOf,
+          winsNeeded: winsReq,
+        };
+      }
+
       await this.prisma.match.update({
         where: { id: matchId },
         data: completedMatchData({ winnerId: matchWinnerId }),
@@ -645,6 +900,8 @@ export class MatchService {
       });
 
       await this.formatsService.handleMatchCompletion(matchId);
+
+      this.realtime.emitTournamentUpdated(match.round.tournamentId);
 
       return {
         matchComplete: true,
@@ -908,57 +1165,37 @@ export class MatchService {
   }
 
   /**
-   * Organizer-driven "start this match": PENDING → ONGOING, and the single point at
-   * which the two players are told to come to the table (MATCH_READY). Nothing
-   * auto-activates any more, so this is how every real match becomes playable, in
-   * every format. Byes/walkovers never reach here — they resolve automatically and
-   * have no game to start. Idempotent on an already-started match.
-   */
-  /**
-   * PENDING → ONGOING.
+   * PENDING → ONGOING, and the single point at which the two players are told
+   * to come to the table (MATCH_READY). Nothing auto-activates any more, so this
+   * is how every real match becomes playable, in every format. Byes/walkovers
+   * never reach here — they resolve automatically and have no game to start.
+   * Idempotent on an already-started match.
    *
-   * `requesterId` is supplied when the caller is not known to be staff. Who may
-   * do this is a per-tournament rule (`matchStartWho`), defaulting to the two
-   * players plus staff: organizer-only start suits a supervised venue and gets
-   * in the way at a casual one, where the players are at the table and the
-   * organizer is not. Enforced here rather than in the guard for the same
+   * Who may call it is a per-tournament rule (`matchStartWho`), defaulting to
+   * the two players plus staff: organizer-only start suits a supervised venue
+   * and gets in the way at a casual one, where the players are at the table and
+   * the organizer is not. Decided here rather than in a guard for the same
    * reason player self-scoring is — the answer depends on the tournament's
    * configuration, which a guard does not read.
    */
   async startMatch(matchId: string, user?: JwtPayload) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      include: { round: { select: { tournamentId: true } } },
+      include: {
+        round: {
+          include: {
+            tournament: {
+              select: {
+                id: true,
+                config: true,
+                format: { select: { config: true } },
+              },
+            },
+          },
+        },
+      },
     });
     if (!match) throw new NotFoundException('Match not found');
-
-    if (user) {
-      const isStaff =
-        (await checkTournamentAccess(
-          this.prisma,
-          match.round.tournamentId,
-          user,
-        )) === 'ALLOWED';
-
-      if (!isStaff) {
-        if (match.player1Id !== user.id && match.player2Id !== user.id)
-          throw new ForbiddenException(
-            'Only a player in this match may start it',
-          );
-
-        const tournament = await this.prisma.tournament.findUnique({
-          where: { id: match.round.tournamentId },
-        });
-        const { matchStartWho } = resolveConfig(
-          effectiveRawConfig(tournament),
-          match.phase ?? undefined,
-        );
-        if (matchStartWho !== 'STAFF_AND_PARTICIPANTS')
-          throw new ForbiddenException(
-            'An organizer starts each match in this tournament',
-          );
-      }
-    }
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
     if (match.isBye)
@@ -967,6 +1204,29 @@ export class MatchService {
       throw new BadRequestException(
         'Both players must be determined before the match can start',
       );
+
+    const tournament = match.round?.tournament;
+    if (!tournament) throw new NotFoundException('Match has no tournament');
+    const { matchStartWho } = resolveConfig(
+      effectiveRawConfig(tournament),
+      match.phase,
+    );
+    const isParticipant =
+      !!user?.id &&
+      (user.id === match.player1Id || user.id === match.player2Id);
+    const isStaff =
+      (await checkTournamentAccess(this.prisma, tournament.id, user)) ===
+      'ALLOWED';
+    if (
+      !isStaff &&
+      !(matchStartWho === 'STAFF_AND_PARTICIPANTS' && isParticipant)
+    ) {
+      throw new ForbiddenException(
+        isParticipant
+          ? 'This tournament restricts starting a match to its organizers'
+          : 'Only a player in this match or the tournament organizers can start it',
+      );
+    }
     if (match.status === MatchStatus.ONGOING) return match; // already started
 
     const updated = await this.prisma.match.update({
@@ -987,6 +1247,8 @@ export class MatchService {
       'Your match is ready',
       'It is your turn to play.',
     );
+
+    this.realtime.emitTournamentUpdated(tournament.id);
 
     return updated;
   }

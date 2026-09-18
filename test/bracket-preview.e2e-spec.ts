@@ -12,6 +12,7 @@ import { RolesGuard } from '../src/guards/roles.guard';
 import { RealtimeGateway } from '../src/realtime/realtime.gateway';
 import { JwtService } from '@nestjs/jwt';
 import { NotificationService } from '../src/notification/notification.service';
+import { SettingsService } from '../src/settings/settings.service';
 import { TournamentStatus, Role } from '@prisma/client';
 
 describe('TournamentController (generate-bracket)', () => {
@@ -64,6 +65,12 @@ describe('TournamentController (generate-bracket)', () => {
           // this suite does not need a database or a socket server.
           provide: NotificationService,
           useValue: { notify: jest.fn(), notifyMany: jest.fn() },
+        },
+        {
+          // TournamentService reads the "Allow Bulk Guest Creation" flag on GET
+          // /tournaments/:id; opened so getTournament keeps resolving.
+          provide: SettingsService,
+          useValue: { getBoolean: jest.fn().mockResolvedValue(true) },
         },
         {
           // The controller's public GET now carries OptionalJwtAuthGuard so it can

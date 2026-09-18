@@ -72,7 +72,10 @@ export class HomeService {
     const data: Prisma.HomeBlockUncheckedUpdateInput = {};
     if (dto.visible !== undefined) data.visible = dto.visible;
     if (dto.content !== undefined) {
-      data.content = this.sanitizeContent(key, dto.content) as Prisma.InputJsonValue;
+      data.content = this.sanitizeContent(
+        key,
+        dto.content,
+      ) as Prisma.InputJsonValue;
     }
 
     const fallback = HOME_DEFAULTS[key];
@@ -146,7 +149,11 @@ export class HomeService {
     content: Record<string, unknown>,
   ): HomeBlockContent {
     if (key === 'hero') return this.sanitizeHero(content);
-    return { label: this.text(content.label, 40) || HOME_DEFAULTS[key].content.label as string };
+    return {
+      label:
+        this.text(content.label, 40) ||
+        (HOME_DEFAULTS[key].content.label as string),
+    };
   }
 
   private sanitizeHero(content: Record<string, unknown>): HomeBlockContent {
@@ -167,7 +174,9 @@ export class HomeService {
           photoDesc: this.text(s.photoDesc, 80),
         };
       })
-      .filter((s): s is { image: string; title: string; photoDesc: string } => !!s);
+      .filter(
+        (s): s is { image: string; title: string; photoDesc: string } => !!s,
+      );
 
     const storeButtons = buttonsIn
       .slice(0, MAX_STORE_BUTTONS)

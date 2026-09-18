@@ -14,10 +14,18 @@ import { DevController } from '../src/dev/dev.controller';
 import { GameController } from '../src/game/game.controller';
 import { TournamentFormatController } from '../src/tournament-format/tournament-format.controller';
 import { StoreController } from '../src/store/store.controller';
-import { AwardCatalogController, AwardGrantController } from '../src/award/award.controller';
+import {
+  AwardCatalogController,
+  AwardGrantController,
+} from '../src/award/award.controller';
 import { SettingsController } from '../src/settings/settings.controller';
 import { BackupController } from '../src/backup/backup.controller';
-import { BuildController, GalleryController, ModerationController, ReportController } from '../src/content/content.controller';
+import {
+  BuildController,
+  GalleryController,
+  ModerationController,
+  ReportController,
+} from '../src/content/content.controller';
 import { HomeController } from '../src/home/home.controller';
 
 /**
@@ -45,31 +53,49 @@ const EXEMPT: Record<string, string> = {
     'the same, with a recovery code instead of the inbox',
   'AuthController.forcedPasswordChange':
     'the last step of a sign-in — a user replacing a password set for them. The ADMIN action that caused it (creating the account, or resetting the password) is what the log records.',
-  'AuthController.linkGoogle': "a user managing their own account",
-  'AuthController.unlinkGoogle': "a user managing their own account",
-  'AuthController.updateMe': "a user editing their own profile",
-  'AuthController.sendAccountCode': "a user asking for a code to confirm a change to their own account",
-  'AuthController.changePassword': "a user changing their own password, with proof",
-  'AuthController.signOutEverywhere': "a user ending their own sessions",
-  'AuthController.changeEmail': "a user changing their own email, with proof",
-  'AuthController.newRecoveryCodes': "a user replacing their own recovery codes, with proof",
-  'AuthController.forgetDevice': "a user forgetting one of their own remembered browsers",
+  'AuthController.linkGoogle': 'a user managing their own account',
+  'AuthController.unlinkGoogle': 'a user managing their own account',
+  'AuthController.updateMe': 'a user editing their own profile',
+  'AuthController.sendAccountCode':
+    'a user asking for a code to confirm a change to their own account',
+  'AuthController.changePassword':
+    'a user changing their own password, with proof',
+  'AuthController.signOutEverywhere': 'a user ending their own sessions',
+  'AuthController.changeEmail': 'a user changing their own email, with proof',
+  'AuthController.newRecoveryCodes':
+    'a user replacing their own recovery codes, with proof',
+  'AuthController.forgetDevice':
+    'a user forgetting one of their own remembered browsers',
   'AuthController.deleteMe':
     'recorded by hand in AccountService.deleteSelf AFTER the account is gone — the interceptor would attribute it to a user that no longer exists',
-  'BuildController.submit': "a player submitting their own build",
-  'BuildController.withdraw': "a player withdrawing their own build",
-  'GalleryController.upsert': "a user editing their own gallery",
-  'GalleryController.remove': "a user deleting their own gallery image",
-  'ReportController.report': "recorded by hand only when filed by staff (a removal request)",
+  'BuildController.submit': 'a player submitting their own build',
+  'BuildController.withdraw': 'a player withdrawing their own build',
+  'GalleryController.upsert': 'a user editing their own gallery',
+  'GalleryController.remove': 'a user deleting their own gallery image',
+  'ReportController.report':
+    'recorded by hand only when filed by staff (a removal request)',
 };
 
 describe('audit coverage', () => {
   const controllers = [
-    TournamentController, ParticipantController, MatchController, OrganizerController,
-    InvitationController, AuthController, DevController, GameController,
-    TournamentFormatController, StoreController, AwardCatalogController, AwardGrantController,
-    SettingsController, BackupController,
-    BuildController, GalleryController, ReportController, ModerationController,
+    TournamentController,
+    ParticipantController,
+    MatchController,
+    OrganizerController,
+    InvitationController,
+    AuthController,
+    DevController,
+    GameController,
+    TournamentFormatController,
+    StoreController,
+    AwardCatalogController,
+    AwardGrantController,
+    SettingsController,
+    BackupController,
+    BuildController,
+    GalleryController,
+    ReportController,
+    ModerationController,
     HomeController,
   ];
 
@@ -77,24 +103,37 @@ describe('audit coverage', () => {
     const proto = ctrl.prototype as unknown as Record<string, unknown>;
     const writes = Object.getOwnPropertyNames(proto).filter((name) => {
       const fn = proto[name];
-      return typeof fn === 'function' && WRITE.has(Reflect.getMetadata(METHOD_KEY, fn as object));
+      return (
+        typeof fn === 'function' &&
+        WRITE.has(Reflect.getMetadata(METHOD_KEY, fn as object))
+      );
     });
-    it.each(writes)(`${ctrl.name}.%s is audited or explicitly exempt`, (name) => {
-      const key = `${ctrl.name}.${name}`;
-      const spec = Reflect.getMetadata(AUDIT_KEY, proto[name] as object) as AuditSpec | undefined;
-      if (EXEMPT[key]) {
-        expect(spec).toBeUndefined();
-      } else {
-        expect(spec).toBeDefined();
-        expect(spec!.action).toMatch(/^[a-z]+\.[a-z_]+$/);
-      }
-    });
+    it.each(writes)(
+      `${ctrl.name}.%s is audited or explicitly exempt`,
+      (name) => {
+        const key = `${ctrl.name}.${name}`;
+        const spec = Reflect.getMetadata(AUDIT_KEY, proto[name] as object) as
+          | AuditSpec
+          | undefined;
+        if (EXEMPT[key]) {
+          expect(spec).toBeUndefined();
+        } else {
+          expect(spec).toBeDefined();
+          expect(spec!.action).toMatch(/^[a-z]+\.[a-z_]+$/);
+        }
+      },
+    );
   }
 });
 
 function build() {
   const prisma: any = {
-    user: { findUnique: jest.fn(async ({ where }: any) => ({ username: `u-${where.id}`, displayName: `Name ${where.id}` })) },
+    user: {
+      findUnique: jest.fn(async ({ where }: any) => ({
+        username: `u-${where.id}`,
+        displayName: `Name ${where.id}`,
+      })),
+    },
     tournament: { findUnique: jest.fn(async () => ({ name: 'Winter Open' })) },
     match: { findUnique: jest.fn() },
     tournamentOrganizer: { findUnique: jest.fn() },
@@ -109,10 +148,16 @@ describe('what gets written', () => {
   it('stores only whitelisted fields — never a password', async () => {
     const { prisma, audit } = build();
     const spec: AuditSpec = {
-      action: 'user.create', category: AuditCategory.USER, pick: ['username'],
+      action: 'user.create',
+      category: AuditCategory.USER,
+      pick: ['username'],
       describe: (c) => `Created @${String(c.body.username)}`,
     };
-    const body = { username: 'newbie', password: 'hunter22-secret', email: 'x@y.z' };
+    const body = {
+      username: 'newbie',
+      password: 'hunter22-secret',
+      email: 'x@y.z',
+    };
     const prepared = await audit.prepare(spec, actor, {}, body);
     await audit.commit(spec, actor, prepared, {}, body, {});
     const row = prisma.auditLog.create.mock.calls[0][0].data;
@@ -123,81 +168,155 @@ describe('what gets written', () => {
 
   it("records a secret setting's name but never its value", async () => {
     const { prisma, audit } = build();
-    const spec = Reflect.getMetadata(AUDIT_KEY, SettingsController.prototype.update) as AuditSpec;
+    const spec = Reflect.getMetadata(
+      AUDIT_KEY,
+      SettingsController.prototype.update,
+    ) as AuditSpec;
     const body = { name: 'MAIL_PASS', value: 'xsmtpsib-real-key' };
-    await audit.commit(spec, actor, await audit.prepare(spec, actor, {}, body), {}, body, {});
+    await audit.commit(
+      spec,
+      actor,
+      await audit.prepare(spec, actor, {}, body),
+      {},
+      body,
+      {},
+    );
     const row = prisma.auditLog.create.mock.calls[0][0].data;
     expect(JSON.stringify(row)).not.toContain('xsmtpsib-real-key');
     expect(row.summary).toMatch(/MAIL_PASS.*not recorded/);
 
     // ...while an ordinary setting keeps its value, which is the useful part.
     const plain = { name: 'BACKUP_ALLOW_RESTORE', value: 'true' };
-    await audit.commit(spec, actor, await audit.prepare(spec, actor, {}, plain), {}, plain, {});
-    expect(prisma.auditLog.create.mock.calls[1][0].data.summary).toBe('Changed BACKUP_ALLOW_RESTORE to "true"');
+    await audit.commit(
+      spec,
+      actor,
+      await audit.prepare(spec, actor, {}, plain),
+      {},
+      plain,
+      {},
+    );
+    expect(prisma.auditLog.create.mock.calls[1][0].data.summary).toBe(
+      'Changed BACKUP_ALLOW_RESTORE to "true"',
+    );
   });
 
   it('names what it deleted, because names are resolved before the action', async () => {
     const { prisma, audit } = build();
-    const spec = Reflect.getMetadata(AUDIT_KEY, DevController.prototype.deleteTournament) as AuditSpec;
+    const spec = Reflect.getMetadata(
+      AUDIT_KEY,
+      DevController.prototype.deleteTournament,
+    ) as AuditSpec;
     const prepared = await audit.prepare(spec, actor, { id: 't-1' }, {});
     prisma.tournament.findUnique.mockResolvedValue(null); // gone after the handler ran
     await audit.commit(spec, actor, prepared, { id: 't-1' }, {}, {});
     const row = prisma.auditLog.create.mock.calls[0][0].data;
     expect(row.summary).toBe('Deleted tournament "Winter Open"');
-    expect(row).toMatchObject({ tournamentId: 't-1', tournamentName: 'Winter Open', actorName: 'Name admin-1' });
+    expect(row).toMatchObject({
+      tournamentId: 't-1',
+      tournamentName: 'Winter Open',
+      actorName: 'Name admin-1',
+    });
   });
 
   it('says "joined" when a player adds themselves, "added X" when staff do', async () => {
     const { prisma, audit } = build();
-    const spec = Reflect.getMetadata(AUDIT_KEY, ParticipantController.prototype.join) as AuditSpec;
+    const spec = Reflect.getMetadata(
+      AUDIT_KEY,
+      ParticipantController.prototype.join,
+    ) as AuditSpec;
     const self = { userId: 'admin-1' };
-    await audit.commit(spec, actor, await audit.prepare(spec, actor, { tournamentId: 't' }, self), {}, self, {});
+    await audit.commit(
+      spec,
+      actor,
+      await audit.prepare(spec, actor, { tournamentId: 't' }, self),
+      {},
+      self,
+      {},
+    );
     const other = { userId: 'p-9' };
-    await audit.commit(spec, actor, await audit.prepare(spec, actor, { tournamentId: 't' }, other), {}, other, {});
-    expect(prisma.auditLog.create.mock.calls[0][0].data.summary).toBe('Joined "Winter Open"');
-    expect(prisma.auditLog.create.mock.calls[1][0].data.summary).toBe('Added Name p-9 to "Winter Open"');
+    await audit.commit(
+      spec,
+      actor,
+      await audit.prepare(spec, actor, { tournamentId: 't' }, other),
+      {},
+      other,
+      {},
+    );
+    expect(prisma.auditLog.create.mock.calls[0][0].data.summary).toBe(
+      'Joined "Winter Open"',
+    );
+    expect(prisma.auditLog.create.mock.calls[1][0].data.summary).toBe(
+      'Added Name p-9 to "Winter Open"',
+    );
   });
 
   it('never throws — a failed audit write must not fail the action', async () => {
     const { prisma, audit } = build();
     prisma.auditLog.create.mockRejectedValue(new Error('db down'));
     prisma.user.findUnique.mockRejectedValue(new Error('db down'));
-    const spec: AuditSpec = { action: 'x.y', category: AuditCategory.SYSTEM, describe: () => 'x' };
+    const spec: AuditSpec = {
+      action: 'x.y',
+      category: AuditCategory.SYSTEM,
+      describe: () => 'x',
+    };
     const prepared = await audit.prepare(spec, actor, {}, {});
-    await expect(audit.commit(spec, actor, prepared, {}, {}, {})).resolves.toBeUndefined();
+    await expect(
+      audit.commit(spec, actor, prepared, {}, {}, {}),
+    ).resolves.toBeUndefined();
   });
 });
 
 describe('the interceptor', () => {
-  const spec: AuditSpec = { action: 'tournament.start', category: AuditCategory.TOURNAMENT, describe: () => 'Started' };
-  const ctx = (user: unknown) => ({
-    getHandler: () => ({}),
-    getType: () => 'http',
-    switchToHttp: () => ({ getRequest: () => ({ user, params: {}, body: {} }) }),
-  }) as any;
+  const spec: AuditSpec = {
+    action: 'tournament.start',
+    category: AuditCategory.TOURNAMENT,
+    describe: () => 'Started',
+  };
+  const ctx = (user: unknown) =>
+    ({
+      getHandler: () => ({}),
+      getType: () => 'http',
+      switchToHttp: () => ({
+        getRequest: () => ({ user, params: {}, body: {} }),
+      }),
+    }) as any;
   const make = () => {
-    const audit = { prepare: jest.fn(async () => ({})), commit: jest.fn(async () => undefined) };
+    const audit = {
+      prepare: jest.fn(async () => ({})),
+      commit: jest.fn(async () => undefined),
+    };
     const reflector = { get: jest.fn(() => spec) };
-    return { audit, interceptor: new AuditInterceptor(reflector as any, audit as any) };
+    return {
+      audit,
+      interceptor: new AuditInterceptor(reflector as any, audit as any),
+    };
   };
 
   it('records after the action succeeds', async () => {
     const { audit, interceptor } = make();
-    await lastValueFrom(interceptor.intercept(ctx(actor), { handle: () => of({ ok: true }) }));
+    await lastValueFrom(
+      interceptor.intercept(ctx(actor), { handle: () => of({ ok: true }) }),
+    );
     expect(audit.commit).toHaveBeenCalledTimes(1);
   });
 
   it('records nothing when the action fails — the log is of what happened', async () => {
     const { audit, interceptor } = make();
     await expect(
-      lastValueFrom(interceptor.intercept(ctx(actor), { handle: () => throwError(() => new Error('refused')) })),
+      lastValueFrom(
+        interceptor.intercept(ctx(actor), {
+          handle: () => throwError(() => new Error('refused')),
+        }),
+      ),
     ).rejects.toThrow('refused');
     expect(audit.commit).not.toHaveBeenCalled();
   });
 
   it('skips unauthenticated requests — there is no one to attribute them to', async () => {
     const { audit, interceptor } = make();
-    await lastValueFrom(interceptor.intercept(ctx(undefined), { handle: () => of(1) }));
+    await lastValueFrom(
+      interceptor.intercept(ctx(undefined), { handle: () => of(1) }),
+    );
     expect(audit.prepare).not.toHaveBeenCalled();
   });
 });

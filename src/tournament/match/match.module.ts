@@ -4,6 +4,7 @@ import { MatchController } from './match.controller';
 import { PrismaModule } from 'prisma/prisma.module';
 import { FormatsModule } from '../../Formats/formats.module';
 import { TrackerModule } from './tracker/tracker.module';
+import { RealtimeModule } from '../../realtime/realtime.module';
 import { AuthModule } from '../../auth/auth.module';
 import { NotificationModule } from '../../notification/notification.module';
 
@@ -12,6 +13,7 @@ import { NotificationModule } from '../../notification/notification.module';
     PrismaModule,
     forwardRef(() => FormatsModule),
     forwardRef(() => TrackerModule),
+    RealtimeModule,
     // MatchController's writes are now behind JwtAuthGuard, which needs the
     // JwtService that AuthModule exports.
     AuthModule,

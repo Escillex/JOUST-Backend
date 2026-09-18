@@ -34,11 +34,13 @@ import { Response } from 'express';
 import { Role, ParticipantStatus, TournamentStatus } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
-
 /** Trim, cap blank-line runs at one (a bio is a paragraph, not a layout), and
  *  treat an empty result as "no bio". The length rule itself is the DTO's. */
 export function normalizeBio(bio: string): string | null {
-  const clean = bio.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  const clean = bio
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   return clean ? clean.slice(0, BIO_MAX_LENGTH) : null;
 }
 
@@ -248,7 +250,7 @@ export class AuthService {
 
     // Guests have no password to reset and no inbox to reset it from.
     const eligible = !!user && !user.isGuest && !!user.email;
-    if (eligible) await this.twoFactor.issueCode(user!, 'reset');
+    if (eligible) await this.twoFactor.issueCode(user, 'reset');
 
     // The RESPONSE SHAPE has to match too, not just the message. Returning a
     // challenge only for real accounts would make the presence of that field a
@@ -259,7 +261,7 @@ export class AuthService {
       message:
         'If that account exists, a reset code is on its way to its email address.',
       challenge: await this.issueChallenge(
-        eligible ? user!.id : randomUUID(),
+        eligible ? user.id : randomUUID(),
         'reset',
       ),
     };
@@ -368,7 +370,10 @@ export class AuthService {
         });
       }
       const taken = await this.prisma.user.findFirst({
-        where: { id: { not: userId }, email: { equals: email, mode: 'insensitive' } },
+        where: {
+          id: { not: userId },
+          email: { equals: email, mode: 'insensitive' },
+        },
       });
       if (taken) {
         throw new BadRequestException('That email address is already in use.');
@@ -393,7 +398,11 @@ export class AuthService {
         // unverified: the next sign-in under `staff`/`all` enforcement asks for
         // that code, and THAT is where recovery codes finally get minted.
         ...(needsAddress && email
-          ? { email: email.trim().toLowerCase(), emailVerified: false, emailVerifiedAt: null }
+          ? {
+              email: email.trim().toLowerCase(),
+              emailVerified: false,
+              emailVerifiedAt: null,
+            }
           : {}),
       },
     });
@@ -510,10 +519,22 @@ export class AuthService {
    *  (a password change). Sets the cookie and returns the token, so the caller
    *  is not signed out by its own security action. */
   async reissueSession(
-    user: { id: string; email: string | null; roles: Role[]; username: string | null; avatarUrl: string | null },
+    user: {
+      id: string;
+      email: string | null;
+      roles: Role[];
+      username: string | null;
+      avatarUrl: string | null;
+    },
     res: Response,
   ): Promise<string> {
-    const token = await this.generateToken(user.id, user.email, user.roles, user.username, user.avatarUrl);
+    const token = await this.generateToken(
+      user.id,
+      user.email,
+      user.roles,
+      user.username,
+      user.avatarUrl,
+    );
     res.cookie('token', token, sessionCookieOptions(sessionLifetimeMs()));
     return token;
   }
@@ -703,11 +724,16 @@ export class AuthService {
       // The profile address follows the name, as it already did for an admin
       // rename. A self-rename used to keep the old address. Old UUID links
       // still resolve; the old handle link does not.
-      data.slug = await generateUniqueUserSlug(this.prisma, dto.username!, userId);
+      data.slug = await generateUniqueUserSlug(
+        this.prisma,
+        dto.username,
+        userId,
+      );
     }
     // displayName was accepted by the DTO but silently dropped here; the admin
     // path (updateProfile) always saved it. Same rule in both now.
-    if (dto.displayName !== undefined) data.displayName = dto.displayName.trim() || null;
+    if (dto.displayName !== undefined)
+      data.displayName = dto.displayName.trim() || null;
     if (dto.bio !== undefined) data.bio = normalizeBio(dto.bio);
 
     if (dto.gameIds !== undefined) {
@@ -899,6 +925,11 @@ export class AuthService {
       where: { id: targetId },
     });
     if (!user) throw new NotFoundException('User not found');
+    if (user.roles.includes(Role.ADMIN)) {
+      throw new BadRequestException(
+        'Cannot delete an admin account. Remove admin permissions from the account first.',
+      );
+    }
 
     // F6. Refuse to delete someone still active in a live tournament. Deleting
     // them would null their pending match slots with no walkover, stalling the

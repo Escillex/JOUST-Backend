@@ -87,6 +87,8 @@ enum NotificationType {
   BUILD_REVIEWED
   // An admin removed this user's gallery image or build after a report.
   CONTENT_REMOVED
+  // A player self-scored a result that now waits for an organizer's review.
+  SCORE_PENDING
 }
 
 /// What kind of thing an audit entry records — the admin dashboard filters on it.
@@ -216,6 +218,7 @@ model User {
   matchesAsPlayer1        Match[]                 @relation("Player1")
   matchesAsPlayer2        Match[]                 @relation("Player2")
   wonMatches              Match[]                 @relation("Winner")
+  reportedMatches         Match[]                 @relation("ReportedWinner")
   createdFormats          TournamentFormat[]
   createdGames            Game[]
   gameRequests            GameRequest[]
@@ -742,6 +745,9 @@ model Match {
 
   winnerId String?
   winner   User?   @relation("Winner", fields: [winnerId], references: [id], onDelete: SetNull)
+
+  reportedWinnerId String?
+  reportedWinner   User?   @relation("ReportedWinner", fields: [reportedWinnerId], references: [id], onDelete: SetNull)
 
   nextMatchId     String?
   nextMatch       Match?  @relation("NextMatch", fields: [nextMatchId], references: [id])

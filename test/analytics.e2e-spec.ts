@@ -9,7 +9,9 @@ describe('AnalyticsService', () => {
   // Raw responses are matched by a distinctive fragment of their SQL, not by
   // call order: an earlier version keyed off position in the Promise.all, so
   // adding one query silently shifted every fixture onto the wrong assertion.
-  const buildService = (raw: Record<string, Record<string, unknown>[]> = {}) => {
+  const buildService = (
+    raw: Record<string, Record<string, unknown>[]> = {},
+  ) => {
     const pick = (query: any) => {
       const sql = (query?.strings ?? []).join(' ');
       const hit = Object.entries(raw).find(([token]) => sql.includes(token));
@@ -32,7 +34,9 @@ describe('AnalyticsService', () => {
       },
       tournamentParticipant: {
         count: jest.fn().mockResolvedValue(10),
-        findMany: jest.fn().mockResolvedValue([{ userId: 'a' }, { userId: 'b' }]),
+        findMany: jest
+          .fn()
+          .mockResolvedValue([{ userId: 'a' }, { userId: 'b' }]),
       },
       game: { count: jest.fn().mockResolvedValue(2) },
       userGlobalStats: { count: jest.fn().mockResolvedValue(5) },
@@ -44,7 +48,9 @@ describe('AnalyticsService', () => {
         ]),
         count: jest.fn().mockResolvedValue(1),
       },
-      $queryRaw: jest.fn().mockImplementation(async (query: any) => pick(query)),
+      $queryRaw: jest
+        .fn()
+        .mockImplementation(async (query: any) => pick(query)),
     } as any;
     return { prisma, service: new AnalyticsService(prisma) };
   };
@@ -53,8 +59,12 @@ describe('AnalyticsService', () => {
     const { service } = buildService();
     // A nonsense window falls back to the default rather than to a 1-month view.
     await expect(service.getOverview(0)).resolves.toMatchObject({ months: 12 });
-    await expect(service.getOverview(NaN)).resolves.toMatchObject({ months: 12 });
-    await expect(service.getOverview(999)).resolves.toMatchObject({ months: 24 });
+    await expect(service.getOverview(NaN)).resolves.toMatchObject({
+      months: 12,
+    });
+    await expect(service.getOverview(999)).resolves.toMatchObject({
+      months: 24,
+    });
     await expect(service.getOverview(1)).resolves.toMatchObject({ months: 1 });
     const twelve = await service.getOverview(12);
     expect(twelve.months).toBe(12);
@@ -81,21 +91,56 @@ describe('AnalyticsService', () => {
   it('reports a tournament with no game rather than dropping it', async () => {
     const { service } = buildService({
       'LEFT JOIN "Game"': [
-        { gameId: 'g1', name: 'Chess', retired: false, tournaments: BigInt(4), completed: BigInt(2), entries: BigInt(20), players: BigInt(9) },
-        { gameId: null, name: null, retired: null, tournaments: BigInt(1), completed: BigInt(0), entries: BigInt(2), players: BigInt(2) },
+        {
+          gameId: 'g1',
+          name: 'Chess',
+          retired: false,
+          tournaments: BigInt(4),
+          completed: BigInt(2),
+          entries: BigInt(20),
+          players: BigInt(9),
+        },
+        {
+          gameId: null,
+          name: null,
+          retired: null,
+          tournaments: BigInt(1),
+          completed: BigInt(0),
+          entries: BigInt(2),
+          players: BigInt(2),
+        },
       ],
     });
     const out = await service.getOverview(6);
     expect(out.games).toHaveLength(2);
-    expect(out.games[1]).toMatchObject({ gameId: null, name: 'No game set', tournaments: 1 });
+    expect(out.games[1]).toMatchObject({
+      gameId: null,
+      name: 'No game set',
+      tournaments: 1,
+    });
   });
 
   it('rolls formats up into bracket structures', async () => {
     const { service } = buildService({
       'LEFT JOIN "TournamentFormat"': [
-        { formatId: 'f1', name: 'Swiss A', system: 'SWISS', tournaments: BigInt(3) },
-        { formatId: 'f2', name: 'Swiss B', system: 'SWISS', tournaments: BigInt(2) },
-        { formatId: 'f3', name: 'Cup', system: 'SINGLE_ELIMINATION', tournaments: BigInt(4) },
+        {
+          formatId: 'f1',
+          name: 'Swiss A',
+          system: 'SWISS',
+          tournaments: BigInt(3),
+        },
+        {
+          formatId: 'f2',
+          name: 'Swiss B',
+          system: 'SWISS',
+          tournaments: BigInt(2),
+        },
+        {
+          formatId: 'f3',
+          name: 'Cup',
+          system: 'SINGLE_ELIMINATION',
+          tournaments: BigInt(4),
+        },
       ],
     });
     const out = await service.getOverview(6);
@@ -113,12 +158,16 @@ describe('AnalyticsService', () => {
       ],
     });
     const out = await service.getOverview(6);
-    expect(out.engagement.participationDistribution.map((d) => d.bucket)).toEqual([
-      '1', '2-4', '5-9', '10+',
-    ]);
+    expect(
+      out.engagement.participationDistribution.map((d) => d.bucket),
+    ).toEqual(['1', '2-4', '5-9', '10+']);
     expect(out.engagement.participationDistribution[1].players).toBe(0);
     // 2 of 8 players entered more than one tournament.
-    expect(out.engagement.returning).toEqual({ players: 8, repeat: 2, returnRate: 25 });
+    expect(out.engagement.returning).toEqual({
+      players: 8,
+      repeat: 2,
+      returnRate: 25,
+    });
   });
 
   describe('operational health', () => {

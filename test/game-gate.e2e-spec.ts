@@ -75,6 +75,7 @@ describe('game assignment gate', () => {
         {} as any,
         { notify: jest.fn(), notifyMany: jest.fn() } as any,
         games as any,
+        { getBoolean: jest.fn().mockResolvedValue(true) } as any,
       );
       return { prisma, games, service };
     };
@@ -141,10 +142,11 @@ describe('game assignment gate', () => {
         {} as any,
         { notify: jest.fn(), notifyMany: jest.fn() } as any,
         games as any,
+        { getBoolean: jest.fn().mockResolvedValue(true) } as any,
       );
-      await expect(service.reassignGame('t1', 'g-general')).rejects.toMatchObject(
-        { response: { code: 'GAME_NOT_ASSIGNABLE' } },
-      );
+      await expect(
+        service.reassignGame('t1', 'g-general'),
+      ).rejects.toMatchObject({ response: { code: 'GAME_NOT_ASSIGNABLE' } });
       expect(prisma.tournament.update).not.toHaveBeenCalled();
     });
   });

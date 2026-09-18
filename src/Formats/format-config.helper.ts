@@ -76,25 +76,37 @@ export interface ResolvedConfig {
   // tournament/game rather than hardcoded. Enforced server-side by MatchUtilityService.
   utilities: UtilitiesConfig;
 
-  // Who may move a match from PENDING to ONGOING. Organizer-only start (F2,
-  // 2026-08-26) suits a supervised venue and gets in the way everywhere else:
-  // at a casual event the two players are sitting at the table and the
-  // organizer is not. Enforced server-side in MatchService.startMatch.
-  matchStartWho: MatchStartPerm;
+  // Who may submit match scores. "Organizer must be present" rule (STAFF_ONLY)
+  // enforces strict supervision. Otherwise, players can self-report (which goes
+  // into pending verification).
+  scoreSubmissionRule: ScoreSubmissionRule;
+
+  // Who may move a match from PENDING to ONGOING. The default is
+  // STAFF_AND_PARTICIPANTS — organizer-only start suits a supervised venue and
+  // obstructs a casual one, where the players are at the table and the
+  // organizer is not. STAFF restores the strict flow.
+  matchStartWho: MatchStartWho;
 }
 
-/** Who may start a match. STAFF is the strict, supervised setting. */
-export type MatchStartPerm = 'STAFF' | 'STAFF_AND_PARTICIPANTS';
+/** Who may submit a match score. STAFF_ONLY is the strict, supervised setting. */
+export type ScoreSubmissionRule = 'STAFF_ONLY' | 'SELF_REPORT_ALLOWED';
 
-const MATCH_START_PERMS: readonly MatchStartPerm[] = [
-  'STAFF',
-  'STAFF_AND_PARTICIPANTS',
+/** Who may move a match from PENDING to ONGOING. STAFF_AND_PARTICIPANTS (the
+ *  default) is the casual setting: the players are at the table and the
+ *  organizer is not. STAFF is what a supervised venue opts into. Enforced in
+ *  `MatchService.startMatch` — like player self-scoring, the answer depends on
+ *  the tournament's configuration, which a guard does not read. */
+export type MatchStartWho = 'STAFF' | 'STAFF_AND_PARTICIPANTS';
+
+const SCORE_SUBMISSION_RULES: readonly ScoreSubmissionRule[] = [
+  'STAFF_ONLY',
+  'SELF_REPORT_ALLOWED',
 ];
 
-function resolveMatchStart(raw: unknown): MatchStartPerm {
-  return MATCH_START_PERMS.includes(raw as MatchStartPerm)
-    ? (raw as MatchStartPerm)
-    : 'STAFF_AND_PARTICIPANTS';
+function resolveScoreSubmissionRule(raw: unknown): ScoreSubmissionRule {
+  return SCORE_SUBMISSION_RULES.includes(raw as ScoreSubmissionRule)
+    ? (raw as ScoreSubmissionRule)
+    : 'SELF_REPORT_ALLOWED';
 }
 
 /** Who may trigger a shared utility. NONE = the utility is off/hidden. */
@@ -301,11 +313,18 @@ export function resolveConfig(
       ),
     },
 
-    // Root first, like seedingMode and the utilities: who may start a match is
     // a property of the event, not of a hybrid's Swiss phase.
-    matchStartWho: resolveMatchStart(
-      config?.matchStartWho ?? c.matchStartWho,
+    scoreSubmissionRule: resolveScoreSubmissionRule(
+      config?.scoreSubmissionRule ?? c.scoreSubmissionRule,
     ),
+
+    // Read from ROOT first (belongs to the event, not a hybrid's Swiss phase).
+    // Anything other than the literal "STAFF" means the permissive default: the
+    // two players plus staff may start.
+    matchStartWho:
+      (config?.matchStartWho ?? c.matchStartWho) === 'STAFF'
+        ? 'STAFF'
+        : 'STAFF_AND_PARTICIPANTS',
   };
 }
 

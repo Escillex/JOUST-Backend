@@ -14,7 +14,11 @@ import {
   // AuthModule supplies JwtService for JwtAuthGuard. Leaving it out type-checks
   // cleanly and only fails when the container boots (it did, for BackupModule).
   imports: [PrismaModule, AuthModule, ImagesModule, NotificationModule],
-  controllers: [ShowcaseController, AwardCatalogController, AwardGrantController],
+  controllers: [
+    ShowcaseController,
+    AwardCatalogController,
+    AwardGrantController,
+  ],
   providers: [AwardService],
 })
 export class AwardModule {}

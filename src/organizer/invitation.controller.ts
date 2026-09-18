@@ -31,7 +31,12 @@ export class InvitationController {
   }
 
   // PATCH /organizers/invitations/:id/accept
-  @Audit({ action: 'staff.accept', category: AC.STAFF, tournament: { invitationParam: 'id' }, describe: (c) => `Accepted the invitation to co-organize ${c.t}` })
+  @Audit({
+    action: 'staff.accept',
+    category: AC.STAFF,
+    tournament: { invitationParam: 'id' },
+    describe: (c) => `Accepted the invitation to co-organize ${c.t}`,
+  })
   @Patch(':id/accept')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -44,7 +49,12 @@ export class InvitationController {
   }
 
   // PATCH /organizers/invitations/:id/decline
-  @Audit({ action: 'staff.decline', category: AC.STAFF, tournament: { invitationParam: 'id' }, describe: (c) => `Declined the invitation to co-organize ${c.t}` })
+  @Audit({
+    action: 'staff.decline',
+    category: AC.STAFF,
+    tournament: { invitationParam: 'id' },
+    describe: (c) => `Declined the invitation to co-organize ${c.t}`,
+  })
   @Patch(':id/decline')
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)

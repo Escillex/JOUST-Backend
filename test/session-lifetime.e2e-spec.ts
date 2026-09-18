@@ -1,4 +1,7 @@
-import { sessionExpiresIn, sessionLifetimeMs } from '../src/config/security.config';
+import {
+  sessionExpiresIn,
+  sessionLifetimeMs,
+} from '../src/config/security.config';
 
 // The cookie and the signed token must agree on how long a session lasts. They
 // did not before: the JWT had no expiry at all while the cookie expired after an

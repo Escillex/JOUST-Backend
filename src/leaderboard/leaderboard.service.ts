@@ -74,9 +74,7 @@ export class LeaderboardService {
     const tbGetters: Record<string, (e: T) => number> = Object.fromEntries(
       Object.entries(raw).map(([key, get]) => [
         key,
-        LeaderboardService.LOWER_IS_BETTER.has(key)
-          ? (e: T) => -get(e)
-          : get,
+        LeaderboardService.LOWER_IS_BETTER.has(key) ? (e: T) => -get(e) : get,
       ]),
     );
 
@@ -172,7 +170,9 @@ export class LeaderboardService {
    */
   private async computeOpponentTiebreakers(
     tournamentId: string,
-  ): Promise<Map<string, { omw: number; oomw: number; gw: number; ogw: number }>> {
+  ): Promise<
+    Map<string, { omw: number; oomw: number; gw: number; ogw: number }>
+  > {
     const [matches, byes] = await Promise.all([
       this.prisma.match.findMany({
         where: {
@@ -287,7 +287,10 @@ export class LeaderboardService {
     // player whose only completed match was a bye is absent from `opponents`
     // entirely, and iterating that map alone left them with no entry, so their
     // credited bye games fell back to a GW% of 0.
-    const everyone = new Set<string>([...opponents.keys(), ...gamesPlayed.keys()]);
+    const everyone = new Set<string>([
+      ...opponents.keys(),
+      ...gamesPlayed.keys(),
+    ]);
     for (const userId of everyone) {
       const list = opponents.get(userId) ?? [];
       const total = list.reduce((sum, id) => sum + (omw.get(id) ?? 0), 0);
@@ -505,7 +508,10 @@ export class LeaderboardService {
     const ranked: LeaderboardEntry[] = [];
     let currentRank = 0;
     for (let i = 0; i < sorted.length; i++) {
-      if (i === 0 || this.rankChanged(sorted[i - 1], sorted[i], tieBreakerOrder)) {
+      if (
+        i === 0 ||
+        this.rankChanged(sorted[i - 1], sorted[i], tieBreakerOrder)
+      ) {
         currentRank += 1;
       }
       ranked.push({ rank: currentRank, ...sorted[i] });

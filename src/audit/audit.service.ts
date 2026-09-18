@@ -3,7 +3,12 @@ import { AuditCategory, Prisma } from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
 import type { AuditSpec } from './audit.decorator';
 
-interface Actor { id?: string; sub?: string; username?: string | null; roles?: string[] }
+interface Actor {
+  id?: string;
+  sub?: string;
+  username?: string | null;
+  roles?: string[];
+}
 
 /** Names resolved before the handler runs. */
 export interface Prepared {
@@ -19,7 +24,8 @@ export interface Prepared {
 const pickFrom = (body: unknown, keys: string[] = []) => {
   const out: Record<string, unknown> = {};
   if (body && typeof body === 'object') {
-    for (const k of keys) if (k in (body as object)) out[k] = (body as Record<string, unknown>)[k];
+    for (const k of keys)
+      if (k in body) out[k] = (body as Record<string, unknown>)[k];
   }
   return out;
 };
@@ -35,13 +41,20 @@ export class AuditService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private nameOf(u: { username: string | null; displayName: string | null } | null) {
+  private nameOf(
+    u: { username: string | null; displayName: string | null } | null,
+  ) {
     return u ? u.displayName || u.username || 'Unknown user' : null;
   }
 
   /** Resolve names BEFORE the action — a deleted tournament or user can no
    *  longer be looked up afterwards. Never throws. */
-  async prepare(spec: AuditSpec, actor: Actor, params: Record<string, string>, body: unknown): Promise<Prepared> {
+  async prepare(
+    spec: AuditSpec,
+    actor: Actor,
+    params: Record<string, string>,
+    body: unknown,
+  ): Promise<Prepared> {
     const out: Prepared = {
       actorName: actor.username || 'Unknown user',
       tournamentId: null,
@@ -62,7 +75,9 @@ export class AuditService {
 
       const src = spec.tournament;
       if (src && 'param' in src) out.tournamentId = params[src.param] ?? null;
-      if (src && 'body' in src) out.tournamentId = (pickFrom(body, [src.body])[src.body] as string) ?? null;
+      if (src && 'body' in src)
+        out.tournamentId =
+          (pickFrom(body, [src.body])[src.body] as string) ?? null;
       if (src && 'matchParam' in src && params[src.matchParam]) {
         const m = await this.prisma.match.findUnique({
           where: { id: params[src.matchParam] },
@@ -119,27 +134,66 @@ export class AuditService {
           ? params[sub.param]
           : (pickFrom(body, [sub.body])[sub.body] as string | undefined)
         : undefined;
-      if (sub && subjectId) out.subjectName = await this.subjectName(sub.model, subjectId);
+      if (sub && subjectId)
+        out.subjectName = await this.subjectName(sub.model, subjectId);
     } catch (err) {
-      this.logger.warn(`Audit prepare failed for ${spec.action}: ${String(err)}`);
+      this.logger.warn(
+        `Audit prepare failed for ${spec.action}: ${String(err)}`,
+      );
     }
     return out;
   }
 
-  private async subjectName(model: import('./audit.decorator').SubjectModel, id: string) {
+  private async subjectName(
+    model: import('./audit.decorator').SubjectModel,
+    id: string,
+  ) {
     switch (model) {
       case 'game':
-        return (await this.prisma.game.findUnique({ where: { id }, select: { name: true } }))?.name ?? null;
+        return (
+          (
+            await this.prisma.game.findUnique({
+              where: { id },
+              select: { name: true },
+            })
+          )?.name ?? null
+        );
       case 'award':
-        return (await this.prisma.award.findUnique({ where: { id }, select: { name: true } }))?.name ?? null;
+        return (
+          (
+            await this.prisma.award.findUnique({
+              where: { id },
+              select: { name: true },
+            })
+          )?.name ?? null
+        );
       case 'tournamentFormat':
-        return (await this.prisma.tournamentFormat.findUnique({ where: { id }, select: { name: true } }))?.name ?? null;
+        return (
+          (
+            await this.prisma.tournamentFormat.findUnique({
+              where: { id },
+              select: { name: true },
+            })
+          )?.name ?? null
+        );
       case 'storeProduct':
-        return (await this.prisma.storeProduct.findUnique({ where: { id }, select: { name: true } }))?.name ?? null;
+        return (
+          (
+            await this.prisma.storeProduct.findUnique({
+              where: { id },
+              select: { name: true },
+            })
+          )?.name ?? null
+        );
       case 'userAward':
         return (
-          await this.prisma.userAward.findUnique({ where: { id }, select: { award: { select: { name: true } } } })
-        )?.award.name ?? null;
+          (
+            await this.prisma.userAward.findUnique({
+              where: { id },
+              select: { award: { select: { name: true } } },
+            })
+          )?.award.name ?? null
+        );
     }
   }
 
@@ -155,11 +209,24 @@ export class AuditService {
     try {
       let { tournamentId, tournamentName } = prepared;
       // Created by this very request: only the response knows its id.
-      if (spec.tournament && 'result' in spec.tournament && result && typeof result === 'object') {
-        tournamentId = ((result as Record<string, unknown>)[spec.tournament.result] as string) ?? null;
-        tournamentName = ((result as Record<string, unknown>).name as string) ?? tournamentName;
+      if (
+        spec.tournament &&
+        'result' in spec.tournament &&
+        result &&
+        typeof result === 'object'
+      ) {
+        tournamentId =
+          ((result as Record<string, unknown>)[
+            spec.tournament.result
+          ] as string) ?? null;
+        tournamentName =
+          ((result as Record<string, unknown>).name as string) ??
+          tournamentName;
       }
-      const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+      const raw =
+        body && typeof body === 'object'
+          ? (body as Record<string, unknown>)
+          : {};
       const picked = spec.pickFn ? spec.pickFn(raw) : pickFrom(body, spec.pick);
       const summary = spec.describe({
         t: tournamentName ? `"${tournamentName}"` : 'a tournament',
@@ -168,7 +235,9 @@ export class AuditService {
         params,
         fields: Object.keys(raw),
         subject: prepared.subjectName ?? 'an item',
-        self: !!prepared.targetUserId && prepared.targetUserId === (actor.id || actor.sub),
+        self:
+          !!prepared.targetUserId &&
+          prepared.targetUserId === (actor.id || actor.sub),
         result,
         match: prepared.match,
       });
@@ -213,7 +282,10 @@ export class AuditService {
     try {
       const actorId = e.actor.id || e.actor.sub || null;
       const u = actorId
-        ? await this.prisma.user.findUnique({ where: { id: actorId }, select: { username: true, displayName: true } })
+        ? await this.prisma.user.findUnique({
+            where: { id: actorId },
+            select: { username: true, displayName: true },
+          })
         : null;
       await this.prisma.auditLog.create({
         data: {
@@ -269,6 +341,9 @@ export class AuditService {
     });
     const more = rows.length > limit;
     const entries = more ? rows.slice(0, limit) : rows;
-    return { entries, nextCursor: more ? entries[entries.length - 1].id : null };
+    return {
+      entries,
+      nextCursor: more ? entries[entries.length - 1].id : null,
+    };
   }
 }

@@ -19,7 +19,11 @@ import {
   Match,
   ParticipantStatus,
 } from '@prisma/client';
-import { effectiveRawConfig, resolveConfig, systemOf } from './format-config.helper';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+  systemOf,
+} from './format-config.helper';
 import { seedBracketSlots, shuffled } from './bracket-seeding.helper';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { completedMatchData } from '../tournament/match/match-completion.helper';

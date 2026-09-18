@@ -31,7 +31,9 @@ describe('award routes are admin-only', () => {
     ['catalog', AwardCatalogController],
     ['grants', AwardGrantController],
   ])('the %s controller requires JWT + ADMIN', (_, ctrl) => {
-    expect(guardsOf(ctrl)).toEqual(expect.arrayContaining([JwtAuthGuard, RolesGuard]));
+    expect(guardsOf(ctrl)).toEqual(
+      expect.arrayContaining([JwtAuthGuard, RolesGuard]),
+    );
     expect(rolesOf(ctrl)).toEqual([Role.ADMIN]);
   });
 
@@ -45,7 +47,8 @@ describe('award routes are admin-only', () => {
 
 const ME = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
-const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const uuid = (n: number) =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 type Grant = { id: string; userId: string; awardId: string; kind: AwardKind };
 
@@ -62,11 +65,20 @@ function build(grants: Grant[] = [], extra: Record<string, unknown> = {}) {
     userAward: {
       findMany: jest.fn(async ({ where }: any) =>
         grants
-          .filter((g) => (where.id?.in ? where.id.in.includes(g.id) : true) && g.userId === where.userId)
+          .filter(
+            (g) =>
+              (where.id?.in ? where.id.in.includes(g.id) : true) &&
+              g.userId === where.userId,
+          )
           .map((g) => ({
             id: g.id,
             awardId: g.awardId,
-            award: { kind: g.kind, name: 'x', description: null, imageUrl: '/u' },
+            award: {
+              kind: g.kind,
+              name: 'x',
+              description: null,
+              imageUrl: '/u',
+            },
             awardedAt: new Date(),
             note: null,
             pinSlot: null,
@@ -83,19 +95,30 @@ function build(grants: Grant[] = [], extra: Record<string, unknown> = {}) {
     $transaction: jest.fn(async (ops: unknown[]) => ops),
     ...extra,
   };
-  const images = { processAndSave: jest.fn(async () => '/uploads/medals/a.webp'), deleteFile: jest.fn() };
+  const images = {
+    processAndSave: jest.fn(async () => '/uploads/medals/a.webp'),
+    deleteFile: jest.fn(),
+  };
   const notifications = { notify: jest.fn() };
   const svc = new AwardService(prisma, images as any, notifications as any);
   return { svc, prisma, images, notifications };
 }
 
 describe('giving awards', () => {
-  const award = { id: uuid(1), name: 'Champion', kind: AwardKind.MEDAL, archivedAt: null, description: null };
+  const award = {
+    id: uuid(1),
+    name: 'Champion',
+    kind: AwardKind.MEDAL,
+    archivedAt: null,
+    description: null,
+  };
 
   it('refuses a guest, whose account the cleanup job would delete', async () => {
     const { svc, prisma } = build();
     prisma.user.findUnique.mockResolvedValue({ id: ME, isGuest: true });
-    await expect(svc.grant(ME, { awardId: award.id }, OTHER)).rejects.toMatchObject({
+    await expect(
+      svc.grant(ME, { awardId: award.id }, OTHER),
+    ).rejects.toMatchObject({
       response: { code: 'GUEST_CANNOT_RECEIVE_AWARDS' },
     });
   });
@@ -103,8 +126,13 @@ describe('giving awards', () => {
   it('refuses an archived award', async () => {
     const { svc, prisma } = build();
     prisma.user.findUnique.mockResolvedValue({ id: ME, isGuest: false });
-    prisma.award.findUnique.mockResolvedValue({ ...award, archivedAt: new Date() });
-    await expect(svc.grant(ME, { awardId: award.id }, OTHER)).rejects.toMatchObject({
+    prisma.award.findUnique.mockResolvedValue({
+      ...award,
+      archivedAt: new Date(),
+    });
+    await expect(
+      svc.grant(ME, { awardId: award.id }, OTHER),
+    ).rejects.toMatchObject({
       response: { code: 'AWARD_ARCHIVED' },
     });
   });
@@ -114,20 +142,36 @@ describe('giving awards', () => {
     prisma.user.findUnique.mockResolvedValue({ id: ME, isGuest: false });
     prisma.award.findUnique.mockResolvedValue(award);
     prisma.userAward.create.mockResolvedValue({
-      id: uuid(9), awardId: award.id, awardedAt: new Date(), note: 'Won it',
-      pinSlot: null, displayed: false,
-      award: { name: 'Champion', description: null, kind: AwardKind.MEDAL, imageUrl: '/u' },
+      id: uuid(9),
+      awardId: award.id,
+      awardedAt: new Date(),
+      note: 'Won it',
+      pinSlot: null,
+      displayed: false,
+      award: {
+        name: 'Champion',
+        description: null,
+        kind: AwardKind.MEDAL,
+        imageUrl: '/u',
+      },
     });
 
     await svc.grant(ME, { awardId: award.id, note: 'Won it' }, OTHER);
 
     expect(prisma.userAward.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ userId: ME, awardedById: OTHER, note: 'Won it' }),
+        data: expect.objectContaining({
+          userId: ME,
+          awardedById: OTHER,
+          note: 'Won it',
+        }),
       }),
     );
     expect(notifications.notify).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: ME, type: NotificationType.AWARD_RECEIVED }),
+      expect.objectContaining({
+        userId: ME,
+        type: NotificationType.AWARD_RECEIVED,
+      }),
     );
   });
 
@@ -136,15 +180,30 @@ describe('giving awards', () => {
     // slot 1 via grant B, not drop it from the showcase.
     const { svc, prisma } = build();
     prisma.userAward.findUnique.mockResolvedValue({
-      id: uuid(21), userId: ME, awardId: award.id, pinSlot: 1, displayed: false,
+      id: uuid(21),
+      userId: ME,
+      awardId: award.id,
+      pinSlot: 1,
+      displayed: false,
     });
-    prisma.userAward.findFirst = jest.fn().mockResolvedValue({ id: uuid(22), userId: ME, awardId: award.id });
-    prisma.userAward.delete = jest.fn((args: unknown) => ({ op: 'delete', args }));
+    prisma.userAward.findFirst = jest
+      .fn()
+      .mockResolvedValue({ id: uuid(22), userId: ME, awardId: award.id });
+    prisma.userAward.delete = jest.fn((args: unknown) => ({
+      op: 'delete',
+      args,
+    }));
 
     await svc.revoke(ME, uuid(21));
 
-    const ops = prisma.$transaction.mock.calls[0][0] as Array<{ op: string; args: any }>;
-    expect(ops[0]).toMatchObject({ op: 'delete', args: { where: { id: uuid(21) } } });
+    const ops = prisma.$transaction.mock.calls[0][0] as Array<{
+      op: string;
+      args: any;
+    }>;
+    expect(ops[0]).toMatchObject({
+      op: 'delete',
+      args: { where: { id: uuid(21) } },
+    });
     expect(ops[1]).toMatchObject({
       op: 'update',
       args: { where: { id: uuid(22) }, data: { pinSlot: 1, displayed: false } },
@@ -163,19 +222,57 @@ describe('giving awards', () => {
 });
 
 describe('the showcase', () => {
-  const medalA = { id: uuid(11), userId: ME, awardId: uuid(101), kind: AwardKind.MEDAL };
-  const medalA2 = { id: uuid(12), userId: ME, awardId: uuid(101), kind: AwardKind.MEDAL };
-  const medalB = { id: uuid(13), userId: ME, awardId: uuid(102), kind: AwardKind.MEDAL };
-  const medalC = { id: uuid(14), userId: ME, awardId: uuid(103), kind: AwardKind.MEDAL };
-  const medalD = { id: uuid(15), userId: ME, awardId: uuid(104), kind: AwardKind.MEDAL };
-  const plaque = { id: uuid(16), userId: ME, awardId: uuid(105), kind: AwardKind.PLAQUE };
-  const theirs = { id: uuid(17), userId: OTHER, awardId: uuid(106), kind: AwardKind.MEDAL };
+  const medalA = {
+    id: uuid(11),
+    userId: ME,
+    awardId: uuid(101),
+    kind: AwardKind.MEDAL,
+  };
+  const medalA2 = {
+    id: uuid(12),
+    userId: ME,
+    awardId: uuid(101),
+    kind: AwardKind.MEDAL,
+  };
+  const medalB = {
+    id: uuid(13),
+    userId: ME,
+    awardId: uuid(102),
+    kind: AwardKind.MEDAL,
+  };
+  const medalC = {
+    id: uuid(14),
+    userId: ME,
+    awardId: uuid(103),
+    kind: AwardKind.MEDAL,
+  };
+  const medalD = {
+    id: uuid(15),
+    userId: ME,
+    awardId: uuid(104),
+    kind: AwardKind.MEDAL,
+  };
+  const plaque = {
+    id: uuid(16),
+    userId: ME,
+    awardId: uuid(105),
+    kind: AwardKind.PLAQUE,
+  };
+  const theirs = {
+    id: uuid(17),
+    userId: OTHER,
+    awardId: uuid(106),
+    kind: AwardKind.MEDAL,
+  };
   const mine = [medalA, medalA2, medalB, medalC, medalD, plaque, theirs];
 
   it('rejects a fourth pin', async () => {
     const { svc } = build(mine);
     await expect(
-      svc.setShowcase(ME, { pinnedMedals: [medalA.id, medalB.id, medalC.id, medalD.id], plaque: null }),
+      svc.setShowcase(ME, {
+        pinnedMedals: [medalA.id, medalB.id, medalC.id, medalD.id],
+        plaque: null,
+      }),
     ).rejects.toThrow(/at most 3/i);
   });
 
@@ -204,24 +301,42 @@ describe('the showcase', () => {
     // "Champion" won twice is one medal with a x2 badge, not two slots.
     const { svc } = build(mine);
     await expect(
-      svc.setShowcase(ME, { pinnedMedals: [medalA.id, medalA2.id], plaque: null }),
+      svc.setShowcase(ME, {
+        pinnedMedals: [medalA.id, medalA2.id],
+        plaque: null,
+      }),
     ).rejects.toThrow(/cannot be pinned twice/i);
   });
 
   it('clears the old showcase before setting the new one, atomically', async () => {
     const { svc, prisma } = build(mine);
-    await svc.setShowcase(ME, { pinnedMedals: [medalB.id, medalA.id], plaque: plaque.id });
+    await svc.setShowcase(ME, {
+      pinnedMedals: [medalB.id, medalA.id],
+      plaque: plaque.id,
+    });
 
-    const ops = prisma.$transaction.mock.calls[0][0] as Array<{ op: string; args: any }>;
+    const ops = prisma.$transaction.mock.calls[0][0] as Array<{
+      op: string;
+      args: any;
+    }>;
     // First the clear, so neither unique index sees two claimants...
     expect(ops[0]).toMatchObject({
       op: 'updateMany',
-      args: { where: { userId: ME }, data: { pinSlot: null, displayed: false } },
+      args: {
+        where: { userId: ME },
+        data: { pinSlot: null, displayed: false },
+      },
     });
     // ...then the pins in slot order, then the plaque.
-    expect(ops[1]).toMatchObject({ args: { where: { id: medalB.id }, data: { pinSlot: 1 } } });
-    expect(ops[2]).toMatchObject({ args: { where: { id: medalA.id }, data: { pinSlot: 2 } } });
-    expect(ops[3]).toMatchObject({ args: { where: { id: plaque.id }, data: { displayed: true } } });
+    expect(ops[1]).toMatchObject({
+      args: { where: { id: medalB.id }, data: { pinSlot: 1 } },
+    });
+    expect(ops[2]).toMatchObject({
+      args: { where: { id: medalA.id }, data: { pinSlot: 2 } },
+    });
+    expect(ops[3]).toMatchObject({
+      args: { where: { id: plaque.id }, data: { displayed: true } },
+    });
   });
 });
 
@@ -238,13 +353,20 @@ describe('award artwork', () => {
   });
   afterAll(async () => fs.rm(root, { recursive: true, force: true }));
 
-  const file = (buffer: Buffer) => ({ buffer } as Express.Multer.File);
+  const file = (buffer: Buffer) => ({ buffer }) as Express.Multer.File;
 
   it('contains a non-square medal on a transparent 512x512 canvas — never crops it', async () => {
     // A tall 300x600 shape: cropping it to a square would cut the top and bottom off.
     const tall = await sharp({
-      create: { width: 300, height: 600, channels: 4, background: { r: 200, g: 160, b: 40, alpha: 1 } },
-    }).png().toBuffer();
+      create: {
+        width: 300,
+        height: 600,
+        channels: 4,
+        background: { r: 200, g: 160, b: 40, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
 
     const url = await images.processAndSave(file(tall), 'medals');
     const out = sharp(join(root, url.replace('/uploads/', '')));
@@ -254,8 +376,11 @@ describe('award artwork', () => {
 
     // The left edge is padding, so it must be fully transparent; the middle
     // column is the medal, so the whole height of the shape survived.
-    const { data, info } = await out.raw().toBuffer({ resolveWithObject: true });
-    const alphaAt = (x: number, y: number) => data[(y * info.width + x) * info.channels + 3];
+    const { data, info } = await out
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const alphaAt = (x: number, y: number) =>
+      data[(y * info.width + x) * info.channels + 3];
     expect(alphaAt(2, 256)).toBe(0);
     expect(alphaAt(256, 4)).toBeGreaterThan(200);
     expect(alphaAt(256, 507)).toBeGreaterThan(200);
@@ -263,10 +388,19 @@ describe('award artwork', () => {
 
   it('produces an exact 1200x300 plaque', async () => {
     const wide = await sharp({
-      create: { width: 1600, height: 900, channels: 3, background: { r: 30, g: 30, b: 30 } },
-    }).png().toBuffer();
+      create: {
+        width: 1600,
+        height: 900,
+        channels: 3,
+        background: { r: 30, g: 30, b: 30 },
+      },
+    })
+      .png()
+      .toBuffer();
     const url = await images.processAndSave(file(wide), 'plaques');
-    const meta = await sharp(join(root, url.replace('/uploads/', ''))).metadata();
+    const meta = await sharp(
+      join(root, url.replace('/uploads/', '')),
+    ).metadata();
     expect([meta.width, meta.height]).toEqual([1200, 300]);
   });
 });

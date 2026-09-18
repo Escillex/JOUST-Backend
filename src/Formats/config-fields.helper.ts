@@ -36,15 +36,27 @@ export interface ConfigField {
 /** Who may start a match. Not a `<tool>Who` select: NONE and PARTICIPANTS-only
  *  are both nonsense here (nobody could start, or staff could not step in), so
  *  this offers the two answers that mean something. */
-function matchStartField(): ConfigField {
+function scoreSubmissionField(): ConfigField {
+  return {
+    key: 'scoreSubmissionRule',
+    label: 'Score Submission Rule',
+    placeholder: 'SELF_REPORT_ALLOWED',
+    defaultValue: 'SELF_REPORT_ALLOWED',
+    type: 'select',
+    options: ['SELF_REPORT_ALLOWED', 'STAFF_ONLY'],
+    help: 'SELF_REPORT_ALLOWED (the default) lets the players score their own match end-to-end — open the tracker, adjust either side, submit games and report the winner. A result that decides the series is held as pending verification until an organizer reviews it. STAFF_ONLY enforces strict supervision where organizers must enter and confirm every score themselves.',
+  };
+}
+
+function matchStartWhoField(): ConfigField {
   return {
     key: 'matchStartWho',
-    label: 'Who Starts a Match',
+    label: 'Who May Start A Match',
     placeholder: 'STAFF_AND_PARTICIPANTS',
     defaultValue: 'STAFF_AND_PARTICIPANTS',
     type: 'select',
     options: ['STAFF_AND_PARTICIPANTS', 'STAFF'],
-    help: 'STAFF_AND_PARTICIPANTS lets the two players start their own match when they sit down. STAFF keeps the strict, supervised flow where an organizer starts every match.',
+    help: 'STAFF_AND_PARTICIPANTS lets either player start the match once both seats are filled (and it is not a bye); organizers always can. STAFF is the strict, supervised setting where only organizers start.',
   };
 }
 
@@ -178,8 +190,8 @@ function pointsRankedFields(includeSwissRounds: boolean): ConfigField[] {
       defaultValue: 'omw, gw, oomw',
       type: 'array',
       help:
-        'Comma-separated, most significant first. Valid: omw (opponents\' match win %), ' +
-        'gw (your game win %), oomw (opponents\' opponents), ogw (opponents\' game win %), ' +
+        "Comma-separated, most significant first. Valid: omw (opponents' match win %), " +
+        "gw (your game win %), oomw (opponents' opponents), ogw (opponents' game win %), " +
         'matchWinPct, wins, losses. Blank uses omw, gw, oomw — the conventional order for ' +
         'best-of-three formats.',
     },
@@ -280,8 +292,12 @@ export function configFieldsForSystem(
 ): ConfigField[] {
   // Utilities permissions apply to every system, so they are appended once here
   // rather than in each branch below.
-  return [...baseFieldsForSystem(system), matchStartField(),
-    ...utilitiesFields()];
+  return [
+    ...baseFieldsForSystem(system),
+    scoreSubmissionField(),
+    matchStartWhoField(),
+    ...utilitiesFields(),
+  ];
 }
 
 function baseFieldsForSystem(system: TournamentSystem | string): ConfigField[] {

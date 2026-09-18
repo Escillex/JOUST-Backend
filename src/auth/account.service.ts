@@ -6,7 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { AuditCategory, ParticipantStatus, Role, TournamentStatus } from '@prisma/client';
+import {
+  AuditCategory,
+  ParticipantStatus,
+  Role,
+  TournamentStatus,
+} from '@prisma/client';
 import { PrismaService } from 'prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { AuditService } from '../audit/audit.service';
@@ -124,7 +129,8 @@ export class AccountService {
     if ((await this.proofMethod(user)) !== 'code') {
       throw new BadRequestException({
         code: 'CODE_NOT_USED',
-        message: 'This site confirms changes with your current password, not an emailed code.',
+        message:
+          'This site confirms changes with your current password, not an emailed code.',
       });
     }
     const issued = await this.twoFactor.issueCode(user, 'change');
@@ -133,20 +139,29 @@ export class AccountService {
 
   /** Throws unless the request carries the proof this account needs. */
   private async assertProof(
-    user: { id: string; email: string | null; hashedPassword: string | null; googleId?: string | null },
+    user: {
+      id: string;
+      email: string | null;
+      hashedPassword: string | null;
+      googleId?: string | null;
+    },
     dto: AccountProofDto,
   ): Promise<void> {
     // Signing in with Google again proves it, for an account that Google knows.
     // Offered whatever else is available: an inbox can be unreachable.
     if (dto.googleCredential) {
       if (!user.googleId) {
-        throw new BadRequestException({ code: 'GOOGLE_NOT_LINKED', message: 'This account is not connected to Google.' });
+        throw new BadRequestException({
+          code: 'GOOGLE_NOT_LINKED',
+          message: 'This account is not connected to Google.',
+        });
       }
       const identity = await this.google.identify(dto.googleCredential);
       if (identity.sub !== user.googleId) {
         throw new BadRequestException({
           code: 'GOOGLE_MISMATCH',
-          message: 'That is a different Google account from the one connected here.',
+          message:
+            'That is a different Google account from the one connected here.',
         });
       }
       return;
@@ -156,28 +171,47 @@ export class AccountService {
 
     if (method === 'code') {
       if (!dto.code) {
-        throw new BadRequestException({ code: 'CODE_REQUIRED', message: 'Enter the code we emailed you.' });
+        throw new BadRequestException({
+          code: 'CODE_REQUIRED',
+          message: 'Enter the code we emailed you.',
+        });
       }
       const check = await this.twoFactor.checkCode(user.id, dto.code);
       if (!check.ok) {
-        throw new BadRequestException({ code: 'CODE_INVALID', message: this.auth.codeFailureMessage(check.reason) });
+        throw new BadRequestException({
+          code: 'CODE_INVALID',
+          message: this.auth.codeFailureMessage(check.reason),
+        });
       }
       return;
     }
 
     if (method === 'password') {
       const now = Date.now();
-      const recent = (this.passwordMisses.get(user.id) ?? []).filter((t) => now - t < PASSWORD_WINDOW_MS);
+      const recent = (this.passwordMisses.get(user.id) ?? []).filter(
+        (t) => now - t < PASSWORD_WINDOW_MS,
+      );
       if (recent.length >= PASSWORD_TRIES) {
-        const waitMin = Math.ceil((PASSWORD_WINDOW_MS - (now - recent[0])) / 60000);
+        const waitMin = Math.ceil(
+          (PASSWORD_WINDOW_MS - (now - recent[0])) / 60000,
+        );
         throw new HttpException(
-          { code: 'TOO_MANY_TRIES', message: `Too many wrong passwords. Try again in ${waitMin} minute${waitMin === 1 ? '' : 's'}.` },
+          {
+            code: 'TOO_MANY_TRIES',
+            message: `Too many wrong passwords. Try again in ${waitMin} minute${waitMin === 1 ? '' : 's'}.`,
+          },
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      if (!dto.currentPassword || !(await bcrypt.compare(dto.currentPassword, user.hashedPassword!))) {
+      if (
+        !dto.currentPassword ||
+        !(await bcrypt.compare(dto.currentPassword, user.hashedPassword!))
+      ) {
         this.passwordMisses.set(user.id, [...recent, now]);
-        throw new BadRequestException({ code: 'WRONG_PASSWORD', message: 'Your current password is not right.' });
+        throw new BadRequestException({
+          code: 'WRONG_PASSWORD',
+          message: 'Your current password is not right.',
+        });
       }
       this.passwordMisses.delete(user.id);
       return;
@@ -203,17 +237,30 @@ export class AccountService {
    * (within the guard's 30-second cache; instantly in this process).
    */
   async signOutEverywhere(userId: string) {
-    await this.prisma.user.update({ where: { id: userId }, data: { sessionsValidFrom: nextSecond() } });
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { sessionsValidFrom: nextSecond() },
+    });
     JwtAuthGuard.forget(userId);
     const devices = await this.twoFactor.revokeDevices(userId);
     return { ok: true, devicesForgotten: devices };
   }
 
-  async changePassword(userId: string, dto: ChangePasswordDto, deviceToken?: string) {
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    deviceToken?: string,
+  ) {
     const user = await this.load(userId);
     await this.assertProof(user, dto);
-    if (user.hashedPassword && (await bcrypt.compare(dto.newPassword, user.hashedPassword))) {
-      throw new BadRequestException({ code: 'SAME_PASSWORD', message: 'Choose a password you are not already using.' });
+    if (
+      user.hashedPassword &&
+      (await bcrypt.compare(dto.newPassword, user.hashedPassword))
+    ) {
+      throw new BadRequestException({
+        code: 'SAME_PASSWORD',
+        message: 'Choose a password you are not already using.',
+      });
     }
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -227,7 +274,13 @@ export class AccountService {
         // this same second, which is why the stamp is the second's start.
         sessionsValidFrom: thisSecond(),
       },
-      select: { id: true, email: true, roles: true, username: true, avatarUrl: true },
+      select: {
+        id: true,
+        email: true,
+        roles: true,
+        username: true,
+        avatarUrl: true,
+      },
     });
     JwtAuthGuard.forget(userId);
     // Other remembered browsers must pass a code again: if the change is
@@ -241,20 +294,32 @@ export class AccountService {
     const user = await this.load(userId);
     const email = dto.email.trim().toLowerCase();
     if (email === (user.email ?? '').toLowerCase()) {
-      throw new BadRequestException({ code: 'SAME_EMAIL', message: 'That is already your email address.' });
+      throw new BadRequestException({
+        code: 'SAME_EMAIL',
+        message: 'That is already your email address.',
+      });
     }
     // A site that sends mail sends sign-in codes and resets here; an address
     // that can never receive them would lock the account out.
     if ((await this.mail.isConfigured()) && isUnroutableAddress(email)) {
-      throw new BadRequestException({ code: 'EMAIL_UNROUTABLE', message: 'That address cannot receive email. Use a real one.' });
+      throw new BadRequestException({
+        code: 'EMAIL_UNROUTABLE',
+        message: 'That address cannot receive email. Use a real one.',
+      });
     }
     // Checked before the proof, so a taken address does not spend the code.
     const taken = await this.prisma.user.findFirst({
-      where: { id: { not: userId }, email: { equals: email, mode: 'insensitive' } },
+      where: {
+        id: { not: userId },
+        email: { equals: email, mode: 'insensitive' },
+      },
       select: { id: true },
     });
     if (taken) {
-      throw new BadRequestException({ code: 'EMAIL_TAKEN', message: 'That email is already used by another account.' });
+      throw new BadRequestException({
+        code: 'EMAIL_TAKEN',
+        message: 'That email is already used by another account.',
+      });
     }
     // The code goes to the CURRENT address: proving you can read the inbox the
     // account already trusts is the second factor. The new address is proved
@@ -286,19 +351,29 @@ export class AccountService {
 
   async deleteSelf(userId: string, dto: DeleteAccountDto) {
     const user = await this.load(userId);
-    if (dto.confirm.trim().toLowerCase() !== (user.username ?? '').toLowerCase()) {
-      throw new BadRequestException({ code: 'CONFIRM_MISMATCH', message: 'Type your username exactly to confirm.' });
+    if (
+      dto.confirm.trim().toLowerCase() !== (user.username ?? '').toLowerCase()
+    ) {
+      throw new BadRequestException({
+        code: 'CONFIRM_MISMATCH',
+        message: 'Type your username exactly to confirm.',
+      });
     }
 
     // The site must never end up with nobody able to run it.
     if (user.roles.includes(Role.ADMIN)) {
       const otherAdmins = await this.prisma.user.count({
-        where: { id: { not: userId }, roles: { has: Role.ADMIN }, isGuest: false },
+        where: {
+          id: { not: userId },
+          roles: { has: Role.ADMIN },
+          isGuest: false,
+        },
       });
       if (otherAdmins === 0) {
         throw new BadRequestException({
           code: 'LAST_ADMIN',
-          message: 'You are the only admin. Make someone else an admin before deleting your account.',
+          message:
+            'You are the only admin. Make someone else an admin before deleting your account.',
         });
       }
     }
@@ -309,7 +384,9 @@ export class AccountService {
       where: {
         userId,
         status: { not: ParticipantStatus.FORFEITED },
-        tournament: { status: { in: [TournamentStatus.OPEN, TournamentStatus.ONGOING] } },
+        tournament: {
+          status: { in: [TournamentStatus.OPEN, TournamentStatus.ONGOING] },
+        },
       },
       select: { tournamentId: true, tournament: { select: { name: true } } },
     });
@@ -317,7 +394,10 @@ export class AccountService {
       throw new BadRequestException({
         code: 'ACTIVE_IN_LIVE_TOURNAMENT',
         message: `You are still entered in ${live.length} live tournament${live.length === 1 ? '' : 's'}. Leave, or ask the organizer to withdraw you, then try again.`,
-        tournaments: live.map((p) => ({ id: p.tournamentId, name: p.tournament.name })),
+        tournaments: live.map((p) => ({
+          id: p.tournamentId,
+          name: p.tournament.name,
+        })),
       });
     }
 

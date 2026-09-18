@@ -12,12 +12,19 @@ import { flattenGamesPlayed } from '../src/game/games-played.helper';
  * rows.
  */
 describe('games played', () => {
-  const buildAuth = (games: { id: string }[] = [], user: any = { id: 'u1', username: 'mae' }) => {
+  const buildAuth = (
+    games: { id: string }[] = [],
+    user: any = { id: 'u1', username: 'mae' },
+  ) => {
     const prisma: any = {
       user: {
         findUnique: jest.fn().mockResolvedValue(user),
         findFirst: jest.fn().mockResolvedValue(null),
-        update: jest.fn(async ({ data }: any) => ({ id: 'u1', ...data, games: [] })),
+        update: jest.fn(async ({ data }: any) => ({
+          id: 'u1',
+          ...data,
+          games: [],
+        })),
       },
       game: { findMany: jest.fn().mockResolvedValue(games) },
     };
@@ -26,13 +33,22 @@ describe('games played', () => {
 
   it('refuses more games than the cap, and anything that is not a uuid', async () => {
     const tooMany = plainToInstance(UpdateMeDto, {
-      gameIds: Array.from({ length: GAMES_PLAYED_MAX + 1 }, () => '11111111-1111-4111-8111-111111111111'),
+      gameIds: Array.from(
+        { length: GAMES_PLAYED_MAX + 1 },
+        () => '11111111-1111-4111-8111-111111111111',
+      ),
     });
     const notIds = plainToInstance(UpdateMeDto, { gameIds: ['lorcana'] });
-    const ok = plainToInstance(UpdateMeDto, { gameIds: ['11111111-1111-4111-8111-111111111111'] });
+    const ok = plainToInstance(UpdateMeDto, {
+      gameIds: ['11111111-1111-4111-8111-111111111111'],
+    });
 
-    expect((await validate(tooMany)).map((e) => e.property)).toContain('gameIds');
-    expect((await validate(notIds)).map((e) => e.property)).toContain('gameIds');
+    expect((await validate(tooMany)).map((e) => e.property)).toContain(
+      'gameIds',
+    );
+    expect((await validate(notIds)).map((e) => e.property)).toContain(
+      'gameIds',
+    );
     expect(await validate(ok)).toHaveLength(0);
   });
 
@@ -70,10 +86,14 @@ describe('games played', () => {
   });
 
   it('refuses a guest — there is no profile to show it on', async () => {
-    const { svc } = buildAuth([{ id: 'g1' }], { id: 'guest', username: 'Bea', isGuest: true });
-    await expect(svc.updateMe('guest', { gameIds: ['g1'] } as UpdateMeDto)).rejects.toThrow(
-      /Guest accounts cannot list games/,
-    );
+    const { svc } = buildAuth([{ id: 'g1' }], {
+      id: 'guest',
+      username: 'Bea',
+      isGuest: true,
+    });
+    await expect(
+      svc.updateMe('guest', { gameIds: ['g1'] } as UpdateMeDto),
+    ).rejects.toThrow(/Guest accounts cannot list games/);
   });
 
   it('leaves the list alone when the field is absent', async () => {
@@ -87,7 +107,9 @@ describe('games played', () => {
   it('serves the join rows unwrapped, so both sides speak one shape', () => {
     expect(
       flattenGamesPlayed([
-        { game: { id: 'g1', name: 'Lorcana', iconUrl: '/uploads/games/a.webp' } },
+        {
+          game: { id: 'g1', name: 'Lorcana', iconUrl: '/uploads/games/a.webp' },
+        },
         { game: { id: 'g2', name: 'Chess', iconUrl: null } },
       ]),
     ).toEqual([
@@ -109,13 +131,18 @@ describe('game icon', () => {
       },
     };
     const svc = new ImagesService(prisma);
-    jest.spyOn(svc, 'processAndSave').mockResolvedValue('/uploads/games/new.webp');
+    jest
+      .spyOn(svc, 'processAndSave')
+      .mockResolvedValue('/uploads/games/new.webp');
     jest.spyOn(svc, 'deleteFile').mockResolvedValue(undefined);
     return { prisma, svc };
   };
 
   it('saves the new icon before removing the old one', async () => {
-    const { prisma, svc } = buildImages({ id: 'g1', iconUrl: '/uploads/games/old.webp' });
+    const { prisma, svc } = buildImages({
+      id: 'g1',
+      iconUrl: '/uploads/games/old.webp',
+    });
     const out = await svc.updateGameIcon('g1', {} as Express.Multer.File);
 
     expect(svc.processAndSave).toHaveBeenCalledWith({}, 'games');
@@ -127,24 +154,33 @@ describe('game icon', () => {
   });
 
   it('removes the icon and the file it pointed at', async () => {
-    const { svc } = buildImages({ id: 'g1', iconUrl: '/uploads/games/old.webp' });
+    const { svc } = buildImages({
+      id: 'g1',
+      iconUrl: '/uploads/games/old.webp',
+    });
     const out = await svc.deleteGameIcon('g1');
     expect(svc.deleteFile).toHaveBeenCalledWith('/uploads/games/old.webp');
     expect(out).toEqual({ id: 'g1', iconUrl: null });
   });
 
   it('refuses the retired system game, as every other edit path does', async () => {
-    const { svc } = buildImages({ id: 'general', isBuiltin: true, iconUrl: null });
-    await expect(svc.updateGameIcon('general', {} as Express.Multer.File)).rejects.toThrow(
+    const { svc } = buildImages({
+      id: 'general',
+      isBuiltin: true,
+      iconUrl: null,
+    });
+    await expect(
+      svc.updateGameIcon('general', {} as Express.Multer.File),
+    ).rejects.toThrow(/retired system game/);
+    await expect(svc.deleteGameIcon('general')).rejects.toThrow(
       /retired system game/,
     );
-    await expect(svc.deleteGameIcon('general')).rejects.toThrow(/retired system game/);
   });
 
   it('404s on a game that does not exist', async () => {
     const { svc } = buildImages(null);
-    await expect(svc.updateGameIcon('nope', {} as Express.Multer.File)).rejects.toThrow(
-      /Game not found/,
-    );
+    await expect(
+      svc.updateGameIcon('nope', {} as Express.Multer.File),
+    ).rejects.toThrow(/Game not found/);
   });
 });

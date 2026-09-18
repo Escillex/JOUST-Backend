@@ -199,6 +199,7 @@ describe('getTournament canManage', () => {
       {} as any,
       { notify: jest.fn(), notifyMany: jest.fn() } as any,
       { assertAssignable: jest.fn() } as any,
+      { getBoolean: jest.fn().mockResolvedValue(true) } as any,
     );
   };
 
@@ -262,6 +263,7 @@ describe('getAllTournaments manageable filter', () => {
         {} as any,
         { notify: jest.fn(), notifyMany: jest.fn() } as any,
         { assertAssignable: jest.fn() } as any,
+        { getBoolean: jest.fn().mockResolvedValue(true) } as any,
       ),
     };
   };

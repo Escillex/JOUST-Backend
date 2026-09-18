@@ -213,15 +213,30 @@ describe('notification write sites', () => {
         findUnique: jest.fn().mockResolvedValue(match),
         update: jest.fn().mockResolvedValue(match),
       },
+      // startMatch authorizes via checkTournamentAccess: this tournament is
+      // created by 'org1', so that user always counts as staff.
+      tournament: {
+        findUnique: jest.fn().mockResolvedValue({ createdById: 'org1' }),
+      },
+      tournamentOrganizer: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
     } as any;
     // Transaction-aware code under test calls prisma.$transaction(cb). The
     // mock runs the callback against itself, so the assertions below are
     // unchanged by the wrapping.
     prisma.$transaction = jest.fn(async (cb: any) => cb(prisma));
     const notifications = { notify: jest.fn(), notifyMany: jest.fn() } as any;
-    const service = new MatchService(prisma, {} as any, notifications);
+    const service = new MatchService(
+      prisma,
+      {} as any,
+      notifications,
+      { emitTournamentUpdated: jest.fn() } as any,
+    );
     return { prisma, notifications, service };
   };
+
+  const STAFF_USER = { id: 'org1', roles: ['ORGANIZER'] };
 
   it('startMatch notifies both players when the organizer starts the match', async () => {
     const { notifications, service } = makeMatchService({
@@ -230,9 +245,12 @@ describe('notification write sites', () => {
       isBye: false,
       player1Id: 'a',
       player2Id: 'b',
-      round: { tournamentId: 't1' },
+      round: {
+        tournamentId: 't1',
+        tournament: { id: 't1', config: null, format: { config: null } },
+      },
     });
-    await service.startMatch('m1');
+    await service.startMatch('m1', STAFF_USER);
     expect(notifications.notifyMany).toHaveBeenCalledWith(
       ['a', 'b'],
       expect.objectContaining({
@@ -249,13 +267,16 @@ describe('notification write sites', () => {
       isBye: false,
       player1Id: 'a',
       player2Id: null,
-      round: { tournamentId: 't1' },
+      round: {
+        tournamentId: 't1',
+        tournament: { id: 't1', config: null, format: { config: null } },
+      },
     });
-    await expect(service.startMatch('m1')).rejects.toBeDefined();
+    await expect(service.startMatch('m1', STAFF_USER)).rejects.toBeDefined();
     expect(notifications.notifyMany).not.toHaveBeenCalled();
   });
 
-  it('startMatch sends nothing when the match has no resolvable tournament', async () => {
+  it('startMatch refuses a match with no resolvable tournament (cannot authorize, no ping)', async () => {
     const { notifications, service } = makeMatchService({
       id: 'm1',
       status: 'PENDING',
@@ -264,7 +285,7 @@ describe('notification write sites', () => {
       player2Id: 'b',
       round: null,
     });
-    await service.startMatch('m1');
+    await expect(service.startMatch('m1', STAFF_USER)).rejects.toBeDefined();
     expect(notifications.notifyMany).not.toHaveBeenCalled();
   });
 
@@ -296,12 +317,7 @@ describe('notification write sites', () => {
       notifications,
     );
 
-    await service.forfeitParticipant('t1', 'x', {
-      id: 'creator',
-      email: null,
-      username: 'c',
-      roles: ['ORGANIZER'],
-    } as any);
+    await service.forfeitParticipant('t1', 'x');
 
     expect(notifications.notify).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -1,12 +1,17 @@
 import { SettingsService } from '../src/settings/settings.service';
-import { encryptSetting, decryptSetting } from '../src/settings/settings.crypto';
+import {
+  encryptSetting,
+  decryptSetting,
+} from '../src/settings/settings.crypto';
 
 describe('settings', () => {
   const KEY = 'a'.repeat(64); // 32 bytes of hex
   const originalKey = process.env.SETTINGS_ENCRYPTION_KEY;
   const originalHost = process.env.MAIL_HOST;
 
-  beforeAll(() => { process.env.SETTINGS_ENCRYPTION_KEY = KEY; });
+  beforeAll(() => {
+    process.env.SETTINGS_ENCRYPTION_KEY = KEY;
+  });
   afterAll(() => {
     if (originalKey === undefined) delete process.env.SETTINGS_ENCRYPTION_KEY;
     else process.env.SETTINGS_ENCRYPTION_KEY = originalKey;
@@ -30,7 +35,12 @@ describe('settings', () => {
       // password without anyone noticing.
       const stored = encryptSetting('original');
       const [v, iv, tag] = stored.split(':');
-      const tampered = [v, iv, tag, Buffer.from('evil').toString('base64')].join(':');
+      const tampered = [
+        v,
+        iv,
+        tag,
+        Buffer.from('evil').toString('base64'),
+      ].join(':');
       expect(() => decryptSetting(tampered)).toThrow();
     });
 
@@ -55,7 +65,11 @@ describe('settings', () => {
 
     it('prefers the stored value over env', async () => {
       process.env.MAIL_HOST = 'from-env.example.com';
-      const { service } = build({ key: 'mail.host', value: 'from-db.example.com', encrypted: false });
+      const { service } = build({
+        key: 'mail.host',
+        value: 'from-db.example.com',
+        encrypted: false,
+      });
       expect(await service.get('MAIL_HOST')).toBe('from-db.example.com');
     });
 
@@ -72,12 +86,20 @@ describe('settings', () => {
     });
 
     it('decrypts a stored secret transparently', async () => {
-      const { service } = build({ key: 'mail.pass', value: encryptSetting('the-smtp-key'), encrypted: true });
+      const { service } = build({
+        key: 'mail.pass',
+        value: encryptSetting('the-smtp-key'),
+        encrypted: true,
+      });
       expect(await service.get('MAIL_PASS')).toBe('the-smtp-key');
     });
 
     it('caches reads so login does not hit the database every time', async () => {
-      const { prisma, service } = build({ key: 'mail.host', value: 'cached.example.com', encrypted: false });
+      const { prisma, service } = build({
+        key: 'mail.host',
+        value: 'cached.example.com',
+        encrypted: false,
+      });
       await service.get('MAIL_HOST');
       await service.get('MAIL_HOST');
       expect(prisma.systemSetting.findUnique).toHaveBeenCalledTimes(1);
@@ -90,7 +112,11 @@ describe('settings', () => {
         systemSetting: {
           findUnique: jest.fn().mockImplementation(({ where }: any) =>
             where.key === 'mail.pass'
-              ? { key: 'mail.pass', value: encryptSetting('the-smtp-key'), encrypted: true }
+              ? {
+                  key: 'mail.pass',
+                  value: encryptSetting('the-smtp-key'),
+                  encrypted: true,
+                }
               : null,
           ),
         },

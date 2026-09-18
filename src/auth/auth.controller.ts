@@ -176,7 +176,10 @@ export class AuthController {
 
   @Post('google/link')
   @UseGuards(JwtAuthGuard)
-  linkGoogle(@Req() req: AuthenticatedRequest, @Body() dto: GoogleCredentialDto) {
+  linkGoogle(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: GoogleCredentialDto,
+  ) {
     const userId = req.user.id || (req.user as any).sub;
     return this.google.link(userId, dto.credential);
   }
@@ -268,7 +271,10 @@ export class AuthController {
 
   @Post('me/recovery-codes')
   @UseGuards(JwtAuthGuard)
-  newRecoveryCodes(@Req() req: AuthenticatedRequest, @Body() dto: AccountProofDto) {
+  newRecoveryCodes(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AccountProofDto,
+  ) {
     return this.account.newRecoveryCodes(req.user.id, dto);
   }
 
@@ -315,7 +321,12 @@ export class AuthController {
   // GUEST MANAGEMENT
   // ──────────────────────────────────────────────
 
-  @Audit({ action: 'user.create_guest', category: AC.USER, pick: ['username'], describe: (c) => `Created the guest "${String(c.body.username ?? '')}"` })
+  @Audit({
+    action: 'user.create_guest',
+    category: AC.USER,
+    pick: ['username'],
+    describe: (c) => `Created the guest "${String(c.body.username ?? '')}"`,
+  })
   @Post('createguest')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -324,7 +335,14 @@ export class AuthController {
   }
 
   // ITEM 2: Convert a guest to a registered account
-  @Audit({ action: 'user.convert_guest', category: AC.USER, targetUser: { param: 'id' }, pick: ['username'], describe: (c) => `Converted guest ${c.target} into the account @${String(c.body.username ?? '')}` })
+  @Audit({
+    action: 'user.convert_guest',
+    category: AC.USER,
+    targetUser: { param: 'id' },
+    pick: ['username'],
+    describe: (c) =>
+      `Converted guest ${c.target} into the account @${String(c.body.username ?? '')}`,
+  })
   @Patch('convert-guest/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -336,7 +354,14 @@ export class AuthController {
   // ROLE MANAGEMENT
   // ──────────────────────────────────────────────
 
-  @Audit({ action: 'user.roles', category: AC.USER, targetUser: { param: 'id' }, pick: ['roles'], describe: (c) => `Set ${c.target}'s roles to ${((c.body.roles as string[]) ?? []).join(', ') || 'none'}` })
+  @Audit({
+    action: 'user.roles',
+    category: AC.USER,
+    targetUser: { param: 'id' },
+    pick: ['roles'],
+    describe: (c) =>
+      `Set ${c.target}'s roles to ${((c.body.roles as string[]) ?? []).join(', ') || 'none'}`,
+  })
   @Patch('roles/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -349,7 +374,12 @@ export class AuthController {
   // ──────────────────────────────────────────────
 
   // ITEM 4: Admin manually creates a registered user
-  @Audit({ action: 'user.create', category: AC.USER, pick: ['username', 'roles'], describe: (c) => `Created the account @${String(c.body.username ?? '')}` })
+  @Audit({
+    action: 'user.create',
+    category: AC.USER,
+    pick: ['username', 'roles'],
+    describe: (c) => `Created the account @${String(c.body.username ?? '')}`,
+  })
   @Post('users')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -358,7 +388,13 @@ export class AuthController {
   }
 
   // ITEM 4: Admin edits a user's profile (username / email / password)
-  @Audit({ action: 'user.update_profile', category: AC.USER, targetUser: { param: 'id' }, describe: (c) => `Edited ${c.target}'s account (${c.fields.join(', ') || 'no changes'})` })
+  @Audit({
+    action: 'user.update_profile',
+    category: AC.USER,
+    targetUser: { param: 'id' },
+    describe: (c) =>
+      `Edited ${c.target}'s account (${c.fields.join(', ') || 'no changes'})`,
+  })
   @Patch('users/:id/profile')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -367,7 +403,12 @@ export class AuthController {
   }
 
   // ITEM 1: Admin permanently deletes a user (preserves match history)
-  @Audit({ action: 'user.delete', category: AC.USER, targetUser: { param: 'id' }, describe: (c) => `Deleted the account ${c.target}` })
+  @Audit({
+    action: 'user.delete',
+    category: AC.USER,
+    targetUser: { param: 'id' },
+    describe: (c) => `Deleted the account ${c.target}`,
+  })
   @Delete('users/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

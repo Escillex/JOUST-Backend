@@ -7,8 +7,7 @@ import { LeaderboardController } from '../src/leaderboard/leaderboard.controller
 describe('cross-game leaderboard access', () => {
   const service = { getGlobalLeaderboard: jest.fn().mockResolvedValue([]) };
   const controller = new LeaderboardController(service as any);
-  const req = (roles?: string[]) =>
-    (roles ? { user: { roles } } : {}) as any;
+  const req = (roles?: string[]) => (roles ? { user: { roles } } : {}) as any;
 
   beforeEach(() => service.getGlobalLeaderboard.mockClear());
 

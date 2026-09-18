@@ -60,6 +60,7 @@ describe('MatchService.completeAsWalkover', () => {
       // Notifications are best-effort side effects, stubbed so this suite stays
       // focused on the behaviour it is actually asserting.
       { notify: jest.fn(), notifyMany: jest.fn() } as any,
+      { emitTournamentUpdated: jest.fn() } as any,
     );
   });
 
@@ -370,6 +371,7 @@ describe('MatchService.resolveForfeitedPairing (via advanceWinner/advanceLoser)'
       // Notifications are best-effort side effects, stubbed so this suite stays
       // focused on the behaviour it is actually asserting.
       { notify: jest.fn(), notifyMany: jest.fn() } as any,
+      { emitTournamentUpdated: jest.fn() } as any,
     );
   });
 
@@ -561,10 +563,7 @@ describe('ParticipantService.forfeitParticipant', () => {
       },
     ]);
 
-    await participantService.forfeitParticipant('t1', 'forfeiter', {
-      id: 'owner',
-      roles: ['ORGANIZER'],
-    } as any);
+    await participantService.forfeitParticipant('t1', 'forfeiter');
 
     expect(prisma.tournamentParticipant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: 'FORFEITED' } }),
@@ -597,10 +596,7 @@ describe('ParticipantService.forfeitParticipant', () => {
       },
     ]);
 
-    await participantService.forfeitParticipant('t1', 'forfeiter', {
-      id: 'owner',
-      roles: ['ORGANIZER'],
-    } as any);
+    await participantService.forfeitParticipant('t1', 'forfeiter');
 
     expect(matchService.completeAsWalkover).not.toHaveBeenCalled();
     expect(realtime.emitTournamentUpdated).toHaveBeenCalledWith('t1');
@@ -633,10 +629,7 @@ describe('ParticipantService.forfeitParticipant', () => {
       status: 'FORFEITED',
     });
 
-    await participantService.forfeitParticipant('t1', 'forfeiter', {
-      id: 'owner',
-      roles: ['ORGANIZER'],
-    } as any);
+    await participantService.forfeitParticipant('t1', 'forfeiter');
 
     expect(prisma.tournamentParticipant.updateMany).not.toHaveBeenCalled();
     expect(matchService.completeAsWalkover).not.toHaveBeenCalled();
@@ -657,10 +650,7 @@ describe('ParticipantService.forfeitParticipant', () => {
     });
     prisma.match.findMany.mockResolvedValue([]);
 
-    await participantService.forfeitParticipant('t1', 'forfeiter', {
-      id: 'admin-user',
-      roles: ['ADMIN'],
-    } as any);
+    await participantService.forfeitParticipant('t1', 'forfeiter');
 
     expect(prisma.tournamentParticipant.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: 'FORFEITED' } }),

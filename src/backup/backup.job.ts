@@ -50,7 +50,9 @@ export class BackupJob implements OnModuleInit {
     } catch {
       // A malformed expression must not take the process down at boot; the
       // schedule simply does not run, and says so.
-      this.logger.error(`"${cron}" is not a valid cron expression — no backup scheduled.`);
+      this.logger.error(
+        `"${cron}" is not a valid cron expression — no backup scheduled.`,
+      );
     }
     return { enabled, cron };
   }

@@ -21,11 +21,6 @@ import {
   JwtAuthGuard,
   type AuthenticatedRequest,
 } from '../../../guards/jwt-auth.guard';
-import { RolesGuard } from '../../../guards/roles.guard';
-import { Roles } from '../../../guards/decorators/roles.decorator';
-import { TournamentAccessGuard } from '../../../guards/tournament-access.guard';
-import { TournamentAccess } from '../../../guards/decorators/tournament-access.decorator';
-import { Role } from '@prisma/client';
 import { Audit, matchText } from '../../../audit/audit.decorator';
 import { AuditCategory as AC } from '@prisma/client';
 
@@ -35,19 +30,21 @@ export class TrackerController {
 
   /**
    * POST /matches/:id/tracker/open
-   * Auth: staff of this match's tournament (creator or ADMIN)
-   * Opens a new game tracker for the next game in the match series.
+   * Auth: authenticated, then authorized in the service — staff always; a
+   * *participant of this match* when the tournament's scoreSubmissionRule allows
+   * player scoring. Like tracker/update and start, the rule depends on the
+   * tournament's config, which a guard cannot read, so it is decided here
+   * rather than by RolesGuard/TournamentAccessGuard.
    */
   @Post(':id/tracker/open')
-  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
-  @Roles(Role.ORGANIZER, Role.ADMIN)
-  @TournamentAccess('match:id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.CREATED)
   openTracker(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: OpenTrackerDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.trackerService.openTracker(id, dto);
+    return this.trackerService.openTracker(id, dto, req.user);
   }
 
   /**
@@ -72,20 +69,28 @@ export class TrackerController {
 
   /**
    * POST /matches/:id/tracker/submit-game
-   * Auth: staff of this match's tournament (creator or ADMIN)
-   * Confirms result of current game → closes log → calls reportGameResult().
+   * Auth: authenticated, then authorized in the service — staff always; a
+   * *participant of this match* when the tournament allows player scoring. A
+   * player-driven result that decides the series is deferred into pending
+   * verification rather than completing immediately (organizer has the final
+   * review). Deliberately NOT guarded by RolesGuard/TournamentAccessGuard: a
+   * guard would reject the player before the per-match rule can run.
    */
-  @Audit({ action: 'match.tracker_game', category: AC.MATCH, tournament: { matchParam: 'id' }, describe: (c) => `Submitted a tracked game for ${matchText(c)} in ${c.t}` })
+  @Audit({
+    action: 'match.tracker_game',
+    category: AC.MATCH,
+    tournament: { matchParam: 'id' },
+    describe: (c) => `Submitted a tracked game for ${matchText(c)} in ${c.t}`,
+  })
   @Post(':id/tracker/submit-game')
-  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
-  @Roles(Role.ORGANIZER, Role.ADMIN)
-  @TournamentAccess('match:id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   submitGame(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SubmitGameDto,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.trackerService.submitGame(id, dto);
+    return this.trackerService.submitGame(id, dto, req.user);
   }
 
   /**

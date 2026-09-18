@@ -49,7 +49,8 @@ function build(opts: { allowRestore?: boolean } = {}) {
     statements.push(sql);
     return sql.includes('pg_tables') ? ALL_TABLES : '';
   });
-  (service as any).databaseUrl = () => 'postgres://user:pw@localhost:5432/joust';
+  (service as any).databaseUrl = () =>
+    'postgres://user:pw@localhost:5432/joust';
   (service as any).databaseName = () => 'joust';
   jest
     .spyOn(service, 'create')
@@ -107,7 +108,12 @@ describe('BackupService.resetData', () => {
     await service.resetData({ scope: 'everything', callerId: 'admin-1' });
     const truncate = truncateOf(statements);
 
-    for (const cleared of ['Game', 'Award', 'StoreProduct', 'TournamentFormat']) {
+    for (const cleared of [
+      'Game',
+      'Award',
+      'StoreProduct',
+      'TournamentFormat',
+    ]) {
       expect(truncate).toContain(`"public"."${cleared}"`);
     }
     // Still never these: the server has to keep running afterwards.
@@ -122,14 +128,17 @@ describe('BackupService.resetData', () => {
     // "User" is held out of the TRUNCATE for exactly this reason: an admin who
     // empties the database must still be able to sign in afterwards.
     expect(truncateOf(statements)).not.toContain('"public"."User"');
-    const del = statements.find((s) => s.startsWith('DELETE FROM "User"')) ?? '';
+    const del =
+      statements.find((s) => s.startsWith('DELETE FROM "User"')) ?? '';
     expect(del).toContain(`"id" <> 'admin-1'`);
   });
 
   it('leaves accounts alone on a content reset', async () => {
     const { service, statements } = build();
     await service.resetData({ scope: 'content', callerId: 'admin-1' });
-    expect(statements.some((s) => s.startsWith('DELETE FROM "User"'))).toBe(false);
+    expect(statements.some((s) => s.startsWith('DELETE FROM "User"'))).toBe(
+      false,
+    );
   });
 
   it('empties in one transactional statement, not table by table', async () => {

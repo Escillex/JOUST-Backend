@@ -4,13 +4,13 @@ import { TournamentController } from './tournament.controller';
 import { RoundModule } from './round/round.module';
 import { MatchModule } from './match/match.module';
 import { PrismaModule } from 'prisma/prisma.module';
-import { JwtModule } from '@nestjs/jwt';
 import { FormatsModule } from '../Formats/formats.module';
 import { AuthModule } from '../auth/auth.module';
 import { LeaderboardModule } from '../leaderboard/leaderboard.module';
 import { RealtimeModule } from '../realtime/realtime.module';
 import { NotificationModule } from '../notification/notification.module';
 import { GameModule } from '../game/game.module';
+import { SettingsModule } from '../settings/settings.module';
 import { forwardRef } from '@nestjs/common';
 
 @Module({
@@ -24,6 +24,7 @@ import { forwardRef } from '@nestjs/common';
     RealtimeModule,
     NotificationModule,
     GameModule,
+    SettingsModule,
   ],
   controllers: [TournamentController],
   providers: [TournamentService],

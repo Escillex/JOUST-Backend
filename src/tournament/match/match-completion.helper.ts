@@ -22,5 +22,6 @@ export function completedMatchData<T extends Prisma.MatchUncheckedUpdateInput>(
     ...(extra ?? ({} as T)),
     status: MatchStatus.COMPLETED,
     completedAt: new Date(),
+    reportedWinnerId: null,
   };
 }

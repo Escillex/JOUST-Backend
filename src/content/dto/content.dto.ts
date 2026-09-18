@@ -26,15 +26,23 @@ export class SubmitBuildDto {
 
   @ValidateIf((o: SubmitBuildDto) => o.kind === BuildKind.TEXT)
   @IsString()
-  @IsNotEmpty({ message: 'Write the build out, or choose image or link instead.' })
-  @MaxLength(BUILD_TEXT_MAX, { message: `A text build can be at most ${BUILD_TEXT_MAX} characters.` })
+  @IsNotEmpty({
+    message: 'Write the build out, or choose image or link instead.',
+  })
+  @MaxLength(BUILD_TEXT_MAX, {
+    message: `A text build can be at most ${BUILD_TEXT_MAX} characters.`,
+  })
   public text?: string;
 
   /** https only: a build link is shown to other players, and an http or
    *  javascript: URL has no business on the page. */
   @ValidateIf((o: SubmitBuildDto) => o.kind === BuildKind.LINK)
   @IsUrl(
-    { protocols: ['https'], require_protocol: true, require_valid_protocol: true },
+    {
+      protocols: ['https'],
+      require_protocol: true,
+      require_valid_protocol: true,
+    },
     { message: 'A build link must be a full https:// address.' },
   )
   @MaxLength(500)
@@ -100,7 +108,9 @@ export class ModerationTargetDto {
 
 export class ModerationRemoveDto extends ModerationTargetDto {
   @IsString()
-  @IsNotEmpty({ message: 'Give a reason — the owner is told why it was removed.' })
+  @IsNotEmpty({
+    message: 'Give a reason — the owner is told why it was removed.',
+  })
   @MaxLength(300)
   public reason!: string;
 }

@@ -9,10 +9,16 @@ import { AuthService } from '../src/auth/auth.service';
  * quietly becomes "off always".
  */
 const tf = (stored: string | null) =>
-  new TwoFactorService({} as any, {} as any, { get: jest.fn(async () => stored) } as any);
+  new TwoFactorService(
+    {} as any,
+    {} as any,
+    { get: jest.fn(async () => stored) } as any,
+  );
 
 describe('enforcement default', () => {
-  afterEach(() => { TwoFactorService.enforcementOverride = null; });
+  afterEach(() => {
+    TwoFactorService.enforcementOverride = null;
+  });
 
   it('is off when nothing is configured', async () => {
     expect(await tf(null).enforcementMode()).toBe('off');
@@ -51,7 +57,11 @@ function authWith(mode: string, user?: Record<string, unknown>) {
 const res: any = { cookie: jest.fn() };
 
 describe('registration and sign-in follow the mode', () => {
-  const signup = { identifier: 'newplayer', email: 'New@Example.com', password: 'long-enough-1' } as any;
+  const signup = {
+    identifier: 'newplayer',
+    email: 'New@Example.com',
+    password: 'long-enough-1',
+  } as any;
 
   it('off: registration needs no emailed code', async () => {
     const { svc, twoFactor } = authWith('off');
@@ -65,24 +75,39 @@ describe('registration and sign-in follow the mode', () => {
     const { svc, twoFactor } = authWith('all');
     const out = await svc.SignUp(signup);
     expect(out).toMatchObject({ verificationRequired: true });
-    expect(twoFactor.issueCode).toHaveBeenCalledWith(expect.anything(), 'verify');
+    expect(twoFactor.issueCode).toHaveBeenCalledWith(
+      expect.anything(),
+      'verify',
+    );
   });
 
   const unverified = async () => ({
-    id: 'u1', username: 'newplayer', email: 'new@example.com', roles: ['PLAYER'], isGuest: false,
-    emailVerified: false, avatarUrl: null, hashedPassword: await bcrypt.hash('long-enough-1', 4),
+    id: 'u1',
+    username: 'newplayer',
+    email: 'new@example.com',
+    roles: ['PLAYER'],
+    isGuest: false,
+    emailVerified: false,
+    avatarUrl: null,
+    hashedPassword: await bcrypt.hash('long-enough-1', 4),
   });
 
   it('off: an unverified account signs straight in', async () => {
     const { svc, twoFactor } = authWith('off', await unverified());
-    const out: any = await svc.SignIn({ identifier: 'newplayer', password: 'long-enough-1' } as any, res);
+    const out: any = await svc.SignIn(
+      { identifier: 'newplayer', password: 'long-enough-1' } as any,
+      res,
+    );
     expect(out.token).toBe('tok');
     expect(twoFactor.issueCode).not.toHaveBeenCalled();
   });
 
   it('all: the same unverified account must prove its address first', async () => {
     const { svc } = authWith('all', await unverified());
-    const out: any = await svc.SignIn({ identifier: 'newplayer', password: 'long-enough-1' } as any, res);
+    const out: any = await svc.SignIn(
+      { identifier: 'newplayer', password: 'long-enough-1' } as any,
+      res,
+    );
     expect(out).toMatchObject({ verificationRequired: true });
     expect(out.token).toBeUndefined();
   });

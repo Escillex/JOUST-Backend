@@ -36,7 +36,14 @@ import { RolesGuard } from '../guards/roles.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, TwoFactorService, GoogleAuthService, AccountService, JwtAuthGuard, RolesGuard],
+  providers: [
+    AuthService,
+    TwoFactorService,
+    GoogleAuthService,
+    AccountService,
+    JwtAuthGuard,
+    RolesGuard,
+  ],
   exports: [AuthService, TwoFactorService, JwtAuthGuard, RolesGuard, JwtModule], // export guards and service for use in other modules
 })
 export class AuthModule {}

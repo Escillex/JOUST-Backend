@@ -1,11 +1,24 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import sharp from 'sharp';
 import { v4 as uuidv4 } from 'uuid';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export type ImageKind = 'avatars' | 'banners' | 'assets' | 'medals' | 'plaques' | 'builds' | 'gallery' | 'prizes' | 'games';
+export type ImageKind =
+  | 'avatars'
+  | 'banners'
+  | 'assets'
+  | 'medals'
+  | 'plaques'
+  | 'builds'
+  | 'gallery'
+  | 'prizes'
+  | 'games';
 
 @Injectable()
 export class ImagesService {
@@ -13,7 +26,17 @@ export class ImagesService {
 
   constructor(private prisma: PrismaService) {
     // Ensure upload directories exist on startup
-    const subdirs = ['avatars', 'banners', 'assets', 'medals', 'plaques', 'builds', 'gallery', 'prizes', 'games'];
+    const subdirs = [
+      'avatars',
+      'banners',
+      'assets',
+      'medals',
+      'plaques',
+      'builds',
+      'gallery',
+      'prizes',
+      'games',
+    ];
     subdirs.forEach((sub) => {
       const dir = path.join(this.uploadRoot, sub);
       if (!fs.existsSync(dir)) {
@@ -74,7 +97,11 @@ export class ImagesService {
         .webp({ quality: 85, alphaQuality: 90 })
         .toFile(outPath);
       return `/uploads/${subdir}/${fileName}`;
-    } else if (subdir === 'builds' || subdir === 'gallery' || subdir === 'prizes') {
+    } else if (
+      subdir === 'builds' ||
+      subdir === 'gallery' ||
+      subdir === 'prizes'
+    ) {
       // Player photos of a deck or a build, or an organizer's photo of the prize
       // on offer. 1600px on the long side keeps a decklist legible without
       // shipping a 12-megapixel original.
@@ -249,7 +276,9 @@ export class ImagesService {
     // The retired "General" placeholder is not assignable and not editable
     // anywhere else either (GameService.update refuses it).
     if (game.isBuiltin) {
-      throw new BadRequestException('The retired system game cannot be modified');
+      throw new BadRequestException(
+        'The retired system game cannot be modified',
+      );
     }
 
     // Save and commit before deleting the old one, so a failed upload cannot
@@ -272,7 +301,9 @@ export class ImagesService {
     const game = await this.prisma.game.findUnique({ where: { id: gameId } });
     if (!game) throw new NotFoundException('Game not found');
     if (game.isBuiltin) {
-      throw new BadRequestException('The retired system game cannot be modified');
+      throw new BadRequestException(
+        'The retired system game cannot be modified',
+      );
     }
 
     if (game.iconUrl) {

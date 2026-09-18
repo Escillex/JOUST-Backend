@@ -255,7 +255,10 @@ export class UserService {
    */
   async getMatchHistory(handle: string, offset = 0, limit = HISTORY_PAGE) {
     const user = await this.resolveUser(handle);
-    const take = Math.min(Math.max(1, Math.floor(limit) || HISTORY_PAGE), HISTORY_PAGE_MAX);
+    const take = Math.min(
+      Math.max(1, Math.floor(limit) || HISTORY_PAGE),
+      HISTORY_PAGE_MAX,
+    );
     const skip = Math.max(0, Math.floor(offset) || 0);
 
     const played = {
@@ -271,7 +274,8 @@ export class UserService {
       where: { rounds: { some: { matches: { some: played } } } },
       select: { id: true, date: true, createdAt: true },
     });
-    const when = (t: { date: Date | null; createdAt: Date }) => (t.date ?? t.createdAt).getTime();
+    const when = (t: { date: Date | null; createdAt: Date }) =>
+      (t.date ?? t.createdAt).getTime();
     const pageIds = all
       .sort((a, b) => when(b) - when(a))
       .slice(skip, skip + take)
@@ -306,8 +310,24 @@ export class UserService {
           completedAt: true,
           createdAt: true,
           round: { select: { roundNumber: true, tournamentId: true } },
-          player1: { select: { id: true, username: true, displayName: true, slug: true, avatarUrl: true } },
-          player2: { select: { id: true, username: true, displayName: true, slug: true, avatarUrl: true } },
+          player1: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              slug: true,
+              avatarUrl: true,
+            },
+          },
+          player2: {
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              slug: true,
+              avatarUrl: true,
+            },
+          },
         },
       }),
       this.prisma.tournamentParticipant.findMany({
@@ -317,7 +337,9 @@ export class UserService {
     ]);
 
     const byId = new Map(tournaments.map((t) => [t.id, t]));
-    const placement = new Map(entries.map((e) => [e.tournamentId, e.placement]));
+    const placement = new Map(
+      entries.map((e) => [e.tournamentId, e.placement]),
+    );
 
     const groups = pageIds.map((id) => {
       const t = byId.get(id)!;
@@ -339,16 +361,29 @@ export class UserService {
             // A deleted opponent has no account left, only the name burned into
             // the match (deleteUser); a guest or TBD has neither.
             const oppName =
-              opp?.displayName || opp?.username || (mine ? m.p2Name : m.p1Name) || 'TBD';
+              opp?.displayName ||
+              opp?.username ||
+              (mine ? m.p2Name : m.p1Name) ||
+              'TBD';
             return {
               id: m.id,
               round: m.round.roundNumber,
               roundLabel: roundText(m.round.roundNumber),
-              result: m.winnerId === user.id ? 'win' : m.winnerId === null ? 'draw' : 'loss',
+              result:
+                m.winnerId === user.id
+                  ? 'win'
+                  : m.winnerId === null
+                    ? 'draw'
+                    : 'loss',
               myScore: mine ? m.player1Score : m.player2Score,
               oppScore: mine ? m.player2Score : m.player1Score,
               opponent: opp
-                ? { id: opp.id, slug: opp.slug, name: oppName, avatarUrl: opp.avatarUrl }
+                ? {
+                    id: opp.id,
+                    slug: opp.slug,
+                    name: oppName,
+                    avatarUrl: opp.avatarUrl,
+                  }
                 : { id: null, slug: null, name: oppName, avatarUrl: null },
               completedAt: (m.completedAt ?? m.createdAt).toISOString(),
             };

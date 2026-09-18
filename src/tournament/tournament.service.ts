@@ -40,6 +40,7 @@ import {
 } from 'src/notification/notification.service';
 import { GameService } from 'src/game/game.service';
 import { completedMatchData } from './match/match-completion.helper';
+import { SettingsService } from 'src/settings/settings.service';
 
 @Injectable()
 export class TournamentService {
@@ -53,6 +54,7 @@ export class TournamentService {
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationService,
     private readonly games: GameService,
+    private readonly settings: SettingsService,
   ) {}
 
   private readonly ALLOWED_TRANSITIONS: Record<
@@ -129,7 +131,10 @@ export class TournamentService {
     if (t.system == null) data.system = t.format.system;
     if (t.formatName == null) data.formatName = t.format.name;
     if (Object.keys(data).length > 0) {
-      await this.prisma.tournament.update({ where: { id: tournamentId }, data });
+      await this.prisma.tournament.update({
+        where: { id: tournamentId },
+        data,
+      });
     }
   }
 
@@ -332,8 +337,16 @@ export class TournamentService {
       where: { id },
     });
     if (!tournament) throw new NotFoundException('Tournament not found');
-    if (tournament.status !== TournamentStatus.OPEN)
-      throw new BadRequestException('Cannot edit started tournament');
+    if (
+      !(
+        [
+          TournamentStatus.OPEN,
+          TournamentStatus.UPCOMING,
+          TournamentStatus.ONGOING,
+        ] as TournamentStatus[]
+      ).includes(tournament.status)
+    )
+      throw new BadRequestException('Cannot edit tournament in current status');
 
     if (dto.formatId) {
       const fmt = await this.prisma.tournamentFormat.findUnique({
@@ -481,16 +494,25 @@ export class TournamentService {
    * opened, which has not started at all.
    */
   private startRefusal(status?: TournamentStatus) {
-    if (status === TournamentStatus.UPCOMING || status === TournamentStatus.PENDING) {
+    if (
+      status === TournamentStatus.UPCOMING ||
+      status === TournamentStatus.PENDING
+    ) {
       return {
         code: 'NOT_OPEN_YET',
         message: 'Open this tournament for registration before starting it.',
       };
     }
     if (status === TournamentStatus.COMPLETED) {
-      return { code: 'ALREADY_COMPLETED', message: 'This tournament has already finished.' };
+      return {
+        code: 'ALREADY_COMPLETED',
+        message: 'This tournament has already finished.',
+      };
     }
-    return { code: 'ALREADY_STARTED', message: 'This tournament has already started.' };
+    return {
+      code: 'ALREADY_STARTED',
+      message: 'This tournament has already started.',
+    };
   }
 
   async startTournament(tournamentId: string) {
@@ -524,7 +546,8 @@ export class TournamentService {
       throw new BadRequestException('Tournament has no format assigned');
     // Mandatory builds (obj. 4.3): refuse to draw a bracket until every active
     // entrant's build has been approved by an organizer.
-    if (tournament.buildsRequired) await assertBuildsReady(this.prisma, tournamentId);
+    if (tournament.buildsRequired)
+      await assertBuildsReady(this.prisma, tournamentId);
 
     // Claim the start atomically. The check above is a fast path for a friendly
     // error; on its own it is a read-then-write race with a window as long as
@@ -548,8 +571,12 @@ export class TournamentService {
         // The bracket type and the preset's name travel with the rules: they
         // are not part of the config, and a tournament that has started must
         // not need its preset to still exist (todo.md §4).
-        ...(tournament.system == null ? { system: tournament.format.system } : {}),
-        ...(tournament.formatName == null ? { formatName: tournament.format.name } : {}),
+        ...(tournament.system == null
+          ? { system: tournament.format.system }
+          : {}),
+        ...(tournament.formatName == null
+          ? { formatName: tournament.format.name }
+          : {}),
       },
     });
     if (claim.count === 0) {
@@ -911,8 +938,12 @@ export class TournamentService {
         // not the @handle — the same rule account deletion uses when it burns a
         // name in (auth.service), so a finished bracket never shows "mira-calder"
         // in one match and "Mira Calder" in the next.
-        const shown = (u: { displayName: string | null; username: string | null } | null | undefined) =>
-          u ? u.displayName?.trim() || u.username || null : null;
+        const shown = (
+          u:
+            | { displayName: string | null; username: string | null }
+            | null
+            | undefined,
+        ) => (u ? u.displayName?.trim() || u.username || null : null);
         for (const round of tournament.rounds) {
           for (const match of round.matches) {
             await tx.match.update({
@@ -1181,7 +1212,9 @@ export class TournamentService {
         // invite route are unauthenticated, so exposing creator/participant emails
         // let anyone with a tournament id enumerate them. Managers who need contact
         // details use GET /auth/users (organizer/admin only).
-        createdBy: { select: { id: true, username: true, displayName: true, slug: true } },
+        createdBy: {
+          select: { id: true, username: true, displayName: true, slug: true },
+        },
         winner: {
           select: {
             id: true,
@@ -1219,7 +1252,16 @@ export class TournamentService {
     // controls on this instead of on the viewer's role, so what it renders
     // matches what the guards will actually permit.
     const access = await checkTournamentAccess(this.prisma, tournamentId, user);
-    return { ...withFormatSnapshot(tournament), canManage: access === 'ALLOWED' };
+    return {
+      ...withFormatSnapshot(tournament),
+      canManage: access === 'ALLOWED',
+      // Whether the bulk guest generator may be used (the "Allow Bulk Guest
+      // Creation" setting). Served to everyone so the manage controls can follow
+      // it for co-organizers too, who get 403 on the admin-only settings read.
+      // It toggles that one control only — single guest add and registered-player
+      // invites are never affected.
+      allowBulkGuestCreation: await this.settings.getBoolean('DEV_BULK_GUESTS'),
+    };
   }
 
   async getTournamentByInviteToken(inviteToken: string) {
@@ -1233,7 +1275,9 @@ export class TournamentService {
         // invite route are unauthenticated, so exposing creator/participant emails
         // let anyone with a tournament id enumerate them. Managers who need contact
         // details use GET /auth/users (organizer/admin only).
-        createdBy: { select: { id: true, username: true, displayName: true, slug: true } },
+        createdBy: {
+          select: { id: true, username: true, displayName: true, slug: true },
+        },
         winner: {
           select: {
             id: true,

@@ -20,7 +20,11 @@ export class UserController {
     @Query('offset') offset?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.userService.getMatchHistory(handle, Number(offset ?? 0), Number(limit ?? 8));
+    return this.userService.getMatchHistory(
+      handle,
+      Number(offset ?? 0),
+      Number(limit ?? 8),
+    );
   }
 
   @Get(':id/stats')

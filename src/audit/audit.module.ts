@@ -17,7 +17,10 @@ import { AuditController } from './audit.controller';
   // self-deletion).
   imports: [PrismaModule, forwardRef(() => AuthModule)],
   controllers: [AuditController],
-  providers: [AuditService, { provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
+  providers: [
+    AuditService,
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+  ],
   exports: [AuditService],
 })
 export class AuditModule {}

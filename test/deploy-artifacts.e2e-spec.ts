@@ -35,9 +35,9 @@ describe('deploy artifacts', () => {
 
     /** `../src/user/user-slug.util` -> `src`. Bare package imports are skipped:
      *  node_modules is copied wholesale. */
-    const importedDirs = [
-      ...seed.matchAll(/from\s+'(\.\.\/[^']+)'/g),
-    ].map((m) => m[1].replace(/^\.\.\//, '').split('/')[0]);
+    const importedDirs = [...seed.matchAll(/from\s+'(\.\.\/[^']+)'/g)].map(
+      (m) => m[1].replace(/^\.\.\//, '').split('/')[0],
+    );
 
     it('copies every directory the seed reaches into', () => {
       // The seed runs through ts-node at container start, so it needs SOURCE,

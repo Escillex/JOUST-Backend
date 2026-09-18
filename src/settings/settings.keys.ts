@@ -61,10 +61,12 @@ export const SETTINGS = {
     key: 'security.googleAllowedDomain',
     env: 'GOOGLE_ALLOWED_DOMAIN',
   },
-  /** Bulk guest creation is off unless explicitly allowed: it mints real user
-   *  rows in a loop, and an organizer who fat-fingers a quantity can flood a
-   *  tournament (and the guest-cleanup crons) in one click. Opt-in, not
-   *  opt-out. */
+  /** Bulk guest creation is off unless explicitly allowed, and it is opt-in,
+   *  not opt-out: it mints many real user rows at once and a fat-fingered
+   *  organizer can flood a tournament (and the guest-cleanup crons) in one
+   *  click. When off, the manage UI hides the bulk generator and
+   *  `POST /dev/batch-guests/:id` refuses. It is a toggle for that one control
+   *  only — single guest add and registered-player invites are never affected. */
   DEV_BULK_GUESTS: {
     key: 'dev.bulkGuests',
     env: 'DEV_BULK_GUESTS',

@@ -19,7 +19,12 @@ import {
  *  AuditModule; AuthModule supplies JwtService for the guards. */
 @Module({
   imports: [PrismaModule, AuthModule, ImagesModule, NotificationModule],
-  controllers: [BuildController, GalleryController, ReportController, ModerationController],
+  controllers: [
+    BuildController,
+    GalleryController,
+    ReportController,
+    ModerationController,
+  ],
   providers: [BuildService, GalleryService, ModerationService, ModerationJob],
   exports: [BuildService, GalleryService],
 })

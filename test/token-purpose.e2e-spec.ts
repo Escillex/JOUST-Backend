@@ -23,29 +23,65 @@ describe('token purpose', () => {
   });
 
   const sign = (purpose?: string) =>
-    jwt.sign({ id: 'u1', email: null, username: 'u', roles: [], ...(purpose ? { purpose } : {}) });
+    jwt.sign({
+      id: 'u1',
+      email: null,
+      username: 'u',
+      roles: [],
+      ...(purpose ? { purpose } : {}),
+    });
 
   describe('isSessionToken', () => {
     it('treats a token with no purpose as a session', () => {
       // Tokens issued before the claim existed must keep working, or deploying
       // this signs everyone out.
-      expect(isSessionToken({ id: 'u1', email: null, username: null, roles: [] })).toBe(true);
+      expect(
+        isSessionToken({ id: 'u1', email: null, username: null, roles: [] }),
+      ).toBe(true);
     });
 
     it('accepts session and rejects the intermediate purposes', () => {
-      expect(isSessionToken({ id: 'u1', email: null, username: null, roles: [], purpose: 'session' })).toBe(true);
-      expect(isSessionToken({ id: 'u1', email: null, username: null, roles: [], purpose: '2fa' })).toBe(false);
-      expect(isSessionToken({ id: 'u1', email: null, username: null, roles: [], purpose: 'password_change' })).toBe(false);
+      expect(
+        isSessionToken({
+          id: 'u1',
+          email: null,
+          username: null,
+          roles: [],
+          purpose: 'session',
+        }),
+      ).toBe(true);
+      expect(
+        isSessionToken({
+          id: 'u1',
+          email: null,
+          username: null,
+          roles: [],
+          purpose: '2fa',
+        }),
+      ).toBe(false);
+      expect(
+        isSessionToken({
+          id: 'u1',
+          email: null,
+          username: null,
+          roles: [],
+          purpose: 'password_change',
+        }),
+      ).toBe(false);
     });
   });
 
   describe('JwtAuthGuard', () => {
     // No revocation stamp on this account, so the guard's check passes through.
-    const prisma: any = { user: { findUnique: jest.fn(async () => ({ sessionsValidFrom: null })) } };
+    const prisma: any = {
+      user: { findUnique: jest.fn(async () => ({ sessionsValidFrom: null })) },
+    };
     const guard = new JwtAuthGuard(jwt, prisma);
 
     it('admits a session token', async () => {
-      await expect(guard.canActivate(contextWith(sign('session')))).resolves.toBe(true);
+      await expect(
+        guard.canActivate(contextWith(sign('session'))),
+      ).resolves.toBe(true);
     });
 
     it('admits a legacy token with no purpose', async () => {
@@ -53,9 +89,9 @@ describe('token purpose', () => {
     });
 
     it('refuses a 2FA challenge token', async () => {
-      await expect(guard.canActivate(contextWith(sign('2fa')))).rejects.toBeInstanceOf(
-        UnauthorizedException,
-      );
+      await expect(
+        guard.canActivate(contextWith(sign('2fa'))),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
     it('refuses a forced-password-change token', async () => {
@@ -97,32 +133,58 @@ describe('JwtAuthGuard revocation', () => {
   const jwt = new JwtService({ secret });
 
   const ctx = (token: string) =>
-    ({ switchToHttp: () => ({ getRequest: () => ({ cookies: { token }, headers: {} }) }) }) as any;
+    ({
+      switchToHttp: () => ({
+        getRequest: () => ({ cookies: { token }, headers: {} }),
+      }),
+    }) as any;
   const tokenIssuedAt = async (secondsAgo: number) =>
-    jwt.signAsync({ id: 'u1', email: null, username: null, roles: [], purpose: 'session', iat: Math.floor(Date.now() / 1000) - secondsAgo }, { secret });
+    jwt.signAsync(
+      {
+        id: 'u1',
+        email: null,
+        username: null,
+        roles: [],
+        purpose: 'session',
+        iat: Math.floor(Date.now() / 1000) - secondsAgo,
+      },
+      { secret },
+    );
 
   const guardFor = (validFrom: Date | null) =>
-    new JwtAuthGuard(jwt, { user: { findUnique: async () => ({ sessionsValidFrom: validFrom }) } } as any);
+    new JwtAuthGuard(jwt, {
+      user: { findUnique: async () => ({ sessionsValidFrom: validFrom }) },
+    } as any);
 
   beforeEach(() => JwtAuthGuard.forget('u1'));
 
   it('refuses a token issued before the account signed out everywhere', async () => {
     const guard = guardFor(new Date());
-    await expect(guard.canActivate(ctx(await tokenIssuedAt(60)))).rejects.toThrow('Signed out');
+    await expect(
+      guard.canActivate(ctx(await tokenIssuedAt(60))),
+    ).rejects.toThrow('Signed out');
   });
 
   it('admits the replacement session issued in the stamped second (a password change)', async () => {
     const guard = guardFor(new Date(Math.floor(Date.now() / 1000) * 1000));
-    await expect(guard.canActivate(ctx(await tokenIssuedAt(0)))).resolves.toBe(true);
+    await expect(guard.canActivate(ctx(await tokenIssuedAt(0)))).resolves.toBe(
+      true,
+    );
   });
 
   it('refuses even this second’s tokens when the stamp is the next second (sign out everywhere)', async () => {
-    const guard = guardFor(new Date((Math.floor(Date.now() / 1000) + 1) * 1000));
-    await expect(guard.canActivate(ctx(await tokenIssuedAt(0)))).rejects.toThrow('Signed out');
+    const guard = guardFor(
+      new Date((Math.floor(Date.now() / 1000) + 1) * 1000),
+    );
+    await expect(
+      guard.canActivate(ctx(await tokenIssuedAt(0))),
+    ).rejects.toThrow('Signed out');
   });
 
   it('admits everything when nothing has been revoked', async () => {
     const guard = guardFor(null);
-    await expect(guard.canActivate(ctx(await tokenIssuedAt(60 * 60 * 24)))).resolves.toBe(true);
+    await expect(
+      guard.canActivate(ctx(await tokenIssuedAt(60 * 60 * 24))),
+    ).resolves.toBe(true);
   });
 });

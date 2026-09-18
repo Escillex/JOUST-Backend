@@ -184,7 +184,9 @@ export class UpdateProfileDto {
   /** Empty string clears it. */
   @IsOptional()
   @IsString()
-  @MaxLength(BIO_MAX_LENGTH, { message: `Bio can be at most ${BIO_MAX_LENGTH} characters.` })
+  @MaxLength(BIO_MAX_LENGTH, {
+    message: `Bio can be at most ${BIO_MAX_LENGTH} characters.`,
+  })
   public bio?: string;
 
   @IsOptional()
@@ -214,7 +216,9 @@ export class UpdateMeDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(BIO_MAX_LENGTH, { message: `Bio can be at most ${BIO_MAX_LENGTH} characters.` })
+  @MaxLength(BIO_MAX_LENGTH, {
+    message: `Bio can be at most ${BIO_MAX_LENGTH} characters.`,
+  })
   public bio?: string;
 
   /** The games this person says they play. The WHOLE set every time — sending

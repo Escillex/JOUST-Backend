@@ -37,8 +37,22 @@ function participation(overrides: any = {}) {
               player2Id: OTHER,
               player1Score: 1,
               player2Score: 2,
-              player1: { id: ME, username: 'me', displayName: 'Me', slug: 'me', avatarUrl: null, isGuest: false },
-              player2: { id: OTHER, username: 'owen', displayName: 'Owen Blake', slug: 'owen', avatarUrl: null, isGuest: false },
+              player1: {
+                id: ME,
+                username: 'me',
+                displayName: 'Me',
+                slug: 'me',
+                avatarUrl: null,
+                isGuest: false,
+              },
+              player2: {
+                id: OTHER,
+                username: 'owen',
+                displayName: 'Owen Blake',
+                slug: 'owen',
+                avatarUrl: null,
+                isGuest: false,
+              },
             },
           ],
         },
@@ -54,23 +68,33 @@ function build(prismaOverrides: any = {}) {
       findMany: jest.fn().mockResolvedValue([participation()]),
     },
     userGame: { findMany: jest.fn().mockResolvedValue([]) },
-    tournament: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn().mockResolvedValue(null) },
+    tournament: {
+      findMany: jest.fn().mockResolvedValue([]),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     userAward: { findMany: jest.fn().mockResolvedValue([]) },
     galleryImage: { count: jest.fn().mockResolvedValue(0) },
     tournamentBuild: { count: jest.fn().mockResolvedValue(0) },
     user: { count: jest.fn().mockResolvedValue(0) },
-    storeProduct: { count: jest.fn().mockResolvedValue(0), findFirst: jest.fn().mockResolvedValue(null) },
+    storeProduct: {
+      count: jest.fn().mockResolvedValue(0),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
     ...prismaOverrides,
   };
   const leaderboard: any = {
     getUserStats: jest.fn().mockResolvedValue(null),
     getGlobalLeaderboard: jest.fn().mockResolvedValue([]),
   };
-  return { service: new DashboardService(prisma, leaderboard), prisma, leaderboard };
+  return {
+    service: new DashboardService(prisma, leaderboard),
+    prisma,
+    leaderboard,
+  };
 }
 
 describe('DashboardService', () => {
-  it('reports the match from the viewer\'s side, not player1\'s', async () => {
+  it("reports the match from the viewer's side, not player1's", async () => {
     // The viewer is player1 and is LOSING 1-2. Read from the wrong side this
     // would tell them they are winning.
     const { service } = build({
@@ -78,7 +102,9 @@ describe('DashboardService', () => {
         findMany: jest
           .fn()
           .mockResolvedValueOnce([participation()])
-          .mockResolvedValueOnce([{ id: 'part-1', tournamentId: 't1', stats: { points: 6 } }]),
+          .mockResolvedValueOnce([
+            { id: 'part-1', tournamentId: 't1', stats: { points: 6 } },
+          ]),
       },
     });
 
@@ -108,7 +134,9 @@ describe('DashboardService', () => {
         findMany: jest
           .fn()
           .mockResolvedValueOnce([p])
-          .mockResolvedValueOnce([{ id: 'part-1', tournamentId: 't1', stats: { points: 6 } }]),
+          .mockResolvedValueOnce([
+            { id: 'part-1', tournamentId: 't1', stats: { points: 6 } },
+          ]),
       },
     });
 
@@ -149,7 +177,9 @@ describe('DashboardService', () => {
         findMany: jest
           .fn()
           .mockResolvedValueOnce([p])
-          .mockResolvedValueOnce([{ id: 'part-1', tournamentId: 't1', stats: { points: 6 } }]),
+          .mockResolvedValueOnce([
+            { id: 'part-1', tournamentId: 't1', stats: { points: 6 } },
+          ]),
       },
     });
 
@@ -167,7 +197,9 @@ describe('DashboardService', () => {
         findMany: jest
           .fn()
           .mockResolvedValueOnce([participation()])
-          .mockResolvedValueOnce([{ id: 'part-1', tournamentId: 't1', stats: { points: 6 } }]),
+          .mockResolvedValueOnce([
+            { id: 'part-1', tournamentId: 't1', stats: { points: 6 } },
+          ]),
       },
     });
 

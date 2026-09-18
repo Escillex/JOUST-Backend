@@ -38,7 +38,12 @@ export class TournamentController {
   constructor(private readonly tournamentService: TournamentService) {}
 
   // POST /tournaments
-  @Audit({ action: 'tournament.create', category: AC.TOURNAMENT, tournament: { result: 'id' }, describe: (c) => `Created tournament ${c.t}` })
+  @Audit({
+    action: 'tournament.create',
+    category: AC.TOURNAMENT,
+    tournament: { result: 'id' },
+    describe: (c) => `Created tournament ${c.t}`,
+  })
   @Post('createtournament')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -52,7 +57,12 @@ export class TournamentController {
   }
 
   // PATCH /tournaments/:id
-  @Audit({ action: 'tournament.update', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Edited ${c.t} (${c.fields.join(', ') || 'no changes'})` })
+  @Audit({
+    action: 'tournament.update',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    describe: (c) => `Edited ${c.t} (${c.fields.join(', ') || 'no changes'})`,
+  })
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -65,7 +75,13 @@ export class TournamentController {
   }
 
   // PATCH /tournaments/:id/game — reassign the game (any status; staff-gated)
-  @Audit({ action: 'tournament.reassign_game', category: AC.TOURNAMENT, tournament: { param: 'id' }, pick: ['gameId'], describe: (c) => `Changed the game of ${c.t}` })
+  @Audit({
+    action: 'tournament.reassign_game',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    pick: ['gameId'],
+    describe: (c) => `Changed the game of ${c.t}`,
+  })
   @Patch(':id/game')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -77,7 +93,13 @@ export class TournamentController {
     return this.tournamentService.reassignGame(id, dto.gameId);
   }
 
-  @Audit({ action: 'tournament.status', category: AC.TOURNAMENT, tournament: { param: 'id' }, pick: ['status'], describe: (c) => `Set ${c.t} to ${String(c.body.status)}` })
+  @Audit({
+    action: 'tournament.status',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    pick: ['status'],
+    describe: (c) => `Set ${c.t} to ${String(c.body.status)}`,
+  })
   @Patch(':id/status')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -90,7 +112,12 @@ export class TournamentController {
     return this.tournamentService.updateStatus(id, dto, req.user);
   }
 
-  @Audit({ action: 'tournament.generate_bracket', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Generated the bracket for ${c.t}` })
+  @Audit({
+    action: 'tournament.generate_bracket',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    describe: (c) => `Generated the bracket for ${c.t}`,
+  })
   @Post(':id/generate-bracket')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -104,7 +131,12 @@ export class TournamentController {
   }
 
   // POST /tournaments/:id/start
-  @Audit({ action: 'tournament.start', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Started ${c.t}` })
+  @Audit({
+    action: 'tournament.start',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    describe: (c) => `Started ${c.t}`,
+  })
   @Post('starttournament/:id')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -114,7 +146,12 @@ export class TournamentController {
     return this.tournamentService.startTournament(id);
   }
 
-  @Audit({ action: 'tournament.delete', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Deleted the tournament ${c.t}` })
+  @Audit({
+    action: 'tournament.delete',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    describe: (c) => `Deleted the tournament ${c.t}`,
+  })
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -123,7 +160,12 @@ export class TournamentController {
     return this.tournamentService.deleteTournament(id);
   }
 
-  @Audit({ action: 'tournament.complete', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Completed ${c.t}` })
+  @Audit({
+    action: 'tournament.complete',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    describe: (c) => `Completed ${c.t}`,
+  })
   @Patch(':id/complete')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -132,7 +174,14 @@ export class TournamentController {
     return this.tournamentService.completeTournament(id);
   }
 
-  @Audit({ action: 'tournament.resolve_tie', category: AC.TOURNAMENT, tournament: { param: 'id' }, pick: ['action'], describe: (c) => `Resolved a tie in ${c.t} (${c.body.action === 'EXTEND_ROUND' ? 'extra round added' : 'tie-breakers applied'})` })
+  @Audit({
+    action: 'tournament.resolve_tie',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    pick: ['action'],
+    describe: (c) =>
+      `Resolved a tie in ${c.t} (${c.body.action === 'EXTEND_ROUND' ? 'extra round added' : 'tie-breakers applied'})`,
+  })
   @Post(':id/resolve-tie')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -144,7 +193,12 @@ export class TournamentController {
     return this.tournamentService.resolveTie(id, action);
   }
 
-  @Audit({ action: 'tournament.cancel_cleanup', category: AC.TOURNAMENT, tournament: { param: 'id' }, describe: (c) => `Cancelled the scheduled guest cleanup for ${c.t}` })
+  @Audit({
+    action: 'tournament.cancel_cleanup',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'id' },
+    describe: (c) => `Cancelled the scheduled guest cleanup for ${c.t}`,
+  })
   @Patch(':id/cancel-cleanup')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

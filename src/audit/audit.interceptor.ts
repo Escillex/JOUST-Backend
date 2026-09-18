@@ -1,4 +1,9 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import {
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  NestInterceptor,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { from, Observable, switchMap, tap } from 'rxjs';
 import { AUDIT_KEY, AuditSpec } from './audit.decorator';
@@ -18,7 +23,10 @@ export class AuditInterceptor implements NestInterceptor {
   ) {}
 
   intercept(ctx: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const spec = this.reflector.get<AuditSpec | undefined>(AUDIT_KEY, ctx.getHandler());
+    const spec = this.reflector.get<AuditSpec | undefined>(
+      AUDIT_KEY,
+      ctx.getHandler(),
+    );
     if (!spec || ctx.getType() !== 'http') return next.handle();
 
     const req = ctx.switchToHttp().getRequest();
@@ -32,7 +40,14 @@ export class AuditInterceptor implements NestInterceptor {
         next.handle().pipe(
           tap({
             next: (result) => {
-              void this.audit.commit(spec, actor, prepared, params, body, result);
+              void this.audit.commit(
+                spec,
+                actor,
+                prepared,
+                params,
+                body,
+                result,
+              );
             },
           }),
         ),

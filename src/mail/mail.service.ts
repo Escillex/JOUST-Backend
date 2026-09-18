@@ -74,7 +74,8 @@ export class MailService {
       const error = err instanceof Error ? err.message : String(err);
       return { delivered: false, transport: 'none', error };
     }
-    if (!transport.verify) return { delivered: true, transport: transport.name };
+    if (!transport.verify)
+      return { delivered: true, transport: transport.name };
     try {
       await transport.verify();
       return { delivered: true, transport: transport.name };

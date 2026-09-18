@@ -21,7 +21,10 @@ export class AuditController {
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
   ) {
-    const cat = category && category in AuditCategory ? (category as AuditCategory) : undefined;
+    const cat =
+      category && category in AuditCategory
+        ? (category as AuditCategory)
+        : undefined;
     return this.audit.list({
       category: cat,
       search: search?.trim() || undefined,

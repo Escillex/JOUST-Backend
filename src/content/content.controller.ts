@@ -38,8 +38,11 @@ import {
 } from './dto/content.dto';
 
 /** Player photos are resized to 1600px on the server; nothing larger is useful. */
-const PHOTO = FileInterceptor('image', { limits: { fileSize: 8 * 1024 * 1024 } });
-const uid = (req: AuthenticatedRequest) => req.user.id || (req.user as { sub?: string }).sub!;
+const PHOTO = FileInterceptor('image', {
+  limits: { fileSize: 8 * 1024 * 1024 },
+});
+const uid = (req: AuthenticatedRequest) =>
+  req.user.id || (req.user as { sub?: string }).sub!;
 
 /** Tournament builds (obj. 4.3). */
 @Controller('tournaments/:tournamentId/builds')
@@ -50,7 +53,10 @@ export class BuildController {
    *  everyone else sees only what the tournament's visibility allows. */
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
-  list(@Param('tournamentId', ParseUUIDPipe) tournamentId: string, @Req() req: AuthenticatedRequest) {
+  list(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     return this.builds.list(tournamentId, req.user);
   }
 
@@ -68,7 +74,10 @@ export class BuildController {
 
   @Delete('me')
   @UseGuards(JwtAuthGuard)
-  withdraw(@Param('tournamentId', ParseUUIDPipe) tournamentId: string, @Req() req: AuthenticatedRequest) {
+  withdraw(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     return this.builds.withdraw(tournamentId, uid(req));
   }
 
@@ -77,7 +86,8 @@ export class BuildController {
     category: AC.PARTICIPANT,
     tournament: { param: 'tournamentId' },
     pick: ['decision', 'note'],
-    describe: (c) => `${c.body.decision === 'APPROVED' ? 'Approved' : 'Rejected'} a build in ${c.t}${c.body.note ? ` (${String(c.body.note)})` : ''}`,
+    describe: (c) =>
+      `${c.body.decision === 'APPROVED' ? 'Approved' : 'Rejected'} a build in ${c.t}${c.body.note ? ` (${String(c.body.note)})` : ''}`,
   })
   @Patch(':buildId/review')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
@@ -98,13 +108,18 @@ export class BuildController {
     tournament: { param: 'tournamentId' },
     pick: ['buildsRequired', 'buildVisibility', 'buildsLockAtStart'],
     describe: (c) =>
-      `Changed build settings for ${c.t} (${Object.entries(c.body).map(([k, v]) => `${k}: ${String(v)}`).join(', ')})`,
+      `Changed build settings for ${c.t} (${Object.entries(c.body)
+        .map(([k, v]) => `${k}: ${String(v)}`)
+        .join(', ')})`,
   })
   @Patch('settings')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
   @TournamentAccess('tournamentId')
-  settings(@Param('tournamentId', ParseUUIDPipe) tournamentId: string, @Body() dto: BuildSettingsDto) {
+  settings(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Body() dto: BuildSettingsDto,
+  ) {
     return this.builds.updateSettings(tournamentId, dto);
   }
 }
@@ -132,7 +147,10 @@ export class GalleryController {
   }
 
   @Delete(':gameId')
-  remove(@Param('gameId', ParseUUIDPipe) gameId: string, @Req() req: AuthenticatedRequest) {
+  remove(
+    @Param('gameId', ParseUUIDPipe) gameId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
     return this.gallery.remove(uid(req), gameId);
   }
 }
@@ -170,7 +188,8 @@ export class ModerationController {
     action: 'moderation.remove',
     category: AC.MODERATION,
     pick: ['targetType', 'targetId', 'reason'],
-    describe: (c) => `Removed a ${c.body.targetType === 'GALLERY_IMAGE' ? 'gallery image' : 'tournament build'} (${String(c.body.reason)})`,
+    describe: (c) =>
+      `Removed a ${c.body.targetType === 'GALLERY_IMAGE' ? 'gallery image' : 'tournament build'} (${String(c.body.reason)})`,
   })
   @Post('remove')
   remove(@Body() dto: ModerationRemoveDto, @Req() req: AuthenticatedRequest) {
@@ -181,7 +200,8 @@ export class ModerationController {
     action: 'moderation.dismiss',
     category: AC.MODERATION,
     pick: ['targetType', 'targetId'],
-    describe: (c) => `Dismissed reports on a ${c.body.targetType === 'GALLERY_IMAGE' ? 'gallery image' : 'tournament build'}`,
+    describe: (c) =>
+      `Dismissed reports on a ${c.body.targetType === 'GALLERY_IMAGE' ? 'gallery image' : 'tournament build'}`,
   })
   @Post('dismiss')
   dismiss(@Body() dto: ModerationTargetDto, @Req() req: AuthenticatedRequest) {
@@ -192,7 +212,8 @@ export class ModerationController {
     action: 'moderation.restore',
     category: AC.MODERATION,
     pick: ['targetType', 'targetId'],
-    describe: (c) => `Restored a removed ${c.body.targetType === 'GALLERY_IMAGE' ? 'gallery image' : 'tournament build'}`,
+    describe: (c) =>
+      `Restored a removed ${c.body.targetType === 'GALLERY_IMAGE' ? 'gallery image' : 'tournament build'}`,
   })
   @Post('restore')
   restore(@Body() dto: ModerationTargetDto) {

@@ -156,7 +156,11 @@ export async function writeJoustql(
 ): Promise<JoustqlManifest> {
   const { encryption, passphrase, ...rest } = meta;
 
-  if (encryption !== 'none' && encryption !== 'serverKey' && encryption !== 'passphrase') {
+  if (
+    encryption !== 'none' &&
+    encryption !== 'serverKey' &&
+    encryption !== 'passphrase'
+  ) {
     // Guessing here is the dangerous option in both directions: default to
     // 'none' and a full backup silently ships in the clear; default to a key
     // and it is silently unreadable. So neither.
@@ -233,7 +237,10 @@ function parseHeader(head: Buffer): ParsedHeader {
       head.subarray(firstBreak + 1, secondBreak).toString('utf8'),
     ) as JoustqlManifest;
   } catch {
-    throw new JoustqlError('BAD_FORMAT', 'The backup manifest is not readable.');
+    throw new JoustqlError(
+      'BAD_FORMAT',
+      'The backup manifest is not readable.',
+    );
   }
   if (manifest.format !== 1 && manifest.format !== 2) {
     throw new JoustqlError(
@@ -296,7 +303,11 @@ export async function readPayload(
           'This backup is passphrase-protected. Enter the passphrase it was exported with.',
         );
       }
-      key = deriveKey(passphrase, Buffer.from(manifest.kdf.salt, 'base64'), manifest.kdf);
+      key = deriveKey(
+        passphrase,
+        Buffer.from(manifest.kdf.salt, 'base64'),
+        manifest.kdf,
+      );
     } else {
       key = requireSettingsKey();
     }

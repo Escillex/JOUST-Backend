@@ -48,7 +48,10 @@ const REVOCATION_CACHE_MS = 30_000;
 export class JwtAuthGuard implements CanActivate {
   /** userId → the stamp, and when this reading goes stale. Static so every
    *  guard instance (one per module) shares it. */
-  private static revokedAt = new Map<string, { at: number | null; until: number }>();
+  private static revokedAt = new Map<
+    string,
+    { at: number | null; until: number }
+  >();
 
   /** Called after a revocation so the next request re-reads immediately. */
   static forget(userId: string): void {
@@ -67,9 +70,15 @@ export class JwtAuthGuard implements CanActivate {
     let entry = JwtAuthGuard.revokedAt.get(payload.id);
     if (!entry || entry.until < now) {
       const user = await this.prisma.user
-        .findUnique({ where: { id: payload.id }, select: { sessionsValidFrom: true } })
+        .findUnique({
+          where: { id: payload.id },
+          select: { sessionsValidFrom: true },
+        })
         .catch(() => null);
-      entry = { at: user?.sessionsValidFrom?.getTime() ?? null, until: now + REVOCATION_CACHE_MS };
+      entry = {
+        at: user?.sessionsValidFrom?.getTime() ?? null,
+        until: now + REVOCATION_CACHE_MS,
+      };
       JwtAuthGuard.revokedAt.set(payload.id, entry);
     }
     // Both stamps sit on a whole second (see AccountService), because `iat` is
@@ -103,7 +112,9 @@ export class JwtAuthGuard implements CanActivate {
     // reasons, and a catch-all here would report every one as "Invalid token".
     let payload: JwtPayload;
     try {
-      payload = await this.jwtService.verifyAsync(token, { secret: requireJwtSecret() });
+      payload = await this.jwtService.verifyAsync(token, {
+        secret: requireJwtSecret(),
+      });
     } catch {
       throw new UnauthorizedException('Invalid token');
     }

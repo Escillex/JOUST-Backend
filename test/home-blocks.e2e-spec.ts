@@ -42,7 +42,12 @@ describe('home blocks — reads', () => {
     const { svc } = build([
       { key: 'hero', order: 2, visible: false, content: { description: 'Hi' } },
       { key: 'shop', order: 0, visible: true, content: { label: 'GEAR' } },
-      { key: 'tournaments', order: 1, visible: true, content: { label: 'EVENTS' } },
+      {
+        key: 'tournaments',
+        order: 1,
+        visible: true,
+        content: { label: 'EVENTS' },
+      },
     ]);
     const { blocks } = await svc.getConfig();
     expect(blocks.map((b) => b.key)).toEqual(['shop', 'tournaments', 'hero']);
@@ -60,8 +65,12 @@ describe('home blocks — writes', () => {
     await svc.updateBlock('hero', {
       content: {
         description: 'Ours now',
-        slides: [{ image: '/uploads/assets/a.webp', title: 'T', photoDesc: 'D' }],
-        storeButtons: [{ text: 'Shop', href: 'https://example.com', color: '#123456' }],
+        slides: [
+          { image: '/uploads/assets/a.webp', title: 'T', photoDesc: 'D' },
+        ],
+        storeButtons: [
+          { text: 'Shop', href: 'https://example.com', color: '#123456' },
+        ],
         somethingElse: 'dropped',
       } as any,
     });
@@ -87,7 +96,10 @@ describe('home blocks — writes', () => {
           { text: 'Sneaky', href: '//evil.example.com' },
           { text: 'Fine', href: '/tournaments' },
         ],
-        slides: [{ title: 'No picture' }, { image: 'https://cdn.example.com/x.jpg' }],
+        slides: [
+          { title: 'No picture' },
+          { image: 'https://cdn.example.com/x.jpg' },
+        ],
       } as any,
     });
     const saved = store.get('hero').content;
@@ -99,7 +111,9 @@ describe('home blocks — writes', () => {
 
   it('caps text and falls back to a usable label rather than an empty divider', async () => {
     const { svc, store } = build();
-    await svc.updateBlock('hero', { content: { description: 'x'.repeat(900) } as any });
+    await svc.updateBlock('hero', {
+      content: { description: 'x'.repeat(900) } as any,
+    });
     expect((store.get('hero').content.description as string).length).toBe(400);
 
     await svc.updateBlock('shop', { content: { label: '   ' } as any });
@@ -111,17 +125,20 @@ describe('home blocks — writes', () => {
       { key: 'shop', order: 1, visible: true, content: { label: 'GEAR' } },
     ]);
     await svc.updateBlock('shop', { visible: false });
-    expect(store.get('shop')).toMatchObject({ visible: false, content: { label: 'GEAR' } });
+    expect(store.get('shop')).toMatchObject({
+      visible: false,
+      content: { label: 'GEAR' },
+    });
   });
 
   it('rejects an unknown or repeated section', async () => {
     const { svc } = build();
-    await expect(svc.updateBlock('footer', { visible: false })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
-    await expect(svc.reorder({ keys: ['hero', 'hero'] })).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      svc.updateBlock('footer', { visible: false }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      svc.reorder({ keys: ['hero', 'hero'] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
     await expect(svc.reorder({ keys: ['nope'] })).rejects.toBeInstanceOf(
       BadRequestException,
     );
@@ -129,7 +146,9 @@ describe('home blocks — writes', () => {
 
   it('reorders by position in the list', async () => {
     const { svc } = build();
-    const { blocks } = await svc.reorder({ keys: ['tournaments', 'hero', 'shop'] });
+    const { blocks } = await svc.reorder({
+      keys: ['tournaments', 'hero', 'shop'],
+    });
     expect(blocks.map((b) => b.key)).toEqual(['tournaments', 'hero', 'shop']);
   });
 });

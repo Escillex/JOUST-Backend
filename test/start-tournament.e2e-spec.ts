@@ -28,7 +28,11 @@ describe('startTournament', () => {
             id: 't1',
             status: opts.status ?? 'OPEN',
             config: opts.tournamentConfig ?? null,
-            format: { id: 'f1', system: 'SINGLE_ELIMINATION', config: opts.formatConfig ?? null },
+            format: {
+              id: 'f1',
+              system: 'SINGLE_ELIMINATION',
+              config: opts.formatConfig ?? null,
+            },
             participants: PLAYERS.map((id) => ({
               id: `part-${id}`,
               userId: id,
@@ -68,6 +72,7 @@ describe('startTournament', () => {
       { emitTournamentUpdated: jest.fn() } as any,
       { notify: jest.fn(), notifyMany: jest.fn() } as any,
       { assertAssignable: jest.fn() } as any,
+      { getBoolean: jest.fn().mockResolvedValue(true) } as any,
     );
     return { prisma, formats, service };
   };
@@ -104,7 +109,10 @@ describe('startTournament', () => {
   // an event mid-flight.
   it('snapshots the preset rules onto the tournament in the same claim', async () => {
     const preset = { bestOf: 3, tieBreakerOrder: ['OMW', 'OOMW'] };
-    const { prisma, service } = buildService({ generatedRound: completeRound(), formatConfig: preset });
+    const { prisma, service } = buildService({
+      generatedRound: completeRound(),
+      formatConfig: preset,
+    });
     await service.startTournament('t1');
     expect(prisma.tournament.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -131,7 +139,9 @@ describe('startTournament', () => {
   // name are not part of the config, and without them a started tournament
   // still fell apart when its preset was deleted.
   it('snapshots the bracket type and the preset name as well', async () => {
-    const { prisma, service } = buildService({ generatedRound: completeRound() });
+    const { prisma, service } = buildService({
+      generatedRound: completeRound(),
+    });
     await service.startTournament('t1');
     const data = prisma.tournament.updateMany.mock.calls[0][0].data;
     expect(data.system).toBe('SINGLE_ELIMINATION');
@@ -145,12 +155,20 @@ describe('startTournament', () => {
     ['UPCOMING', 'NOT_OPEN_YET'],
     ['COMPLETED', 'ALREADY_COMPLETED'],
     ['ONGOING', 'ALREADY_STARTED'],
-  ])('tells you that a %s tournament cannot be started, with %s', async (status, code) => {
-    const { prisma, service } = buildService({ claimCount: 0, generatedRound: completeRound() });
-    // The re-read after the failed claim reports the real status.
-    prisma.tournament.findUnique.mockResolvedValueOnce({ status });
-    await expect(service.startTournament('t1')).rejects.toMatchObject({ response: { code } });
-  });
+  ])(
+    'tells you that a %s tournament cannot be started, with %s',
+    async (status, code) => {
+      const { prisma, service } = buildService({
+        claimCount: 0,
+        generatedRound: completeRound(),
+      });
+      // The re-read after the failed claim reports the real status.
+      prisma.tournament.findUnique.mockResolvedValueOnce({ status });
+      await expect(service.startTournament('t1')).rejects.toMatchObject({
+        response: { code },
+      });
+    },
+  );
 
   it('refuses when another request already claimed the start', async () => {
     // The second of two near-simultaneous taps on a flaky connection: the

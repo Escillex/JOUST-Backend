@@ -87,10 +87,15 @@ export class AwardService {
 
   /** sharp throws on anything that is not an image; report that as the
    *  uploader's mistake rather than a 500. */
-  private async saveArt(file: Express.Multer.File | undefined, kind: AwardKind) {
+  private async saveArt(
+    file: Express.Multer.File | undefined,
+    kind: AwardKind,
+  ) {
     if (!file) throw new BadRequestException('Artwork is required.');
     if (!file.mimetype?.startsWith('image/')) {
-      throw new BadRequestException('The artwork must be an image (PNG or WebP recommended).');
+      throw new BadRequestException(
+        'The artwork must be an image (PNG or WebP recommended).',
+      );
     }
     try {
       return await this.images.processAndSave(file, this.folderFor(kind));
@@ -99,7 +104,11 @@ export class AwardService {
     }
   }
 
-  async create(dto: CreateAwardDto, file: Express.Multer.File | undefined, adminId: string) {
+  async create(
+    dto: CreateAwardDto,
+    file: Express.Multer.File | undefined,
+    adminId: string,
+  ) {
     const imageUrl = await this.saveArt(file, dto.kind);
     return this.prisma.award.create({
       data: {
@@ -144,7 +153,8 @@ export class AwardService {
       where: { id },
       data: { imageUrl },
     });
-    if (award.imageUrl !== imageUrl) await this.images.deleteFile(award.imageUrl);
+    if (award.imageUrl !== imageUrl)
+      await this.images.deleteFile(award.imageUrl);
     return updated;
   }
 
@@ -190,7 +200,8 @@ export class AwardService {
       // Guests are purged by CleanGuestsJob; an award given to one would vanish.
       throw new BadRequestException({
         code: 'GUEST_CANNOT_RECEIVE_AWARDS',
-        message: 'Guests cannot receive awards — convert them to a full account first.',
+        message:
+          'Guests cannot receive awards — convert them to a full account first.',
       });
     }
 
@@ -236,8 +247,11 @@ export class AwardService {
    * two grants holding the slot at once.
    */
   async revoke(userId: string, grantId: string) {
-    const row = await this.prisma.userAward.findUnique({ where: { id: grantId } });
-    if (!row || row.userId !== userId) throw new NotFoundException('Grant not found.');
+    const row = await this.prisma.userAward.findUnique({
+      where: { id: grantId },
+    });
+    if (!row || row.userId !== userId)
+      throw new NotFoundException('Grant not found.');
 
     const heir =
       row.pinSlot || row.displayed
@@ -274,7 +288,9 @@ export class AwardService {
   async setShowcase(userId: string, dto: ShowcaseDto) {
     const pins = dto.pinnedMedals ?? [];
     if (pins.length > MAX_PINS) {
-      throw new BadRequestException(`At most ${MAX_PINS} medals can be pinned.`);
+      throw new BadRequestException(
+        `At most ${MAX_PINS} medals can be pinned.`,
+      );
     }
     if (new Set(pins).size !== pins.length) {
       throw new BadRequestException('The same grant cannot fill two slots.');
@@ -298,12 +314,16 @@ export class AwardService {
     if (pinnedAwards.some((g) => g.award.kind !== AwardKind.MEDAL)) {
       throw new BadRequestException('Only medals can be pinned.');
     }
-    if (new Set(pinnedAwards.map((g) => g.awardId)).size !== pinnedAwards.length) {
+    if (
+      new Set(pinnedAwards.map((g) => g.awardId)).size !== pinnedAwards.length
+    ) {
       // "Champion" x3 is shown as one medal with a x3 badge, not three slots.
       throw new BadRequestException('The same medal cannot be pinned twice.');
     }
     if (dto.plaque && byId.get(dto.plaque)!.award.kind !== AwardKind.PLAQUE) {
-      throw new BadRequestException('Only a plaque can be shown under your name.');
+      throw new BadRequestException(
+        'Only a plaque can be shown under your name.',
+      );
     }
 
     // Clear first, then set, in one transaction: the unique (userId, pinSlot)

@@ -61,7 +61,12 @@ export class ImagesController {
 
   // ─── TOURNAMENT BANNER ──────────────────────────────────────────
 
-  @Audit({ action: 'tournament.banner', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Changed the banner of ${c.t}` })
+  @Audit({
+    action: 'tournament.banner',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'tournamentId' },
+    describe: (c) => `Changed the banner of ${c.t}`,
+  })
   @Post('banner/:tournamentId')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -74,7 +79,12 @@ export class ImagesController {
     return this.imagesService.updateBanner(tournamentId, file);
   }
 
-  @Audit({ action: 'tournament.banner_remove', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Removed the banner of ${c.t}` })
+  @Audit({
+    action: 'tournament.banner_remove',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'tournamentId' },
+    describe: (c) => `Removed the banner of ${c.t}`,
+  })
   @Delete('banner/:tournamentId')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -85,7 +95,12 @@ export class ImagesController {
 
   // ─── TOURNAMENT PRIZE PICTURE ──────────────────────────────────
 
-  @Audit({ action: 'tournament.prize_image', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Changed the prize picture of ${c.t}` })
+  @Audit({
+    action: 'tournament.prize_image',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'tournamentId' },
+    describe: (c) => `Changed the prize picture of ${c.t}`,
+  })
   @Post('prize/:tournamentId')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -98,7 +113,12 @@ export class ImagesController {
     return this.imagesService.updatePrizeImage(tournamentId, file);
   }
 
-  @Audit({ action: 'tournament.prize_image_remove', category: AC.TOURNAMENT, tournament: { param: 'tournamentId' }, describe: (c) => `Removed the prize picture of ${c.t}` })
+  @Audit({
+    action: 'tournament.prize_image_remove',
+    category: AC.TOURNAMENT,
+    tournament: { param: 'tournamentId' },
+    describe: (c) => `Removed the prize picture of ${c.t}`,
+  })
   @Delete('prize/:tournamentId')
   @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -109,7 +129,12 @@ export class ImagesController {
 
   // ─── GAME ICON ─────────────────────────────────────────────────
 
-  @Audit({ action: 'game.icon', category: AC.CATALOG, subject: { model: 'game', param: 'gameId' }, describe: (c) => `Set the icon for the game "${c.subject}"` })
+  @Audit({
+    action: 'game.icon',
+    category: AC.CATALOG,
+    subject: { model: 'game', param: 'gameId' },
+    describe: (c) => `Set the icon for the game "${c.subject}"`,
+  })
   @Post('game/:gameId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -121,7 +146,12 @@ export class ImagesController {
     return this.imagesService.updateGameIcon(gameId, file);
   }
 
-  @Audit({ action: 'game.icon_remove', category: AC.CATALOG, subject: { model: 'game', param: 'gameId' }, describe: (c) => `Removed the icon for the game "${c.subject}"` })
+  @Audit({
+    action: 'game.icon_remove',
+    category: AC.CATALOG,
+    subject: { model: 'game', param: 'gameId' },
+    describe: (c) => `Removed the icon for the game "${c.subject}"`,
+  })
   @Delete('game/:gameId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -131,7 +161,11 @@ export class ImagesController {
 
   // ─── SITE ASSETS ───────────────────────────────────────────────
 
-  @Audit({ action: 'system.asset', category: AC.SYSTEM, describe: (c) => `Uploaded the site asset "${c.params.key}"` })
+  @Audit({
+    action: 'system.asset',
+    category: AC.SYSTEM,
+    describe: (c) => `Uploaded the site asset "${c.params.key}"`,
+  })
   @Post('assets/:key')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -144,7 +178,11 @@ export class ImagesController {
     return this.imagesService.upsertAsset(key, file, label);
   }
 
-  @Audit({ action: 'system.asset_remove', category: AC.SYSTEM, describe: (c) => `Removed the site asset "${c.params.key}"` })
+  @Audit({
+    action: 'system.asset_remove',
+    category: AC.SYSTEM,
+    describe: (c) => `Removed the site asset "${c.params.key}"`,
+  })
   @Delete('assets/:key')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

@@ -40,7 +40,12 @@ export function matchText(c: AuditContext): string {
   return `${c.match?.p1 ?? 'TBD'} vs ${c.match?.p2 ?? 'TBD'} (${roundText(c.match?.round ?? 0)})`;
 }
 
-export type SubjectModel = 'game' | 'award' | 'tournamentFormat' | 'storeProduct' | 'userAward';
+export type SubjectModel =
+  | 'game'
+  | 'award'
+  | 'tournamentFormat'
+  | 'storeProduct'
+  | 'userAward';
 
 export interface AuditSpec {
   /** Stable machine name, e.g. `tournament.start`. */

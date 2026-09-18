@@ -153,9 +153,13 @@ export class BackupService {
     // -Fc is already zlib-compressed, and restores selectively; --no-owner so a
     // dump taken as one role restores as another (the defense copy's DB user is
     // not necessarily this one).
-    await run('pg_dump', ['-Fc', '--no-owner', '--no-acl', '-f', outFile, '-d', url], {
-      maxBuffer: 1024 * 1024 * 16,
-    });
+    await run(
+      'pg_dump',
+      ['-Fc', '--no-owner', '--no-acl', '-f', outFile, '-d', url],
+      {
+        maxBuffer: 1024 * 1024 * 16,
+      },
+    );
   }
 
   private async pgRestore(url: string, inFile: string): Promise<void> {
@@ -171,7 +175,9 @@ export class BackupService {
       // a failure when it actually reports errors.
       const stderr: string = err?.stderr ?? '';
       if (!/\berror\b/i.test(stderr)) {
-        this.logger.warn(`pg_restore reported warnings: ${stderr.trim().slice(0, 500)}`);
+        this.logger.warn(
+          `pg_restore reported warnings: ${stderr.trim().slice(0, 500)}`,
+        );
         return;
       }
       throw new BadRequestException(
@@ -181,9 +187,13 @@ export class BackupService {
   }
 
   private async psql(url: string, sql: string): Promise<string> {
-    const { stdout } = await run('psql', ['-v', 'ON_ERROR_STOP=1', '-d', url, '-c', sql], {
-      maxBuffer: 1024 * 1024 * 8,
-    });
+    const { stdout } = await run(
+      'psql',
+      ['-v', 'ON_ERROR_STOP=1', '-d', url, '-c', sql],
+      {
+        maxBuffer: 1024 * 1024 * 8,
+      },
+    );
     return stdout;
   }
 
@@ -222,7 +232,10 @@ export class BackupService {
   }): Promise<BackupListEntry> {
     const sanitized = !!opts.sanitized;
     const passphrase = opts.passphrase?.trim() || null;
-    const tmp = join(tmpdir(), `joust-dump-${randomBytes(6).toString('hex')}.pgc`);
+    const tmp = join(
+      tmpdir(),
+      `joust-dump-${randomBytes(6).toString('hex')}.pgc`,
+    );
 
     try {
       await this.pgDump(this.databaseUrl(), tmp);
@@ -249,7 +262,11 @@ export class BackupService {
         // meant to be handed to someone else — a file needing a key is a bad
         // demo artefact. A full backup is locked either to a passphrase (and so
         // can travel) or, with none given, to this server's key.
-        encryption: sanitized ? 'none' : passphrase ? 'passphrase' : 'serverKey',
+        encryption: sanitized
+          ? 'none'
+          : passphrase
+            ? 'passphrase'
+            : 'serverKey',
         passphrase: passphrase ?? undefined,
       });
 
@@ -297,8 +314,11 @@ export class BackupService {
       return await fs.readFile(out);
     } finally {
       await fs.rm(out, { force: true });
-      await this.psql(admin, `DROP DATABASE IF EXISTS "${scratch}" WITH (FORCE)`).catch(
-        (err) => this.logger.error(`Could not drop scratch database ${scratch}`, err),
+      await this.psql(
+        admin,
+        `DROP DATABASE IF EXISTS "${scratch}" WITH (FORCE)`,
+      ).catch((err) =>
+        this.logger.error(`Could not drop scratch database ${scratch}`, err),
       );
     }
   }
@@ -354,7 +374,9 @@ export class BackupService {
         out.push({ ...manifest, name, fileBytes: stat.size });
       } catch (err) {
         // One unreadable file must not hide every other backup from the screen.
-        this.logger.warn(`Skipping unreadable backup ${name}: ${(err as Error).message}`);
+        this.logger.warn(
+          `Skipping unreadable backup ${name}: ${(err as Error).message}`,
+        );
       }
     }
     return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -362,7 +384,11 @@ export class BackupService {
 
   async update(
     name: string,
-    patch: { alias?: string | null; description?: string | null; pinned?: boolean },
+    patch: {
+      alias?: string | null;
+      description?: string | null;
+      pinned?: boolean;
+    },
   ): Promise<BackupListEntry> {
     const path = await this.resolveFile(name);
     const manifest = await rewriteManifest(path, patch);
@@ -386,7 +412,10 @@ export class BackupService {
    * deliberately labelled.
    */
   async prune(): Promise<number> {
-    const keep = Math.max(1, Number((await this.settings.get('BACKUP_RETENTION')) ?? 14));
+    const keep = Math.max(
+      1,
+      Number((await this.settings.get('BACKUP_RETENTION')) ?? 14),
+    );
     const all = await this.list();
     const disposable = all.filter((b) => !b.pinned);
     const doomed = disposable.slice(keep);
@@ -486,7 +515,10 @@ export class BackupService {
     // secrets here that this server cannot decrypt at all (todo.md §6).
     const preserved = await this.environmentSettings();
 
-    const tmp = join(tmpdir(), `joust-restore-${randomBytes(6).toString('hex')}.pgc`);
+    const tmp = join(
+      tmpdir(),
+      `joust-restore-${randomBytes(6).toString('hex')}.pgc`,
+    );
     try {
       await fs.writeFile(tmp, payload);
       await this.prisma.$disconnect(); // an open pool holds locks --clean trips on
@@ -497,7 +529,9 @@ export class BackupService {
       // matters even when the process is about to exit: if it is not PID 1 it
       // will not exit, and stale settings would outlive the restore.
       this.settings.clearCache();
-      this.logger.warn(`Database restored from ${name} (safety copy: ${safety ?? 'none'})`);
+      this.logger.warn(
+        `Database restored from ${name} (safety copy: ${safety ?? 'none'})`,
+      );
       return { replacedBy: name, safetyCopy: safety };
     } finally {
       await fs.rm(tmp, { force: true });
@@ -521,7 +555,11 @@ export class BackupService {
   async resetData(opts: {
     scope: 'content' | 'everything';
     callerId: string;
-  }): Promise<{ scope: string; tablesCleared: number; safetyCopy: string | null }> {
+  }): Promise<{
+    scope: string;
+    tablesCleared: number;
+    safetyCopy: string | null;
+  }> {
     await this.assertRestoreAllowed();
 
     const safetyCopy = (
@@ -557,13 +595,21 @@ export class BackupService {
       .split('\n')
       .map((t) => t.trim())
       .filter((t) => t.length > 0 && !keep.includes(t))
-      .filter((t) => t !== 'tablename' && !t.startsWith('--') && !t.match(/^\(\d+ rows\)$/));
+      .filter(
+        (t) =>
+          t !== 'tablename' &&
+          !t.startsWith('--') &&
+          !t.match(/^\(\d+ rows\)$/),
+      );
 
     if (tables.length > 0) {
       // One statement: TRUNCATE is transactional, so a failure leaves the
       // database untouched rather than half-emptied.
       const quoted = tables.map((t) => `"public"."${t}"`).join(', ');
-      await this.psql(url, `TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE;`);
+      await this.psql(
+        url,
+        `TRUNCATE TABLE ${quoted} RESTART IDENTITY CASCADE;`,
+      );
     }
 
     if (opts.scope === 'everything') {
@@ -592,8 +638,9 @@ export class BackupService {
 
   private isEnvironmentSetting(key: string): boolean {
     return (
-      BackupService.ENVIRONMENT_SETTING_PREFIXES.some((p) => key.startsWith(p)) ||
-      BackupService.ENVIRONMENT_SETTING_KEYS.includes(key)
+      BackupService.ENVIRONMENT_SETTING_PREFIXES.some((p) =>
+        key.startsWith(p),
+      ) || BackupService.ENVIRONMENT_SETTING_KEYS.includes(key)
     );
   }
 
@@ -604,13 +651,20 @@ export class BackupService {
     } catch (err) {
       // Never block a restore over this — losing the preserved settings is
       // recoverable from Admin → Settings; a refused restore may not be.
-      this.logger.warn(`Could not read environment settings before restore: ${String(err)}`);
+      this.logger.warn(
+        `Could not read environment settings before restore: ${String(err)}`,
+      );
       return [];
     }
   }
 
   private async restoreEnvironmentSettings(
-    rows: { key: string; value: string; encrypted: boolean; updatedById: string | null }[],
+    rows: {
+      key: string;
+      value: string;
+      encrypted: boolean;
+      updatedById: string | null;
+    }[],
   ): Promise<void> {
     for (const row of rows) {
       try {
@@ -629,7 +683,9 @@ export class BackupService {
           },
         });
       } catch (err) {
-        this.logger.warn(`Could not restore the setting "${row.key}": ${String(err)}`);
+        this.logger.warn(
+          `Could not restore the setting "${row.key}": ${String(err)}`,
+        );
       }
     }
     if (rows.length > 0) {

@@ -21,6 +21,7 @@ import {
 } from './dto/tracker.dto';
 import { GameTrackingMode } from '@prisma/client';
 import { RealtimeGateway } from '../../../realtime/realtime.gateway';
+import { resolveScoreActor } from '../scoring-permission.helper';
 
 @Injectable()
 export class TrackerService {
@@ -44,7 +45,7 @@ export class TrackerService {
     return match?.round.tournamentId;
   }
 
-  async openTracker(matchId: string, dto: OpenTrackerDto) {
+  async openTracker(matchId: string, dto: OpenTrackerDto, user: JwtPayload) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       include: {
@@ -65,6 +66,13 @@ export class TrackerService {
     if (match.isBye)
       throw new BadRequestException('Cannot open tracker on a bye match');
 
+    // A player-driven result already sits awaiting review — no further games
+    // until the staff member verdicts it (the series is decided).
+    if (match.reportedWinnerId && !match.winnerId)
+      throw new BadRequestException(
+        'This match is awaiting organizer verification of its result',
+      );
+
     const activeLog = match.gameLogs.find((l) => l.trackerActive);
     if (activeLog)
       throw new BadRequestException(
@@ -75,6 +83,11 @@ export class TrackerService {
       effectiveRawConfig(match.round.tournament),
       match.phase,
     );
+
+    // Who may open the tracker: staff always; a player of the match when the
+    // tournament allows player scoring. Decided here, not by the route's guards
+    // (that would reject the PLAYER before this rule can run).
+    await resolveScoreActor(this.prisma, match, user, config.scoreSubmissionRule);
 
     // Resolve mode — dto > format config > default 'POINTS'
     const mode: GameTrackingMode =
@@ -130,7 +143,7 @@ export class TrackerService {
       select: {
         player1Id: true,
         player2Id: true,
-        round: { select: { tournamentId: true } },
+        round: { include: { tournament: { include: { format: true } } } },
       },
     });
     if (!match) throw new NotFoundException('Match not found');
@@ -149,13 +162,20 @@ export class TrackerService {
           'Only a player in this match or the tournament organizer can update the tracker',
         );
       }
-      // A participant may move only their own number. Writing the opponent's slot
-      // is a staff-only action (the organizer verifies both sides).
-      if (isP1 && dto.player2Value !== undefined) {
-        throw new ForbiddenException('You can only update your own value');
-      }
-      if (isP2 && dto.player1Value !== undefined) {
-        throw new ForbiddenException('You can only update your own value');
+      // A participant may ALWAYS move their own number (self-scoring, 2026-08-09).
+      // Writing the opponent's slot is a staff-only action unless this tournament
+      // allows player scoring (SELF_REPORT_ALLOWED), where both players run the
+      // tracker together and the result still waits for an organizer's review.
+      const rule = resolveConfig(
+        effectiveRawConfig(match.round?.tournament ?? {}),
+      ).scoreSubmissionRule;
+      if (rule === 'STAFF_ONLY') {
+        if (isP1 && dto.player2Value !== undefined) {
+          throw new ForbiddenException('You can only update your own value');
+        }
+        if (isP2 && dto.player1Value !== undefined) {
+          throw new ForbiddenException('You can only update your own value');
+        }
       }
     }
 
@@ -193,7 +213,7 @@ export class TrackerService {
     return updated;
   }
 
-  async submitGame(matchId: string, dto: SubmitGameDto) {
+  async submitGame(matchId: string, dto: SubmitGameDto, user: JwtPayload) {
     const activeLog = await this.prisma.matchGameLog.findFirst({
       where: { matchId, trackerActive: true },
     });
@@ -201,13 +221,15 @@ export class TrackerService {
     if (!activeLog)
       throw new BadRequestException('No active tracker to submit');
 
-    // Record the result FIRST. reportGameResult / reportDraw validate the submit
-    // (a winner-less draw on a bestOf>1, elimination, points-threshold, or
-    // allowDraw:false match all throw here) before writing anything. Only once
-    // that has succeeded do we close the log below. The old order closed the log
-    // first, so an invalid draw left an orphaned "completed" game with no result
-    // and no active tracker to retry (F5). We deliberately do NOT wrap the two in
-    // one transaction: the result path cascades through handleMatchCompletion into
+    // Record the result FIRST. reportGameResult / reportDraw authorize the
+    // caller (staff always; a player of the match when the tournament allows
+    // player scoring) and validate the submit (a winner-less draw on a
+    // bestOf>1, elimination, points-threshold, or allowDraw:false match all
+    // throw here) before writing anything. Only once that has succeeded do we
+    // close the log below. The old order closed the log first, so an invalid
+    // draw left an orphaned "completed" game with no result and no active
+    // tracker to retry (F5). We deliberately do NOT wrap the two in one
+    // transaction: the result path cascades through handleMatchCompletion into
     // bracket generation, which the codebase intentionally keeps out of a single
     // long transaction — so ordering, not a transaction, is what guarantees the
     // log is never closed until the result is committed.
@@ -216,9 +238,10 @@ export class TrackerService {
       matchResult = await this.matchService.reportGameResult(
         matchId,
         dto.winnerId,
+        user,
       );
     } else {
-      matchResult = await this.matchService.reportDraw(matchId);
+      matchResult = await this.matchService.reportDraw(matchId, user);
     }
 
     // Result is committed — now close the game log.

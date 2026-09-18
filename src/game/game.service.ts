@@ -161,7 +161,9 @@ export class GameService {
   async delete(id: string) {
     const game = await this.prisma.game.findUnique({
       where: { id },
-      include: { _count: { select: { tournaments: true, galleryImages: true } } },
+      include: {
+        _count: { select: { tournaments: true, galleryImages: true } },
+      },
     });
     if (!game) throw new NotFoundException('Game not found');
     if (game.isBuiltin)

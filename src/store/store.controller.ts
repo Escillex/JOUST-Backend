@@ -45,7 +45,12 @@ export class StoreController {
 
   // ─── Admin mutations ───────────────────────────────────────────
 
-  @Audit({ action: 'store.create', category: AC.CATALOG, pick: ['name'], describe: (c) => `Added the store product "${String(c.body.name ?? '')}"` })
+  @Audit({
+    action: 'store.create',
+    category: AC.CATALOG,
+    pick: ['name'],
+    describe: (c) => `Added the store product "${String(c.body.name ?? '')}"`,
+  })
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -53,7 +58,13 @@ export class StoreController {
     return this.storeService.create(dto);
   }
 
-  @Audit({ action: 'store.update', category: AC.CATALOG, subject: { model: 'storeProduct', param: 'id' }, describe: (c) => `Edited the store product "${c.subject}" (${c.fields.join(', ') || 'no changes'})` })
+  @Audit({
+    action: 'store.update',
+    category: AC.CATALOG,
+    subject: { model: 'storeProduct', param: 'id' },
+    describe: (c) =>
+      `Edited the store product "${c.subject}" (${c.fields.join(', ') || 'no changes'})`,
+  })
   @Patch(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -61,7 +72,12 @@ export class StoreController {
     return this.storeService.update(id, dto);
   }
 
-  @Audit({ action: 'store.image', category: AC.CATALOG, subject: { model: 'storeProduct', param: 'id' }, describe: (c) => `Changed the image of "${c.subject}"` })
+  @Audit({
+    action: 'store.image',
+    category: AC.CATALOG,
+    subject: { model: 'storeProduct', param: 'id' },
+    describe: (c) => `Changed the image of "${c.subject}"`,
+  })
   @Post(':id/image')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -73,7 +89,12 @@ export class StoreController {
     return this.storeService.uploadImage(id, file);
   }
 
-  @Audit({ action: 'store.image_remove', category: AC.CATALOG, subject: { model: 'storeProduct', param: 'id' }, describe: (c) => `Removed the image of "${c.subject}"` })
+  @Audit({
+    action: 'store.image_remove',
+    category: AC.CATALOG,
+    subject: { model: 'storeProduct', param: 'id' },
+    describe: (c) => `Removed the image of "${c.subject}"`,
+  })
   @Delete(':id/image')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)
@@ -81,7 +102,12 @@ export class StoreController {
     return this.storeService.removeImage(id);
   }
 
-  @Audit({ action: 'store.delete', category: AC.CATALOG, subject: { model: 'storeProduct', param: 'id' }, describe: (c) => `Deleted the store product "${c.subject}"` })
+  @Audit({
+    action: 'store.delete',
+    category: AC.CATALOG,
+    subject: { model: 'storeProduct', param: 'id' },
+    describe: (c) => `Deleted the store product "${c.subject}"`,
+  })
   @Delete(':id')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN)

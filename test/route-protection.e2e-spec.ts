@@ -7,6 +7,7 @@ import { NotificationController } from '../src/notification/notification.control
 import { OrganizerController } from '../src/organizer/organizer.controller';
 import { InvitationController } from '../src/organizer/invitation.controller';
 import { JwtAuthGuard } from '../src/guards/jwt-auth.guard';
+import { RolesGuard } from '../src/guards/roles.guard';
 import { TournamentAccessGuard } from '../src/guards/tournament-access.guard';
 import { TOURNAMENT_ACCESS_KEY } from '../src/guards/decorators/tournament-access.decorator';
 
@@ -91,11 +92,35 @@ describe('match and tracker routes are access-guarded', () => {
     unknown
   >;
 
-  it.each([['submitResult'], ['reportGameResult']])(
-    'MatchController.%s is guarded by match id',
+  it('submitResult is guarded by match id', () => {
+    expect(guardsOf(match.submitResult)).toContain(TournamentAccessGuard);
+    expect(accessSourceOf(match.submitResult)).toBe('match:id');
+  });
+
+  // Who may start a match is the tournament's `matchStartWho` config, decided in
+  // MatchService.startMatch — the same shape as tracker/update (player
+  // self-scoring): a guard would reject a PLAYER before the per-match rule can
+  // run. The matrix lives in test/match-start.e2e-spec.ts.
+  it('MatchController.startMatch is JwtAuthGuard-only (per-tournament rule enforced in the service)', () => {
+    expect(guardsOf(match.startMatch)).not.toContain(TournamentAccessGuard);
+    expect(guardsOf(match.startMatch)).not.toContain(RolesGuard);
+  });
+
+  // Who may score a match is the tournament's `scoreSubmissionRule`, decided in
+  // MatchService.reportGameResult / TrackerService (staff always, a player of
+  // the match under SELF_REPORT_ALLOWED). Same guard-shape as startMatch: a
+  // guard cannot see the config or who the caller is relative to the match. The
+  // matrix lives in test/scoring-permission.e2e-spec.ts.
+  it('MatchController.reportGameResult is JwtAuthGuard-only (per-tournament rule enforced in the service)', () => {
+    expect(guardsOf(match.reportGameResult)).not.toContain(TournamentAccessGuard);
+    expect(guardsOf(match.reportGameResult)).not.toContain(RolesGuard);
+  });
+
+  it.each([['openTracker'], ['submitGame']])(
+    'TrackerController.%s is JwtAuthGuard-only (per-tournament rule enforced in the service)',
     (name) => {
-      expect(guardsOf(match[name])).toContain(TournamentAccessGuard);
-      expect(accessSourceOf(match[name])).toBe('match:id');
+      expect(guardsOf(tracker[name])).not.toContain(TournamentAccessGuard);
+      expect(guardsOf(tracker[name])).not.toContain(RolesGuard);
     },
   );
 
@@ -109,20 +134,10 @@ describe('match and tracker routes are access-guarded', () => {
     expect(match.reportDraw).toBeUndefined();
   });
 
-  // openTracker/submitGame are staff-only (organizer has final say). updateTracker
-  // is deliberately NOT here: it's JwtAuthGuard-only, with per-match authorization
-  // in TrackerService so a *participant* can adjust their own slot (player
-  // self-scoring, 2026-08-09). See the updateTracker assertion below.
-  it.each([['openTracker'], ['submitGame']])(
-    'TrackerController.%s is guarded by match id',
-    (name) => {
-      expect(guardsOf(tracker[name])).toContain(TournamentAccessGuard);
-      expect(accessSourceOf(tracker[name])).toBe('match:id');
-    },
-  );
-
   it('TrackerController.updateTracker is JwtAuthGuard-only (per-match ownership enforced in the service)', () => {
-    expect(guardsOf(tracker.updateTracker)).not.toContain(TournamentAccessGuard);
+    expect(guardsOf(tracker.updateTracker)).not.toContain(
+      TournamentAccessGuard,
+    );
   });
 
   it('tracker reads stay public for spectators', () => {

@@ -22,6 +22,8 @@ export type GamePlayed = { id: string; name: string; iconUrl: string | null };
 type GamesPlayedRow = { game: GamePlayed };
 
 /** `[{ game: {...} }]` → `[{...}]`. */
-export function flattenGamesPlayed(rows: GamesPlayedRow[] | undefined | null): GamePlayed[] {
+export function flattenGamesPlayed(
+  rows: GamesPlayedRow[] | undefined | null,
+): GamePlayed[] {
   return (rows ?? []).map((row) => row.game);
 }

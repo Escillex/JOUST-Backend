@@ -9,7 +9,10 @@ describe('completeTournament idempotency', () => {
   let notificationsSpy: { notify: jest.Mock; notifyMany: jest.Mock };
   let realtimeSpy: { emitTournamentUpdated: jest.Mock };
 
-  const buildService = (status: string, extra: Record<string, unknown> = {}) => {
+  const buildService = (
+    status: string,
+    extra: Record<string, unknown> = {},
+  ) => {
     const prisma = {
       tournament: {
         findUnique: jest.fn().mockResolvedValue({
@@ -51,6 +54,7 @@ describe('completeTournament idempotency', () => {
         realtime,
         notifications,
         { assertAssignable: jest.fn() } as any,
+        { getBoolean: jest.fn().mockResolvedValue(true) } as any,
       ),
     };
   };
@@ -86,23 +90,56 @@ describe('completeTournament idempotency', () => {
   it('burns display names, not handles, into the finished bracket', async () => {
     // Account deletion already burns the display name in; completion wrote the
     // @handle, so one bracket could show "mira-calder" beside "Mira Calder".
-    const mira = { id: 'w1', username: 'mira-calder', displayName: 'Mira Calder', isGuest: false };
-    const tobias = { id: 'u2', username: 'tobias-renn', displayName: null, isGuest: false };
+    const mira = {
+      id: 'w1',
+      username: 'mira-calder',
+      displayName: 'Mira Calder',
+      isGuest: false,
+    };
+    const tobias = {
+      id: 'u2',
+      username: 'tobias-renn',
+      displayName: null,
+      isGuest: false,
+    };
     const { prisma, service } = buildService('ONGOING', {
       participants: [
         { userId: 'w1', user: mira, status: 'ACTIVE' },
         { userId: 'u2', user: tobias, status: 'ACTIVE' },
       ],
-      rounds: [{ roundNumber: 1, matches: [{ id: 'm1', player1: mira, player2: tobias, winner: mira, p1Name: null, p2Name: null, winnerName: null }] }],
+      rounds: [
+        {
+          roundNumber: 1,
+          matches: [
+            {
+              id: 'm1',
+              player1: mira,
+              player2: tobias,
+              winner: mira,
+              p1Name: null,
+              p2Name: null,
+              winnerName: null,
+            },
+          ],
+        },
+      ],
     });
 
     await service.completeTournament('t1');
 
     expect(prisma.match.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { p1Name: 'Mira Calder', p2Name: 'tobias-renn', winnerName: 'Mira Calder' } }),
+      expect.objectContaining({
+        data: {
+          p1Name: 'Mira Calder',
+          p2Name: 'tobias-renn',
+          winnerName: 'Mira Calder',
+        },
+      }),
     );
     expect(prisma.tournament.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ winnerName: 'Mira Calder' }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ winnerName: 'Mira Calder' }),
+      }),
     );
   });
 

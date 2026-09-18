@@ -44,7 +44,13 @@ export class OrganizerController {
   // Deliberately NOT access-guarded: the rule here is stricter than the guard,
   // since staff must not be able to recruit staff. The service checks the
   // creator directly.
-  @Audit({ action: 'staff.invite', category: AC.STAFF, tournament: { param: 'tournamentId' }, targetUser: { body: 'userId' }, describe: (c) => `Invited ${c.target} to co-organize ${c.t}` })
+  @Audit({
+    action: 'staff.invite',
+    category: AC.STAFF,
+    tournament: { param: 'tournamentId' },
+    targetUser: { body: 'userId' },
+    describe: (c) => `Invited ${c.target} to co-organize ${c.t}`,
+  })
   @Post()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)
@@ -59,7 +65,13 @@ export class OrganizerController {
   }
 
   // DELETE /tournaments/:tournamentId/organizers/:userId
-  @Audit({ action: 'staff.revoke', category: AC.STAFF, tournament: { param: 'tournamentId' }, targetUser: { param: 'userId' }, describe: (c) => `Removed ${c.target} as a co-organizer of ${c.t}` })
+  @Audit({
+    action: 'staff.revoke',
+    category: AC.STAFF,
+    tournament: { param: 'tournamentId' },
+    targetUser: { param: 'userId' },
+    describe: (c) => `Removed ${c.target} as a co-organizer of ${c.t}`,
+  })
   @Delete(':userId')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ORGANIZER, Role.ADMIN)

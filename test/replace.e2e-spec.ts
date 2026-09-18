@@ -85,12 +85,9 @@ describe('ParticipantService.replaceParticipant', () => {
       username: 'Substitute',
     });
 
-    await participantService.replaceParticipant(
-      't1',
-      'x',
-      { substituteUserId: 'y' },
-      { id: 'owner', roles: ['ORGANIZER'] } as any,
-    );
+    await participantService.replaceParticipant('t1', 'x', {
+      substituteUserId: 'y',
+    });
 
     expect(prisma.tournamentParticipant.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -126,12 +123,9 @@ describe('ParticipantService.replaceParticipant', () => {
     prisma.match.count.mockResolvedValue(1);
 
     await expect(
-      participantService.replaceParticipant(
-        't1',
-        'x',
-        { substituteUserId: 'y' },
-        { id: 'owner', roles: ['ORGANIZER'] } as any,
-      ),
+      participantService.replaceParticipant('t1', 'x', {
+        substituteUserId: 'y',
+      }),
     ).rejects.toThrow(BadRequestException);
 
     expect(prisma.tournamentParticipant.update).not.toHaveBeenCalled();
@@ -165,12 +159,9 @@ describe('ParticipantService.replaceParticipant', () => {
     prisma.match.count.mockResolvedValue(0);
 
     await expect(
-      participantService.replaceParticipant(
-        't1',
-        'x',
-        { substituteUserId: 'y' },
-        { id: 'owner', roles: ['ORGANIZER'] } as any,
-      ),
+      participantService.replaceParticipant('t1', 'x', {
+        substituteUserId: 'y',
+      }),
     ).rejects.toThrow(BadRequestException);
 
     expect(prisma.tournamentParticipant.update).not.toHaveBeenCalled();
@@ -196,12 +187,9 @@ describe('ParticipantService.replaceParticipant', () => {
       isGuest: true,
     });
 
-    await participantService.replaceParticipant(
-      't1',
-      'x',
-      { guestName: 'Sub Guest' },
-      { id: 'owner', roles: ['ORGANIZER'] } as any,
-    );
+    await participantService.replaceParticipant('t1', 'x', {
+      guestName: 'Sub Guest',
+    });
 
     expect(prisma.user.create).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -73,6 +73,50 @@ export class NotificationService {
     }
   }
 
+  /** Fan-out to everyone who manages one tournament: the creator, every accepted
+   *  co-organizer, and every admin (the same membership checkTournamentAccess
+   *  grants). Used where a player's action needs a staff member to act — e.g. a
+   *  self-scored match result sitting in pending verification. Non-existent
+   *  tournaments silently notify nobody. */
+  async notifyTournamentOrganizers(
+    tournamentId: string,
+    input: Omit<NotifyInput, 'userId'>,
+  ): Promise<void> {
+    try {
+      const tournament = await this.prisma.tournament.findUnique({
+        where: { id: tournamentId },
+        select: {
+          createdById: true,
+          organizers: {
+            where: { status: 'ACCEPTED' },
+            select: { userId: true },
+          },
+        },
+      });
+      if (!tournament) return;
+
+      const admins = await this.prisma.user.findMany({
+        where: { roles: { has: Role.ADMIN }, isGuest: false },
+        select: { id: true },
+      });
+
+      const management =
+        tournament.createdById
+          ? [...tournament.organizers.map((o) => o.userId), tournament.createdById]
+          : tournament.organizers.map((o) => o.userId);
+      // The creator is already one of the organizers' membership set only when
+      // they are also an admin (checked below) — dedupe against the admins.
+      await this.notifyMany(
+        [...new Set([...management, ...admins.map((a) => a.id)])],
+        { ...input, tournamentId },
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to notify tournament organizers: ${String(error)}`,
+      );
+    }
+  }
+
   /** Fan-out to every admin. For platform-level requests an organizer cannot
    *  self-serve — e.g. asking for a game the catalog does not have yet (todo.md
    *  §5). Admins are resolved here so callers need not know how roles are stored. */
