@@ -29,23 +29,17 @@ export class DevService {
   ) {}
 
   /**
-   * Rebuilds all UserGameStats rows from historical data. Match-level
-   * aggregates come from TournamentParticipantStats of every tournament
-   * whose format has a game designation; tournament counts and placement
-   * points only from COMPLETED ones (mirroring completeTournament).
+   * Rebuilds all UserGlobalStats and UserGameStats rows from historical data.
+   * Match-level aggregates come from TournamentParticipantStats; tournament
+   * counts and placement points only from COMPLETED tournaments (mirroring
+   * completeTournament). This ensures full reconciliation if a tournament was
+   * deleted or modified.
    */
   async backfillGameStats() {
     await this.prisma.userGameStats.deleteMany({});
+    await this.prisma.userGlobalStats.deleteMany({});
 
     const tournaments = await this.prisma.tournament.findMany({
-      // A tournament contributes per-game stats if it has a game (the new source
-      // of truth) or a legacy format.gameName not yet backfilled (todo.md §5).
-      where: {
-        OR: [
-          { gameId: { not: null } },
-          { format: { gameName: { not: null } } },
-        ],
-      },
       include: {
         format: true,
         game: { select: { name: true } },
@@ -53,7 +47,7 @@ export class DevService {
       },
     });
 
-    type Agg = {
+    type GameAgg = {
       userId: string;
       gameName: string;
       tournamentsPlayed: number;
@@ -64,10 +58,24 @@ export class DevService {
       draws: number;
       globalPoints: number;
     };
-    const byKey = new Map<string, Agg>();
-    const aggFor = (userId: string, gameName: string): Agg => {
+
+    type GlobalAgg = {
+      userId: string;
+      tournamentsPlayed: number;
+      tournamentsWon: number;
+      gamesPlayed: number;
+      wins: number;
+      losses: number;
+      draws: number;
+      globalPoints: number;
+    };
+
+    const byGameKey = new Map<string, GameAgg>();
+    const byGlobalKey = new Map<string, GlobalAgg>();
+
+    const gameAggFor = (userId: string, gameName: string): GameAgg => {
       const key = `${userId}::${gameName}`;
-      let agg = byKey.get(key);
+      let agg = byGameKey.get(key);
       if (!agg) {
         agg = {
           userId,
@@ -80,14 +88,31 @@ export class DevService {
           draws: 0,
           globalPoints: 0,
         };
-        byKey.set(key, agg);
+        byGameKey.set(key, agg);
+      }
+      return agg;
+    };
+
+    const globalAggFor = (userId: string): GlobalAgg => {
+      let agg = byGlobalKey.get(userId);
+      if (!agg) {
+        agg = {
+          userId,
+          tournamentsPlayed: 0,
+          tournamentsWon: 0,
+          gamesPlayed: 0,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          globalPoints: 0,
+        };
+        byGlobalKey.set(userId, agg);
       }
       return agg;
     };
 
     for (const t of tournaments) {
-      const gameName = t.game?.name ?? t.format?.gameName;
-      if (!gameName) continue;
+      const gameName = t.game?.name ?? t.format?.gameName ?? null;
 
       const registered = t.participants.filter(
         (p) => p.user && !p.user.isGuest,
@@ -95,20 +120,35 @@ export class DevService {
 
       for (const p of registered) {
         if (!p.stats) continue;
-        const agg = aggFor(p.userId, gameName);
-        agg.gamesPlayed += p.stats.gamesPlayed;
-        agg.wins += p.stats.wins;
-        agg.losses += p.stats.losses;
-        agg.draws += p.stats.draws;
+
+        const glob = globalAggFor(p.userId);
+        glob.gamesPlayed += p.stats.gamesPlayed;
+        glob.wins += p.stats.wins;
+        glob.losses += p.stats.losses;
+        glob.draws += p.stats.draws;
+
+        if (gameName) {
+          const gm = gameAggFor(p.userId, gameName);
+          gm.gamesPlayed += p.stats.gamesPlayed;
+          gm.wins += p.stats.wins;
+          gm.losses += p.stats.losses;
+          gm.draws += p.stats.draws;
+        }
       }
 
       if (t.status !== TournamentStatus.COMPLETED) continue;
 
       for (const p of registered) {
-        aggFor(p.userId, gameName).tournamentsPlayed += 1;
+        globalAggFor(p.userId).tournamentsPlayed += 1;
+        if (gameName) {
+          gameAggFor(p.userId, gameName).tournamentsPlayed += 1;
+        }
       }
       if (t.winnerId && registered.some((p) => p.userId === t.winnerId)) {
-        aggFor(t.winnerId, gameName).tournamentsWon += 1;
+        globalAggFor(t.winnerId).tournamentsWon += 1;
+        if (gameName) {
+          gameAggFor(t.winnerId, gameName).tournamentsWon += 1;
+        }
       }
 
       const config = resolveConfig(effectiveRawConfig(t));
@@ -122,19 +162,32 @@ export class DevService {
         else if (entry.rank === 3) pts = config.placementPoints3rd;
         else if (isHybrid) pts = config.placementPointsTopCut;
         else pts = config.placementPointsParticipation;
-        aggFor(entry.userId, gameName).globalPoints += pts;
+
+        globalAggFor(entry.userId).globalPoints += pts;
+        if (gameName) {
+          gameAggFor(entry.userId, gameName).globalPoints += pts;
+        }
       }
     }
 
-    const rows = [...byKey.values()].map((a) => ({
+    const gameRows = [...byGameKey.values()].map((a) => ({
       ...a,
       winRate: a.gamesPlayed > 0 ? a.wins / a.gamesPlayed : 0,
     }));
-    if (rows.length > 0) {
-      await this.prisma.userGameStats.createMany({ data: rows });
+    if (gameRows.length > 0) {
+      await this.prisma.userGameStats.createMany({ data: gameRows });
     }
+
+    const globalRows = [...byGlobalKey.values()].map((a) => ({
+      ...a,
+      winRate: a.gamesPlayed > 0 ? a.wins / a.gamesPlayed : 0,
+    }));
+    if (globalRows.length > 0) {
+      await this.prisma.userGlobalStats.createMany({ data: globalRows });
+    }
+
     return {
-      message: `Rebuilt per-game stats: ${rows.length} rows from ${tournaments.length} game-designated tournaments.`,
+      message: `Rebuilt stats: ${globalRows.length} global row(s) and ${gameRows.length} per-game row(s) from ${tournaments.length} tournament(s).`,
     };
   }
 
@@ -225,12 +278,9 @@ export class DevService {
 
     // F13. Matches point at each other through nextMatchId / loserNextMatchId,
     // which are Restrict, so a match cannot be deleted while another still
-    // references it. The old code deleted matches round-by-round (in no particular
-    // order), which threw a FK error whenever a referenced later-round match went
-    // first. Mirror discardGeneratedBracket: null the links, then delete matches,
+    // references it. Mirror discardGeneratedBracket: null the links, then delete matches,
     // rounds, participants, and finally the tournament — all in one transaction so
-    // a partial delete can't strand the row half-gone. (GameRequest.tournamentId is
-    // SetNull and MatchGameLog/TournamentOrganizer cascade, so those need no help.)
+    // a partial delete can't strand the row half-gone.
     await this.prisma.$transaction(async (tx) => {
       await tx.match.updateMany({
         where: { round: { tournamentId } },
@@ -241,6 +291,10 @@ export class DevService {
       await tx.tournamentParticipant.deleteMany({ where: { tournamentId } });
       await tx.tournament.delete({ where: { id: tournamentId } });
     });
+
+    // Rebuild global and per-game stats from remaining tournaments so player records
+    // are automatically reconciled and never contain phantom wins/losses/points.
+    await this.backfillGameStats();
 
     return {
       message: `Tournament "${tournament.name}" and all related data deleted.`,

@@ -9,11 +9,13 @@ import {
 import { PrismaService } from 'prisma/prisma.service';
 import { FormatsService } from 'src/Formats/formats.service';
 import {
+  ByeResult,
   effectiveRawConfig,
   resolveConfig,
   systemOf,
   withFormatSnapshot,
 } from 'src/Formats/format-config.helper';
+import { applyMatchStats } from './match/match-stats.helper';
 import { seedBracketSlots, shuffled } from 'src/Formats/bracket-seeding.helper';
 import { LeaderboardService } from 'src/leaderboard/leaderboard.service';
 import {
@@ -1373,11 +1375,49 @@ export class TournamentService {
       });
     }
 
+    // If any matches were completed in an uncompleted tournament (e.g. ONGOING),
+    // roll back their match stats so player records never retain phantom games/wins.
+    const completedMatches = await this.prisma.match.findMany({
+      where: {
+        round: { tournamentId },
+        status: MatchStatus.COMPLETED,
+      },
+      include: {
+        round: {
+          include: {
+            tournament: {
+              include: { format: true },
+            },
+          },
+        },
+      },
+    });
+
     const matches = await this.prisma.match.count({
       where: { round: { tournamentId } },
     });
 
     await this.prisma.$transaction(async (tx) => {
+      for (const m of completedMatches) {
+        const rawConfig = effectiveRawConfig(m.round.tournament);
+        const config = resolveConfig(rawConfig, m.phase);
+        await applyMatchStats(
+          tx,
+          m.id,
+          {
+            pointsForWin: config.swissPointsForWin,
+            pointsForDraw: config.swissPointsForDraw,
+            pointsForLoss: config.swissPointsForLoss,
+          },
+          config.byeResult as ByeResult,
+          -1,
+        );
+      }
+
+      await tx.match.updateMany({
+        where: { round: { tournamentId } },
+        data: { nextMatchId: null, loserNextMatchId: null },
+      });
       await tx.match.deleteMany({ where: { round: { tournamentId } } });
       await tx.round.deleteMany({ where: { tournamentId } });
       await tx.tournamentParticipant.deleteMany({ where: { tournamentId } });

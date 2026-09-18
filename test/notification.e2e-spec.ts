@@ -227,12 +227,9 @@ describe('notification write sites', () => {
     // unchanged by the wrapping.
     prisma.$transaction = jest.fn(async (cb: any) => cb(prisma));
     const notifications = { notify: jest.fn(), notifyMany: jest.fn() } as any;
-    const service = new MatchService(
-      prisma,
-      {} as any,
-      notifications,
-      { emitTournamentUpdated: jest.fn() } as any,
-    );
+    const service = new MatchService(prisma, {} as any, notifications, {
+      emitTournamentUpdated: jest.fn(),
+    } as any);
     return { prisma, notifications, service };
   };
 

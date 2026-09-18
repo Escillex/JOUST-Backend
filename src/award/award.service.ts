@@ -109,10 +109,21 @@ export class AwardService {
     file: Express.Multer.File | undefined,
     adminId: string,
   ) {
+    const trimmedName = dto.name.trim();
+    const existing = await this.prisma.award.findFirst({
+      where: { name: { equals: trimmedName, mode: 'insensitive' } },
+    });
+    if (existing) {
+      throw new ConflictException({
+        code: 'AWARD_NAME_EXISTS',
+        message: `An award named "${trimmedName}" already exists. Award names must be unique.`,
+      });
+    }
+
     const imageUrl = await this.saveArt(file, dto.kind);
     return this.prisma.award.create({
       data: {
-        name: dto.name.trim(),
+        name: trimmedName,
         description: dto.description?.trim() || null,
         kind: dto.kind,
         imageUrl,
@@ -128,7 +139,25 @@ export class AwardService {
   }
 
   async update(id: string, dto: UpdateAwardDto) {
-    await this.findAward(id);
+    const award = await this.findAward(id);
+    if (dto.name !== undefined) {
+      const trimmedName = dto.name.trim();
+      if (trimmedName.toLowerCase() !== award.name.toLowerCase()) {
+        const conflict = await this.prisma.award.findFirst({
+          where: {
+            name: { equals: trimmedName, mode: 'insensitive' },
+            id: { not: id },
+          },
+        });
+        if (conflict) {
+          throw new ConflictException({
+            code: 'AWARD_NAME_EXISTS',
+            message: `An award named "${trimmedName}" already exists. Award names must be unique.`,
+          });
+        }
+      }
+    }
+
     return this.prisma.award.update({
       where: { id },
       data: {

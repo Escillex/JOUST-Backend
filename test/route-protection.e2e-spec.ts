@@ -112,7 +112,9 @@ describe('match and tracker routes are access-guarded', () => {
   // guard cannot see the config or who the caller is relative to the match. The
   // matrix lives in test/scoring-permission.e2e-spec.ts.
   it('MatchController.reportGameResult is JwtAuthGuard-only (per-tournament rule enforced in the service)', () => {
-    expect(guardsOf(match.reportGameResult)).not.toContain(TournamentAccessGuard);
+    expect(guardsOf(match.reportGameResult)).not.toContain(
+      TournamentAccessGuard,
+    );
     expect(guardsOf(match.reportGameResult)).not.toContain(RolesGuard);
   });
 

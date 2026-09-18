@@ -3,8 +3,9 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   effectiveRawConfig,
   resolveConfig,
+  systemOf,
 } from '../Formats/format-config.helper';
-import { MatchStatus } from '@prisma/client';
+import { MatchStatus, TournamentSystem } from '@prisma/client';
 
 export interface LeaderboardEntry {
   rank: number;
@@ -132,6 +133,12 @@ export class LeaderboardService {
    * sorted apart and then handed the same rank. Caught by game-win.spec.ts.
    */
   private static readonly DEFAULT_TIEBREAK_ORDER = ['omw', 'gw', 'oomw'];
+
+  /** Same constant, readable to callers that need to name the effective order
+   *  (the "OMW, GW, and OOMW are identical" refusal in formats.service). */
+  static effectiveTiebreakOrder(): string[] {
+    return [...LeaderboardService.DEFAULT_TIEBREAK_ORDER];
+  }
 
   private static tiebreakGetters<T extends SortableEntry>(): Record<
     string,
@@ -313,6 +320,157 @@ export class LeaderboardService {
   }
 
   /**
+   * A player's match record (games, W/L/D, tournament points) derived from the
+   * completed-match graph instead of the denormalized `TournamentParticipantStats`
+   * rows.
+   *
+   * Why: those rows are bumped on every result and rolled back on every reset,
+   * and nothing ever reconciles them with the matches they describe — a
+   * reject → re-report or reset → re-score cycle can leave a record no completed
+   * match supports (seen live: a changed round-1 result landed three times in
+   * W/L while points stayed flat, so the standings mixed a true OMW with a
+   * fabricated record). OMW/OOMW/GW/OGW already derive from the match graph on
+   * read; the match record does now too, so every number on the standings agrees
+   * with the bracket. Crediting follows the exact branches of
+   * `MatchService.updateMatchStats` (win/draw/bye, per-phase config, and the
+   * points-zeroed systems).
+   */
+  private async computeTournamentRecords(
+    tournament: {
+      config?: unknown;
+      system?: TournamentSystem | null;
+      format?: { system?: TournamentSystem | null; config?: unknown } | null;
+    } | null,
+    tournamentId: string,
+  ): Promise<
+    Map<
+      string,
+      {
+        gamesPlayed: number;
+        wins: number;
+        losses: number;
+        draws: number;
+        points: number;
+      }
+    >
+  > {
+    const matches = await this.prisma.match.findMany({
+      where: { round: { tournamentId }, status: MatchStatus.COMPLETED },
+      select: {
+        player1Id: true,
+        player2Id: true,
+        winnerId: true,
+        isBye: true,
+        phase: true,
+      },
+    });
+
+    const rawConfig = effectiveRawConfig(tournament);
+    const configByPhase = new Map<number, ReturnType<typeof resolveConfig>>();
+    const system = systemOf(tournament);
+    const record = new Map<
+      string,
+      {
+        gamesPlayed: number;
+        wins: number;
+        losses: number;
+        draws: number;
+        points: number;
+      }
+    >();
+
+    const add = (
+      userId: string,
+      partial: Partial<{
+        gamesPlayed: number;
+        wins: number;
+        losses: number;
+        draws: number;
+        points: number;
+      }>,
+    ) => {
+      const cur = record.get(userId) ?? {
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        points: 0,
+      };
+      record.set(userId, {
+        gamesPlayed: cur.gamesPlayed + (partial.gamesPlayed ?? 0),
+        wins: cur.wins + (partial.wins ?? 0),
+        losses: cur.losses + (partial.losses ?? 0),
+        draws: cur.draws + (partial.draws ?? 0),
+        points: cur.points + (partial.points ?? 0),
+      });
+    };
+
+    const credit = (
+      userId: string,
+      type: 'WIN' | 'LOSS' | 'DRAW',
+      pointsFor: number,
+    ) => {
+      if (type === 'WIN') {
+        add(userId, { gamesPlayed: 1, wins: 1, points: pointsFor });
+      } else if (type === 'LOSS') {
+        add(userId, { gamesPlayed: 1, losses: 1, points: pointsFor });
+      } else {
+        add(userId, { gamesPlayed: 1, draws: 1, points: pointsFor });
+      }
+    };
+
+    for (const m of matches) {
+      let config = configByPhase.get(m.phase);
+      if (!config) {
+        config = resolveConfig(rawConfig, m.phase);
+        configByPhase.set(m.phase, config);
+      }
+
+      // Plan 8.1: match points only apply where standings ARE the result. On a
+      // bracket the result is who won, so points are zeroed even though the
+      // W/L/D counters still count (they feed match-win percentage everywhere).
+      const pointsApply = !(
+        system === 'SINGLE_ELIMINATION' ||
+        system === 'DOUBLE_ELIMINATION' ||
+        (system === 'HYBRID' && m.phase === 2)
+      );
+      const pointsForWin = pointsApply ? config.swissPointsForWin : 0;
+      const pointsForDraw = pointsApply ? config.swissPointsForDraw : 0;
+      const pointsForLoss = pointsApply ? config.swissPointsForLoss : 0;
+
+      if (m.isBye) {
+        // A bye credits only the player given the seat, per the configured
+        // byeResult; NONE credits nothing (the bye still counts as played).
+        if (config.byeResult === 'NONE') continue;
+        credit(
+          m.player1Id ?? '',
+          config.byeResult === 'DRAW' ? 'DRAW' : 'WIN',
+          config.byeResult === 'DRAW' ? pointsForDraw : pointsForWin,
+        );
+        continue;
+      }
+
+      if (!m.player1Id || !m.player2Id) continue;
+
+      if (!m.winnerId) {
+        credit(m.player1Id, 'DRAW', pointsForDraw);
+        credit(m.player2Id, 'DRAW', pointsForDraw);
+        continue;
+      }
+
+      if (m.winnerId === m.player1Id) {
+        credit(m.player1Id, 'WIN', pointsForWin);
+        credit(m.player2Id, 'LOSS', pointsForLoss);
+      } else {
+        credit(m.player1Id, 'LOSS', pointsForLoss);
+        credit(m.player2Id, 'WIN', pointsForWin);
+      }
+    }
+
+    return record;
+  }
+
+  /**
    * Which tiebreaker actually separated two entries, or null when none did.
    * Used so the organizer is told what decided a tie instead of being given a
    * fixed message that may not be true.
@@ -454,7 +612,6 @@ export class LeaderboardService {
     const participants = await this.prisma.tournamentParticipant.findMany({
       where: { tournamentId },
       include: {
-        stats: true,
         user: {
           select: {
             id: true,
@@ -483,21 +640,33 @@ export class LeaderboardService {
     // anything, so both tiebreakers silently compared 0 to 0 and fell through.
     const opponentStats = await this.computeOpponentTiebreakers(tournamentId);
 
-    const entries: Omit<LeaderboardEntry, 'rank'>[] = participants.map((p) => ({
-      userId: p.userId,
-      username: p.user?.username ?? 'Guest',
-      displayName: p.user?.displayName ?? null,
-      points: p.stats?.points ?? 0,
-      wins: p.stats?.wins ?? 0,
-      losses: p.stats?.losses ?? 0,
-      draws: p.stats?.draws ?? 0,
-      matchWinPct: p.stats?.winRate ?? 0,
-      omw: opponentStats.get(p.userId)?.omw ?? 0,
-      oomw: opponentStats.get(p.userId)?.oomw ?? 0,
-      gw: opponentStats.get(p.userId)?.gw ?? 0,
-      ogw: opponentStats.get(p.userId)?.ogw ?? 0,
-      avatarUrl: p.user?.avatarUrl ?? null,
-    }));
+    // The match record (W/L/D/points) derives from the completed matches too,
+    // for the same reason: the denormalized stats rows drift when results are
+    // rejected, reset, or re-reported, and nothing reconciles them.
+    const records = await this.computeTournamentRecords(
+      tournament,
+      tournamentId,
+    );
+
+    const entries: Omit<LeaderboardEntry, 'rank'>[] = participants.map((p) => {
+      const rec = records.get(p.userId);
+      const gamesPlayed = rec?.gamesPlayed ?? 0;
+      return {
+        userId: p.userId,
+        username: p.user?.username ?? 'Guest',
+        displayName: p.user?.displayName ?? null,
+        points: rec?.points ?? 0,
+        wins: rec?.wins ?? 0,
+        losses: rec?.losses ?? 0,
+        draws: rec?.draws ?? 0,
+        matchWinPct: gamesPlayed > 0 ? (rec?.wins ?? 0) / gamesPlayed : 0,
+        omw: opponentStats.get(p.userId)?.omw ?? 0,
+        oomw: opponentStats.get(p.userId)?.oomw ?? 0,
+        gw: opponentStats.get(p.userId)?.gw ?? 0,
+        ogw: opponentStats.get(p.userId)?.ogw ?? 0,
+        avatarUrl: p.user?.avatarUrl ?? null,
+      };
+    });
 
     const sorted = this.sortEntries(entries, tieBreakerOrder);
 

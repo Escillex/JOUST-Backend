@@ -100,10 +100,12 @@ export class NotificationService {
         select: { id: true },
       });
 
-      const management =
-        tournament.createdById
-          ? [...tournament.organizers.map((o) => o.userId), tournament.createdById]
-          : tournament.organizers.map((o) => o.userId);
+      const management = tournament.createdById
+        ? [
+            ...tournament.organizers.map((o) => o.userId),
+            tournament.createdById,
+          ]
+        : tournament.organizers.map((o) => o.userId);
       // The creator is already one of the organizers' membership set only when
       // they are also an admin (checked below) — dedupe against the admins.
       await this.notifyMany(

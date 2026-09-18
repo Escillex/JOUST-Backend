@@ -1067,6 +1067,34 @@ export class FormatsService {
 
   // ─── TIE BREAKER OVERRIDE ────────────────────────────────────
 
+  /** The refusal message when the top two are identical on every configured
+   *  tiebreaker: "OMW, GW, and OOMW are identical. You must extend the round to
+   *  determine a winner." Names the configured order so a custom one is spelled
+   *  out honestly instead of the default triad. */
+  private tiedTiebreakersText(tieBreakerOrder: string[]): string {
+    const labels: Record<string, string> = {
+      omw: 'OMW',
+      oomw: 'OOMW',
+      gw: 'GW',
+      ogw: 'OGW',
+      matchWinPct: 'Match Win%',
+      wins: 'Wins',
+      losses: 'Losses',
+    };
+    const order =
+      tieBreakerOrder.length > 0
+        ? tieBreakerOrder
+        : LeaderboardService.effectiveTiebreakOrder();
+    const names = order.map((key) => labels[key] ?? key.toUpperCase());
+    const subject =
+      names.length > 1
+        ? `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`
+        : (names[0] ?? 'the tiebreakers');
+    return `${subject} ${
+      names.length > 1 ? 'are' : 'is'
+    } identical. You must extend the round to determine a winner.`;
+  }
+
   async resolveTie(
     tournamentId: string,
     action: 'EXTEND_ROUND' | 'APPLY_TIEBREAKERS',
@@ -1103,6 +1131,17 @@ export class FormatsService {
         tieBreakerOrder,
       );
 
+      // When EVERY configured tiebreaker is identical between the top two there
+      // is no honest winner to crown — leaderboard[0] is just whoever the query
+      // happened to return first, not someone who earned the result. The old
+      // fallback completed the tournament with that arbitrary player silently;
+      // now the organizer must settle it on the table with an extra round.
+      if (!criterion) {
+        throw new BadRequestException(
+          this.tiedTiebreakersText(tieBreakerOrder),
+        );
+      }
+
       const winnerId = leaderboard[0].userId;
       await this.prisma.tournament.update({
         where: { id: tournamentId },
@@ -1111,11 +1150,7 @@ export class FormatsService {
       await this.tournamentService.completeTournament(tournamentId);
 
       return {
-        message: criterion
-          ? `Tie broken on ${criterion}.`
-          : 'The configured tiebreakers could not separate these players. ' +
-            'The winner was set to the current top of the standings — extend the ' +
-            'round instead if you need this decided on results.',
+        message: `Tie broken on ${criterion}.`,
         tiebreaker: criterion,
       };
     }

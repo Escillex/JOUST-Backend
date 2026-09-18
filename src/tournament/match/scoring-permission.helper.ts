@@ -35,8 +35,7 @@ export function isParticipantOfMatch(
   match: ScoreMatchContext,
 ): boolean {
   return (
-    !!user?.id &&
-    (user.id === match.player1Id || user.id === match.player2Id)
+    !!user?.id && (user.id === match.player1Id || user.id === match.player2Id)
   );
 }
 

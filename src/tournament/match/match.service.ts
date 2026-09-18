@@ -23,6 +23,7 @@ import {
   systemOf,
 } from '../../Formats/format-config.helper';
 import { completedMatchData } from './match-completion.helper';
+import { applyMatchStats } from './match-stats.helper';
 import { checkTournamentAccess } from '../../guards/tournament-access.util';
 import {
   resolveScoreActor,
@@ -41,6 +42,17 @@ export class MatchService {
     private realtime: RealtimeGateway,
   ) {}
 
+  /**
+   * Credits (or — with `direction = -1` — reverses) the stats a completed match
+   * earns. The delta math lives in `match-stats.helper.ts` so a grant, a reset
+   * and a tournament-delete rollback all use the same authority: nothing else
+   * ever recomputed a reset's reversal, which is exactly how phantom wins and
+   * games used to sneak in (the old reset passed negative points but the
+   * game/win/loss/draw deltas were hardcoded +1, so every reset RE-ADDED a win).
+   * Wrapped in its own transaction here rather than in submitResult on purpose:
+   * that cascades through handleMatchCompletion into bracket generation, which
+   * would hold one transaction open across the whole chain.
+   */
   private async updateMatchStats(
     matchId: string,
     pointsConfig: {
@@ -51,255 +63,12 @@ export class MatchService {
     // How a bye match credits its player. Only consulted when match.isBye; a real
     // result ignores it. Defaults to WIN so every existing caller is unchanged.
     byeResult: ByeResult = 'WIN',
+    // 1 = grant, -1 = reverse (reset). All deltas scale with it.
+    direction: 1 | -1 = 1,
   ) {
-    // One transaction: this credits BOTH players. Half-applied, one player
-    // has the match on their record and the other does not, and nothing
-    // recomputes to notice. Every step is a plain write, so none of it needs
-    // to sit outside. Wrapped here rather than in submitResult on purpose:
-    // that cascades through handleMatchCompletion into bracket generation,
-    // which would hold one transaction open across the whole chain.
-    await this.prisma.$transaction(async (tx) => {
-      const match = await tx.match.findUnique({
-        where: { id: matchId },
-        include: {
-          round: {
-            select: {
-              tournamentId: true,
-              tournament: {
-                select: { system: true, format: { select: { system: true } } },
-              },
-            },
-          },
-          player1: { select: { id: true, isGuest: true } },
-          player2: { select: { id: true, isGuest: true } },
-        },
-      });
-
-      if (!match || !match.round || !match.player1Id) return;
-
-      // Plan 8.1. Match points are the result only where standings ARE the
-      // result. On a bracket the result is who won, and awarding points per win
-      // actively caused harm: it is what let a hybrid pay the runner-up the
-      // champion's global points (8b), and what made double elimination halt on
-      // a phantom "tie for 1st" straight after a legitimate grand final (7.11).
-      //
-      // Win/loss/draw counters are deliberately NOT skipped — a win/loss record
-      // matters in every system and feeds UserGlobalStats. Only the points
-      // component is zeroed.
-      const system = systemOf(match.round.tournament);
-      const pointsApply = !(
-        system === 'SINGLE_ELIMINATION' ||
-        system === 'DOUBLE_ELIMINATION' ||
-        (system === 'HYBRID' && match.phase === 2)
-      );
-      const points = pointsApply
-        ? pointsConfig
-        : { pointsForWin: 0, pointsForDraw: 0, pointsForLoss: 0 };
-
-      const participantIds = [match.player1Id, match.player2Id].filter(
-        Boolean,
-      ) as string[];
-      const participants = await tx.tournamentParticipant.findMany({
-        where: {
-          tournamentId: match.round.tournamentId,
-          userId: { in: participantIds },
-        },
-        include: {
-          stats: true,
-          user: { select: { isGuest: true } },
-        },
-      });
-
-      const participantByUserId = new Map(
-        participants.map((participant) => [participant.userId, participant]),
-      );
-
-      // Game bucket for per-game stats — the tournament's own game (todo.md §5),
-      // with the format's gameName as a legacy fallback for un-backfilled rows.
-      const tournamentMeta = await tx.tournament.findUnique({
-        where: { id: match.round.tournamentId },
-        select: {
-          game: { select: { name: true } },
-          format: { select: { gameName: true } },
-        },
-      });
-      const gameName =
-        tournamentMeta?.game?.name ?? tournamentMeta?.format?.gameName ?? null;
-
-      const maybeUpdateGlobalStats = async (
-        userId: string,
-        isGuest: boolean,
-        deltaGames: number,
-        deltaWins: number,
-        deltaLosses: number,
-        deltaDraws: number,
-      ) => {
-        if (isGuest) return;
-
-        const currentGlobal = await tx.userGlobalStats.findUnique({
-          where: { userId },
-        });
-
-        const gamesPlayed = (currentGlobal?.gamesPlayed ?? 0) + deltaGames;
-        const wins = (currentGlobal?.wins ?? 0) + deltaWins;
-        const losses = (currentGlobal?.losses ?? 0) + deltaLosses;
-        const draws = (currentGlobal?.draws ?? 0) + deltaDraws;
-        const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0;
-
-        if (currentGlobal) {
-          await tx.userGlobalStats.update({
-            where: { userId },
-            data: {
-              gamesPlayed,
-              wins,
-              losses,
-              draws,
-              winRate,
-            },
-          });
-        } else {
-          await tx.userGlobalStats.create({
-            data: {
-              userId,
-              tournamentsPlayed: 0,
-              tournamentsWon: 0,
-              gamesPlayed,
-              wins,
-              losses,
-              draws,
-              winRate,
-            },
-          });
-        }
-
-        if (!gameName) return;
-
-        const currentGame = await tx.userGameStats.findUnique({
-          where: { userId_gameName: { userId, gameName } },
-        });
-
-        const gameGamesPlayed = (currentGame?.gamesPlayed ?? 0) + deltaGames;
-        const gameWins = (currentGame?.wins ?? 0) + deltaWins;
-        const gameWinRate =
-          gameGamesPlayed > 0 ? gameWins / gameGamesPlayed : 0;
-
-        await tx.userGameStats.upsert({
-          where: { userId_gameName: { userId, gameName } },
-          create: {
-            userId,
-            gameName,
-            gamesPlayed: gameGamesPlayed,
-            wins: gameWins,
-            losses: deltaLosses,
-            draws: deltaDraws,
-            winRate: gameWinRate,
-          },
-          update: {
-            gamesPlayed: gameGamesPlayed,
-            wins: gameWins,
-            losses: { increment: deltaLosses },
-            draws: { increment: deltaDraws },
-            winRate: gameWinRate,
-          },
-        });
-      };
-
-      const updateParticipant = async (
-        userId: string,
-        deltaGames: number,
-        deltaWins: number,
-        deltaLosses: number,
-        deltaDraws: number,
-        deltaPoints: number,
-      ) => {
-        const participant = participantByUserId.get(userId);
-        if (!participant) return;
-
-        let stats = participant.stats;
-        if (!stats) {
-          stats = await tx.tournamentParticipantStats.create({
-            data: { participantId: participant.id },
-          });
-        }
-
-        const gamesPlayed = stats.gamesPlayed + deltaGames;
-        const wins = stats.wins + deltaWins;
-        const losses = stats.losses + deltaLosses;
-        const draws = stats.draws + deltaDraws;
-        const winRate = gamesPlayed > 0 ? wins / gamesPlayed : 0;
-
-        await tx.tournamentParticipantStats.update({
-          where: { id: stats.id },
-          data: {
-            gamesPlayed,
-            wins,
-            losses,
-            draws,
-            points: { increment: deltaPoints },
-            winRate,
-          },
-        });
-
-        await maybeUpdateGlobalStats(
-          userId,
-          participant.user.isGuest,
-          deltaGames,
-          deltaWins,
-          deltaLosses,
-          deltaDraws,
-        );
-      };
-
-      if (match.isBye) {
-        // A bye credits its player per the configured byeResult. WIN is the
-        // standard and the default; DRAW records a draw's points; NONE credits
-        // nothing (the match still stands as a completed bye, just uncounted).
-        if (byeResult === 'NONE') return;
-        if (byeResult === 'DRAW') {
-          await updateParticipant(
-            match.player1Id,
-            1,
-            0,
-            0,
-            1,
-            points.pointsForDraw,
-          );
-        } else {
-          await updateParticipant(
-            match.player1Id,
-            1,
-            1,
-            0,
-            0,
-            points.pointsForWin,
-          );
-        }
-        return;
-      }
-
-      if (!match.player2Id) return;
-
-      if (!match.winnerId) {
-        await Promise.all([
-          updateParticipant(match.player1Id, 1, 0, 0, 1, points.pointsForDraw),
-          updateParticipant(match.player2Id, 1, 0, 0, 1, points.pointsForDraw),
-        ]);
-        return;
-      }
-
-      if (match.winnerId === match.player1Id) {
-        await Promise.all([
-          updateParticipant(match.player1Id, 1, 1, 0, 0, points.pointsForWin),
-          updateParticipant(match.player2Id, 1, 0, 1, 0, points.pointsForLoss),
-        ]);
-        return;
-      }
-
-      await Promise.all([
-        updateParticipant(match.player1Id, 1, 0, 1, 0, points.pointsForLoss),
-        updateParticipant(match.player2Id, 1, 1, 0, 0, points.pointsForWin),
-      ]);
-    });
+    await this.prisma.$transaction((tx) =>
+      applyMatchStats(tx, matchId, pointsConfig, byeResult, direction),
+    );
   }
 
   /**
@@ -466,9 +235,7 @@ export class MatchService {
       config.scoreSubmissionRule,
     );
     if (actor === 'PARTICIPANT') {
-      throw new ForbiddenException(
-        'A draw must be confirmed by an organizer',
-      );
+      throw new ForbiddenException('A draw must be confirmed by an organizer');
     }
 
     await this.prisma.match.update({
@@ -565,10 +332,79 @@ export class MatchService {
     return this.submitResult(matchId, match.reportedWinnerId);
   }
 
+  // A player's deciding game bumps the series score and closes its game log
+  // before the result is verified. Undoing that decision — rejecting a pending
+  // report on an ONGOING match, or resetting a COMPLETED match back to play —
+  // must undo BOTH, or the tracker keeps declaring a winner while the match is
+  // still being played. Completing a match means one side reached winsNeeded,
+  // so subtracting one win (floored at 0) guarantees that side is no longer
+  // decisive; reopening the deciding log hands the players back a live game.
+  // A result carries no deciding log (a bare self/quick report or a draw) — it
+  // only needs the score step skipped and the state `extra` still applied.
+  private async undoDecidingResult(
+    match: {
+      id: string;
+      player1Id: string | null;
+      player2Id: string | null;
+      player1Score: number;
+      player2Score: number;
+      gameLogs?: {
+        id: string;
+        gameNumber: number;
+        trackerActive: boolean;
+        winnerId: string | null;
+        completedAt: Date | null;
+      }[];
+    },
+    winnerId: string | null,
+    extra: Partial<{
+      reportedWinnerId: null;
+      status: MatchStatus;
+      winnerId: null;
+      completedAt: null;
+    }> = {},
+  ) {
+    const decidingLog =
+      winnerId &&
+      match.gameLogs
+        ?.filter(
+          (log) =>
+            !log.trackerActive && log.winnerId === winnerId && log.completedAt,
+        )
+        .sort((a, b) => b.gameNumber - a.gameNumber)[0];
+
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.match.update({
+        where: { id: match.id },
+        data: {
+          ...extra,
+          player1Score:
+            winnerId === match.player1Id
+              ? Math.max(0, match.player1Score - 1)
+              : match.player1Score,
+          player2Score:
+            winnerId === match.player2Id
+              ? Math.max(0, match.player2Score - 1)
+              : match.player2Score,
+        },
+      }),
+      ...(decidingLog
+        ? [
+            this.prisma.matchGameLog.update({
+              where: { id: decidingLog.id },
+              data: { trackerActive: true, winnerId: null, completedAt: null },
+            }),
+          ]
+        : []),
+    ]);
+
+    return updated;
+  }
+
   async rejectReportedResult(matchId: string) {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      include: { round: true },
+      include: { round: true, gameLogs: true },
     });
     if (!match) throw new NotFoundException('Match not found');
     if (!match.reportedWinnerId)
@@ -576,9 +412,8 @@ export class MatchService {
     if (match.status === MatchStatus.COMPLETED)
       throw new BadRequestException('Match already completed');
 
-    await this.prisma.match.update({
-      where: { id: matchId },
-      data: { reportedWinnerId: null },
+    await this.undoDecidingResult(match, match.reportedWinnerId, {
+      reportedWinnerId: null,
     });
 
     await this.notifyPlayers(
@@ -603,6 +438,7 @@ export class MatchService {
             },
           },
         },
+        gameLogs: true,
       },
     });
 
@@ -620,15 +456,14 @@ export class MatchService {
       pointsForLoss: -config.swissPointsForLoss,
     });
 
-    // Revert match status and clear winner/timestamps
-    const reset = await this.prisma.match.update({
-      where: { id: matchId },
-      data: {
-        status: MatchStatus.ONGOING,
-        winnerId: null,
-        completedAt: null,
-        reportedWinnerId: null,
-      },
+    // Revert match status, clear winner/timestamps, and take back the deciding
+    // game (series score −1 + the closed game log reopened) so the tracker does
+    // not keep declaring a winner on an ONGOING match.
+    const reset = await this.undoDecidingResult(match, match.winnerId, {
+      status: MatchStatus.ONGOING,
+      winnerId: null,
+      completedAt: null,
+      reportedWinnerId: null,
     });
 
     // If tournament was marked COMPLETED, reopen it as ONGOING

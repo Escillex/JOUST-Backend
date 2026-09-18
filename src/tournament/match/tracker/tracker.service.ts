@@ -87,7 +87,12 @@ export class TrackerService {
     // Who may open the tracker: staff always; a player of the match when the
     // tournament allows player scoring. Decided here, not by the route's guards
     // (that would reject the PLAYER before this rule can run).
-    await resolveScoreActor(this.prisma, match, user, config.scoreSubmissionRule);
+    await resolveScoreActor(
+      this.prisma,
+      match,
+      user,
+      config.scoreSubmissionRule,
+    );
 
     // Resolve mode — dto > format config > default 'POINTS'
     const mode: GameTrackingMode =

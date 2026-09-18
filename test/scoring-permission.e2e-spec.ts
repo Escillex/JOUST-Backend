@@ -73,6 +73,10 @@ describe('scoring permission', () => {
             match.player1Score += data.player1Score.increment;
           if (data.player2Score?.increment)
             match.player2Score += data.player2Score.increment;
+          if ('player1Score' in data && typeof data.player1Score === 'number')
+            match.player1Score = data.player1Score;
+          if ('player2Score' in data && typeof data.player2Score === 'number')
+            match.player2Score = data.player2Score;
           if (data.status) match.status = data.status;
           if ('winnerId' in data) match.winnerId = data.winnerId;
           if ('reportedWinnerId' in data)
@@ -98,6 +102,7 @@ describe('scoring permission', () => {
         findUnique: jest
           .fn()
           .mockResolvedValue({ createdById: 'someone-else' }),
+        update: jest.fn(),
       },
       tournamentOrganizer: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -106,7 +111,13 @@ describe('scoring permission', () => {
         findMany: jest.fn().mockResolvedValue([]),
       },
     } as any;
-    prisma.$transaction = jest.fn(async (cb: any) => cb(prisma));
+    // The service uses both transaction forms: array (undoDecidingResult) and
+    // callback (updateMatchStats). The array items are evaluated eagerly, so
+    // Promise.all resolving them also lets the update mocks keep `match` fresh.
+    prisma.$transaction = jest.fn(async (arg: any) => {
+      if (Array.isArray(arg)) return Promise.all(arg);
+      return arg(prisma);
+    });
     return prisma;
   };
 
@@ -309,11 +320,7 @@ describe('scoring permission', () => {
         reportGameResult: jest.fn(),
         reportDraw: jest.fn(),
       } as any;
-      const service = new TrackerService(
-        prisma,
-        matchService,
-        realtime,
-      );
+      const service = new TrackerService(prisma, matchService, realtime);
       return { prisma, service, realtime };
     };
 
@@ -326,10 +333,7 @@ describe('scoring permission', () => {
     };
 
     it('a participant can open a game under the default (permissive) setting', async () => {
-      const { prisma, run } = open(
-        makeMatch({}, { bestOf: 3 }),
-        PLAYER1,
-      );
+      const { prisma, run } = open(makeMatch({}, { bestOf: 3 }), PLAYER1);
       await run();
       expect(prisma.matchGameLog.create).toHaveBeenCalled();
     });
@@ -452,6 +456,217 @@ describe('scoring permission', () => {
           data: expect.objectContaining({ trackerActive: false }),
         }),
       );
+    });
+  });
+
+  describe('MatchService.rejectReportedResult', () => {
+    const call = (match: MutableMatch) => {
+      const prisma = makePrisma(match);
+      const notifications = makeNotificationMock();
+      const realtime = makeRealtimeMock();
+      const service = new MatchService(
+        prisma,
+        { handleMatchCompletion: jest.fn() } as any,
+        notifications,
+        realtime as any,
+      );
+      const run = () => service.rejectReportedResult('m1');
+      return { prisma, notifications, realtime, service, run, match };
+    };
+
+    it('takes back the deciding game: score −1 and the newest closed log reopened', async () => {
+      const { run, prisma, match } = call(
+        makeMatch(
+          {
+            player1Score: 1,
+            player2Score: 1,
+            reportedWinnerId: 'p2',
+            gameLogs: [
+              {
+                id: 'log1',
+                gameNumber: 1,
+                trackerActive: false,
+                winnerId: 'p2',
+                completedAt: new Date(),
+              },
+              {
+                id: 'log3',
+                gameNumber: 3,
+                trackerActive: false,
+                winnerId: 'p2',
+                completedAt: new Date(),
+              },
+            ],
+          },
+          { bestOf: 3 },
+        ),
+      );
+      await run();
+      expect(prisma.match.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            reportedWinnerId: null,
+            player1Score: 1,
+            player2Score: 0,
+          }),
+        }),
+      );
+      // Only the deciding (newest closed) game is reopened, not the whole series.
+      expect(prisma.matchGameLog.update).toHaveBeenCalledTimes(1);
+      expect(prisma.matchGameLog.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'log3' },
+          data: { trackerActive: true, winnerId: null, completedAt: null },
+        }),
+      );
+      expect(match.player2Score).toBe(0);
+    });
+
+    it('a pending self-report with no tracker game still rolls the win back', async () => {
+      const { run, prisma } = call(
+        makeMatch(
+          {
+            player1Score: 1,
+            player2Score: 0,
+            reportedWinnerId: 'p1',
+            gameLogs: [],
+          },
+          { bestOf: 1 },
+        ),
+      );
+      await run();
+      expect(prisma.match.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            reportedWinnerId: null,
+            player1Score: 0,
+            player2Score: 0,
+          }),
+        }),
+      );
+      expect(prisma.matchGameLog.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses when there is nothing pending to reject', async () => {
+      const { run } = call(makeMatch({}, { bestOf: 3 }));
+      await expect(run()).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses on a completed match', async () => {
+      const { run } = call(
+        makeMatch(
+          { status: MatchStatus.COMPLETED, reportedWinnerId: 'p1' },
+          { bestOf: 3 },
+        ),
+      );
+      await expect(run()).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('MatchService.resetMatch', () => {
+    const call = (match: MutableMatch) => {
+      const prisma = makePrisma(match);
+      const notifications = makeNotificationMock();
+      const realtime = makeRealtimeMock();
+      const service = new MatchService(
+        prisma,
+        { handleMatchCompletion: jest.fn() } as any,
+        notifications,
+        realtime as any,
+      );
+      const run = () => service.resetMatch('m1');
+      return { prisma, notifications, realtime, service, run, match };
+    };
+
+    it('returns a completed match to ONGOING and takes back the deciding game', async () => {
+      const { run, prisma, match } = call(
+        makeMatch(
+          {
+            status: MatchStatus.COMPLETED,
+            winnerId: 'p2',
+            player1Score: 1,
+            player2Score: 2,
+            gameLogs: [
+              {
+                id: 'log1',
+                gameNumber: 1,
+                trackerActive: false,
+                winnerId: 'p2',
+                completedAt: new Date(),
+              },
+              {
+                id: 'log3',
+                gameNumber: 3,
+                trackerActive: false,
+                winnerId: 'p2',
+                completedAt: new Date(),
+              },
+            ],
+          },
+          { bestOf: 3 },
+        ),
+      );
+      await run();
+      expect(match.status).toBe(MatchStatus.ONGOING);
+      expect(prisma.match.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: MatchStatus.ONGOING,
+            winnerId: null,
+            completedAt: null,
+            reportedWinnerId: null,
+            player1Score: 1,
+            player2Score: 1,
+          }),
+        }),
+      );
+      expect(prisma.matchGameLog.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'log3' } }),
+      );
+    });
+
+    it('reopens a completed tournament as ONGOING', async () => {
+      const match = {
+        ...makeMatch({}, { bestOf: 3 }),
+        status: MatchStatus.COMPLETED,
+        winnerId: 'p1',
+        player1Score: 2,
+        player2Score: 0,
+        gameLogs: [
+          {
+            id: 'log2',
+            gameNumber: 2,
+            trackerActive: false,
+            winnerId: 'p1',
+            completedAt: new Date(),
+          },
+        ],
+        round: {
+          tournamentId: 't1',
+          tournament: {
+            id: 't1',
+            status: 'COMPLETED',
+            config: { bestOf: 3 },
+            format: { config: null },
+          },
+        },
+      };
+      const { run, prisma } = call(match);
+      await run();
+      expect(prisma.tournament.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'ONGOING',
+            completedAt: null,
+            winnerId: null,
+          }),
+        }),
+      );
+    });
+
+    it('refuses a match that is not completed', async () => {
+      const { run } = call(makeMatch({}, { bestOf: 3 }));
+      await expect(run()).rejects.toThrow(BadRequestException);
     });
   });
 });
