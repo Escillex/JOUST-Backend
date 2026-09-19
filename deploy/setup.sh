@@ -539,6 +539,13 @@ if [ "$STACK" = docker ]; then
 	if [[ "$GO" =~ ^[Yy] ]]; then
 		docker compose up -d --build
 		sync_db_password   # ensure the DB role password matches .env (stale-volume guard)
+		# Production compose fragments do not all own the API command, so do not
+		# assume the image entrypoint applied migrations. Run the release migration
+		# explicitly after the database credentials are reconciled, then restart the
+		# API with the migrated schema. This also makes a clean database safe.
+		banner "Applying database migrations"
+		docker compose run --rm server npx prisma migrate deploy
+		docker compose restart server >/dev/null
 		if [ "$RUNTIME" = host ]; then
 			render_host_caddy
 			[ "$TUNNEL" = cloudflared ] && render_host_cloudflared
