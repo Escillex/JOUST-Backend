@@ -17,6 +17,9 @@ RUN npm run build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
 FROM node:22-alpine
+# The backup service shells out to pg_dump/pg_restore/psql. Keep this runtime
+# dependency in the canonical production image, just as it is in server/Dockerfile.
+RUN apk add --no-cache postgresql17-client
 WORKDIR /app
 ENV NODE_ENV=production
 # Copy the whole (already-compiled) node_modules from build — same base image, so
