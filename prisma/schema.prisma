@@ -222,6 +222,8 @@ model User {
   tournamentsCreated      Tournament[]
   wonTournaments          Tournament[]            @relation("TournamentWinner")
   participatedTournaments TournamentParticipant[]
+  guestHistoryExclusions GuestHistoryExclusion[]
+  guestHistoryExclusionsMade GuestHistoryExclusion[] @relation("GuestHistoryExcludedBy")
   matchesAsPlayer1        Match[]                 @relation("Player1")
   matchesAsPlayer2        Match[]                 @relation("Player2")
   wonMatches              Match[]                 @relation("Winner")
@@ -586,6 +588,7 @@ model Tournament {
   organizers   TournamentOrganizer[]
   rounds       Round[]
   gameRequests GameRequest[]
+  guestHistoryExclusions GuestHistoryExclusion[]
 
   bannerUrl String? // path: /uploads/banners/<uuid>.webp
 
@@ -630,6 +633,25 @@ model TournamentParticipant {
   // The unique above leads with userId, so it cannot serve a tournamentId-only
   // filter - which is how nearly every read of this table is shaped.
   @@index([tournamentId])
+}
+
+/// Staff-side correction for a legacy guest identity that was reused across
+/// events. The tournament remains unchanged; this only excludes the selected
+/// result from a later guest claim/conversion.
+model GuestHistoryExclusion {
+  id           String   @id @default(uuid())
+  guestId      String
+  tournamentId String
+  excludedById String
+  reason       String?
+  createdAt    DateTime @default(now())
+
+  guest      User       @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  excludedBy User       @relation("GuestHistoryExcludedBy", fields: [excludedById], references: [id])
+
+  @@unique([guestId, tournamentId])
+  @@index([guestId])
 }
 
 // ─── PER-TOURNAMENT STATS (guests + registered users) ─────────────

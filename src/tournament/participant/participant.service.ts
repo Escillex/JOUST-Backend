@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from 'prisma/prisma.service';
 import { TournamentService } from '../tournament.service';
+import { guestHistoryInclude, retireGuest } from '../../user/guest-lifecycle';
 import { MatchService } from '../match/match.service';
 import { RealtimeGateway } from 'src/realtime/realtime.gateway';
 import { NotificationService } from 'src/notification/notification.service';
@@ -60,9 +61,9 @@ export class ParticipantService {
       throw new NotFoundException('User not found');
     }
 
-    if (tournament.isPrivate && user.isGuest) {
+    if (user.isGuest) {
       throw new BadRequestException(
-        'Private tournaments can only be joined by registered players',
+        'Guest entries must be added by staff with a fresh tournament identity',
       );
     }
 
@@ -153,42 +154,16 @@ export class ParticipantService {
       throw new NotFoundException('Tournament not found');
     }
 
-    // Guest registration is allowed while the field is OPEN and for historical
-    // records after completion. It never reopens or mutates an ongoing bracket.
     const isOpen = tournament.status === 'OPEN';
-    const isCompleted = tournament.status === 'COMPLETED';
-    if (!isOpen && !isCompleted) {
-      throw new BadRequestException(
-        'Guest registration is available while registration is open or after the tournament is completed',
-      );
+    if (!isOpen) {
+      throw new BadRequestException('Add guest participants while registration is open. Use Guest registration to preserve an existing player’s results.');
     }
-
-    // A completed tournament is being given a historical guest record, not a
-    // bracket seat. Do not reject that record just because the original field
-    // reached maxPlayers; the guest is not added to any match.
-    if (isOpen && tournament.participants.length >= tournament.maxPlayers) {
-      throw new BadRequestException(
-        `Tournament is full (${tournament.maxPlayers} players max)`,
-      );
+    if (tournament.participants.length >= tournament.maxPlayers) {
+      throw new BadRequestException(`Tournament is full (${tournament.maxPlayers} players max)`);
     }
-
-    if (isOpen && tournament.isPrivate) {
-      throw new BadRequestException(
-        'Private tournaments cannot be joined by guests',
-      );
-    }
-
-    const now = new Date();
-    const newExpiry = new Date(now);
-    newExpiry.setDate(
-      newExpiry.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
-    );
-    // Keep post-completion guests on the tournament's existing cleanup window
-    // when it is still active. If that window already passed, start a new one
-    // so the new historical record has a complete retention period.
-    const expiresAt = isCompleted && tournament.guestCleanupAt && tournament.guestCleanupAt > now
-      ? tournament.guestCleanupAt
-      : newExpiry;
+    if (tournament.isPrivate) throw new BadRequestException('Private tournaments cannot be joined by guests');
+    if (!username.trim()) throw new BadRequestException('Enter a guest name');
+    const expiresAt = null;
 
     // One transaction for the same reason as joinTournament, plus a second: the
     // guest User row is created here. Without it, a failure between the two
@@ -210,6 +185,7 @@ export class ParticipantService {
             where: {
               username: { equals: normalizedUsername, mode: 'insensitive' },
             },
+            include: guestHistoryInclude,
           });
 
           if (existingUser && !existingUser.isGuest) {
@@ -250,7 +226,8 @@ export class ParticipantService {
           // `GET /users/:handle/profile` resolves either way; `profileHref`
           // already falls back to it. The replace path below never generated
           // one, so this also makes the three guest-creation sites agree.
-          const guestUser = existingUser ?? await tx.user.create({
+          if (existingUser) await retireGuest(tx, existingUser);
+          const guestUser = await tx.user.create({
             data: {
               isGuest: true,
               username: normalizedUsername,
@@ -258,13 +235,6 @@ export class ParticipantService {
               expiresAt,
             },
           });
-
-          if (existingUser) {
-            await tx.user.update({
-              where: { id: existingUser.id },
-              data: { expiresAt, isExpired: false },
-            });
-          }
 
           const participant = await tx.tournamentParticipant.create({
             data: { tournamentId, userId: guestUser.id },
@@ -287,13 +257,6 @@ export class ParticipantService {
             data: { participantId: participant.id },
           });
 
-          if (isCompleted) {
-            await tx.tournament.update({
-              where: { id: tournamentId },
-              data: { guestCleanupAt: expiresAt },
-            });
-          }
-
           return participant;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -301,12 +264,10 @@ export class ParticipantService {
       .catch((error: unknown) => {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === 'P2034'
+          ['P2034', 'P2002'].includes(error.code)
         ) {
-          throw new ConflictException(
-            'Another player joined at the same moment. Please try again.',
-      );
-  }
+          throw new ConflictException('The roster or guest name changed. Refresh and try again.');
+        }
 
         throw error;
       });
@@ -693,6 +654,7 @@ export class ParticipantService {
         where: { id: dto.substituteUserId },
       });
       if (!substitute) throw new NotFoundException('Substitute user not found');
+      if (substitute.isGuest) throw new BadRequestException('Use a fresh guest name or select a registered player.');
 
       existingSubstituteId = substitute.id;
       substituteName = substitute.username ?? 'Player';
@@ -714,17 +676,18 @@ export class ParticipantService {
       let substituteId = existingSubstituteId;
 
       if (!substituteId && guestNameToCreate) {
-        // Match joinTournamentAsGuest's guest-creation shape exactly: guests
-        // have no dedicated display-name field, only `username`.
-        const expiresAt = new Date();
-        expiresAt.setDate(
-          expiresAt.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
-        );
+        const existingGuest = await tx.user.findFirst({
+          where: { username: { equals: guestNameToCreate.trim(), mode: 'insensitive' } },
+          include: guestHistoryInclude,
+        });
+        if (existingGuest && !existingGuest.isGuest) throw new ConflictException('That name belongs to a registered player.');
+        if (existingGuest) await retireGuest(tx, existingGuest);
+        const expiresAt = null;
 
         const guest = await tx.user.create({
           data: {
             isGuest: true,
-            username: guestNameToCreate,
+            username: guestNameToCreate.trim(),
             roles: ['PLAYER'],
             expiresAt,
           },
@@ -753,7 +716,7 @@ export class ParticipantService {
         },
         data: { player2Id: substituteId, p2Name: substituteName },
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     // Emitted only after the swap has committed: a socket message cannot be
     // recalled if the transaction rolls back.

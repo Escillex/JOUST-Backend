@@ -12,6 +12,7 @@ import {
   MatchStatus,
   ParticipantStatus,
   NotificationType,
+  Prisma,
 } from '@prisma/client';
 import { NotificationService } from 'src/notification/notification.service';
 import {
@@ -363,6 +364,7 @@ export class MatchService {
       winnerId: null;
       completedAt: null;
     }> = {},
+    transaction?: Prisma.TransactionClient,
   ) {
     const decidingLog =
       winnerId &&
@@ -373,8 +375,8 @@ export class MatchService {
         )
         .sort((a, b) => b.gameNumber - a.gameNumber)[0];
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.match.update({
+    const undo = async (tx: Prisma.TransactionClient) => {
+      const updated = await tx.match.update({
         where: { id: match.id },
         data: {
           ...extra,
@@ -387,18 +389,16 @@ export class MatchService {
               ? Math.max(0, match.player2Score - 1)
               : match.player2Score,
         },
-      }),
-      ...(decidingLog
-        ? [
-            this.prisma.matchGameLog.update({
-              where: { id: decidingLog.id },
-              data: { trackerActive: true, winnerId: null, completedAt: null },
-            }),
-          ]
-        : []),
-    ]);
-
-    return updated;
+      });
+      if (decidingLog) {
+        await tx.matchGameLog.update({
+          where: { id: decidingLog.id },
+          data: { trackerActive: true, winnerId: null, completedAt: null },
+        });
+      }
+      return updated;
+    };
+    return transaction ? undo(transaction) : this.prisma.$transaction(undo);
   }
 
   async rejectReportedResult(matchId: string) {
@@ -428,55 +428,144 @@ export class MatchService {
   }
 
   async resetMatch(matchId: string) {
-    const match = await this.prisma.match.findUnique({
-      where: { id: matchId },
-      include: {
-        round: {
+    const { match, reset } = await this.prisma.$transaction(
+      async (tx) => {
+        const match = await tx.match.findUnique({
+          where: { id: matchId },
           include: {
-            tournament: {
-              include: { format: true },
+            round: {
+              include: {
+                tournament: {
+                  include: { format: true },
+                },
+              },
             },
+            gameLogs: true,
           },
-        },
-        gameLogs: true,
+        });
+
+        if (!match) throw new NotFoundException('Match not found');
+        if (match.status !== MatchStatus.COMPLETED)
+          throw new BadRequestException('Only completed matches can be reset');
+
+        // A played dependent match cannot safely have its participants replaced.
+        // Rebuild pending destinations from their feeders, which also repairs old
+        // duplicate/stale slots left by previous reset/re-report cycles.
+        const destinationIds = [
+          match.nextMatchId,
+          match.loserNextMatchId,
+        ].filter((id): id is string => Boolean(id));
+        const destinations = destinationIds.length
+          ? await tx.match.findMany({ where: { id: { in: destinationIds } } })
+          : [];
+        if (
+          destinations.some(
+            (next) => next.status !== MatchStatus.PENDING || next.startedAt,
+          )
+        ) {
+          throw new BadRequestException(
+            'Cannot reset this result because a dependent match has already started.',
+          );
+        }
+
+        const system = systemOf(match.round.tournament);
+        // Swiss pairings/top cuts depend on the entire preceding round, not links.
+        if (
+          system === 'SWISS' ||
+          (system === 'HYBRID' && match.phase === 1) ||
+          (system === 'DOUBLE_ELIMINATION' && match.round.roundNumber === 200)
+        ) {
+          const laterRound = await tx.round.findFirst({
+            where: {
+              tournamentId: match.round.tournamentId,
+              roundNumber: { gt: match.round.roundNumber },
+            },
+          });
+          if (laterRound) {
+            throw new BadRequestException(
+              'Cannot reset this result after a dependent round has been generated.',
+            );
+          }
+        }
+
+        const rawConfig = effectiveRawConfig(match.round.tournament);
+        const config = resolveConfig(rawConfig, match.phase);
+
+        // Roll back stats awarded for this match
+        await applyMatchStats(
+          tx,
+          matchId,
+          {
+            pointsForWin: config.swissPointsForWin,
+            pointsForDraw: config.swissPointsForDraw,
+            pointsForLoss: config.swissPointsForLoss,
+          },
+          config.byeResult,
+          -1,
+        );
+
+        // Revert match status, clear winner/timestamps, and take back the deciding
+        // game (series score −1 + the closed game log reopened) so the tracker does
+        // not keep declaring a winner on an ONGOING match.
+        const reset = await this.undoDecidingResult(
+          match,
+          match.winnerId,
+          {
+            status: MatchStatus.ONGOING,
+            winnerId: null,
+            completedAt: null,
+            reportedWinnerId: null,
+          },
+          tx,
+        );
+
+        for (const next of destinations) {
+          const feeders = await tx.match.findMany({
+            where: {
+              OR: [{ nextMatchId: next.id }, { loserNextMatchId: next.id }],
+            },
+            orderBy: { id: 'asc' },
+          });
+          const players = feeders.flatMap((feeder) => {
+            if (feeder.status !== MatchStatus.COMPLETED || !feeder.winnerId)
+              return [];
+            const player =
+              feeder.nextMatchId === next.id
+                ? feeder.winnerId
+                : feeder.player1Id === feeder.winnerId
+                  ? feeder.player2Id
+                  : feeder.player1Id;
+            return player ? [player] : [];
+          });
+          if (players.length > 2 || new Set(players).size !== players.length) {
+            throw new BadRequestException(
+              'The downstream bracket has conflicting participants.',
+            );
+          }
+          await tx.match.update({
+            where: { id: next.id },
+            data: {
+              player1Id: players[0] ?? null,
+              player2Id: players[1] ?? null,
+            },
+          });
+        }
+
+        // If tournament was marked COMPLETED, reopen it as ONGOING
+        if (match.round.tournament.status === 'COMPLETED') {
+          await tx.tournament.update({
+            where: { id: match.round.tournamentId },
+            data: {
+              status: 'ONGOING',
+              completedAt: null,
+              winnerId: null,
+            },
+          });
+        }
+        return { match, reset };
       },
-    });
-
-    if (!match) throw new NotFoundException('Match not found');
-    if (match.status !== MatchStatus.COMPLETED)
-      throw new BadRequestException('Only completed matches can be reset');
-
-    const rawConfig = effectiveRawConfig(match.round.tournament);
-    const config = resolveConfig(rawConfig, match.phase);
-
-    // Roll back stats awarded for this match
-    await this.updateMatchStats(matchId, {
-      pointsForWin: -config.swissPointsForWin,
-      pointsForDraw: -config.swissPointsForDraw,
-      pointsForLoss: -config.swissPointsForLoss,
-    });
-
-    // Revert match status, clear winner/timestamps, and take back the deciding
-    // game (series score −1 + the closed game log reopened) so the tracker does
-    // not keep declaring a winner on an ONGOING match.
-    const reset = await this.undoDecidingResult(match, match.winnerId, {
-      status: MatchStatus.ONGOING,
-      winnerId: null,
-      completedAt: null,
-      reportedWinnerId: null,
-    });
-
-    // If tournament was marked COMPLETED, reopen it as ONGOING
-    if (match.round.tournament.status === 'COMPLETED') {
-      await this.prisma.tournament.update({
-        where: { id: match.round.tournamentId },
-        data: {
-          status: 'ONGOING',
-          completedAt: null,
-          winnerId: null,
-        },
-      });
-    }
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
 
     await this.notifyPlayers(
       match,
@@ -961,6 +1050,17 @@ export class MatchService {
     });
     if (!nextMatch) return;
 
+    if (nextMatch.player1Id === winnerId || nextMatch.player2Id === winnerId)
+      return;
+    if (
+      nextMatch.status !== MatchStatus.PENDING ||
+      (nextMatch.player1Id && nextMatch.player2Id)
+    ) {
+      throw new BadRequestException(
+        'Cannot advance into a started or full match',
+      );
+    }
+
     const slot = nextMatch.player1Id === null ? 'player1Id' : 'player2Id';
     const updated = await this.prisma.match.update({
       where: { id: nextMatchId },
@@ -983,6 +1083,17 @@ export class MatchService {
       where: { id: nextMatchId },
     });
     if (!nextMatch) return;
+
+    if (nextMatch.player1Id === loserId || nextMatch.player2Id === loserId)
+      return;
+    if (
+      nextMatch.status !== MatchStatus.PENDING ||
+      (nextMatch.player1Id && nextMatch.player2Id)
+    ) {
+      throw new BadRequestException(
+        'Cannot advance into a started or full match',
+      );
+    }
 
     const slot = nextMatch.player1Id === null ? 'player1Id' : 'player2Id';
     const updated = await this.prisma.match.update({

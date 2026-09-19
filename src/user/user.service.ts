@@ -35,7 +35,7 @@ export class UserService {
    *  UUID links keep working after the switch to username handles. */
   private async resolveUser(handle: string) {
     const user = await this.prisma.user.findFirst({
-      where: { OR: [{ slug: handle }, { id: handle }] },
+      where: { OR: [{ slug: handle }, { id: handle }], NOT: { isGuest: true, username: null } },
       select: {
         id: true,
         username: true,

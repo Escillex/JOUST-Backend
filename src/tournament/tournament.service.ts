@@ -1,3 +1,4 @@
+import { GUEST_RETENTION_DAYS } from '../user/guest-lifecycle';
 import {
   Injectable,
   BadRequestException,
@@ -46,7 +47,7 @@ import { SettingsService } from 'src/settings/settings.service';
 
 @Injectable()
 export class TournamentService {
-  public static GUEST_EXPIRY_DAYS = 30;
+  public static readonly GUEST_EXPIRY_DAYS = GUEST_RETENTION_DAYS;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -892,7 +893,7 @@ export class TournamentService {
     if (!winnerId) winnerId = leaderboard[0]?.userId ?? null;
 
     const guestUserIds = tournament.participants
-      .filter((p) => p.user.isGuest && p.user.id !== winnerId)
+      .filter((p) => p.user.isGuest && p.user.username)
       .map((p) => p.user.id);
 
     const cleanupTime = new Date();
@@ -909,8 +910,8 @@ export class TournamentService {
         userId: tournament.createdById,
         type: NotificationType.GUEST_CLEANUP_SCHEDULED,
         title: 'Guest accounts scheduled for removal',
-        body: `Guest accounts from ${tournament.name} will be deleted. Cancel from the manage page if you still need them.`,
-        link: `/tournaments/${tournamentId}/manage`,
+        body: `Register verified guests from ${tournament.name} within 30 days to preserve their account history. Reassigning a guest name ends the claim window earlier. Event results remain saved.`,
+        link: `/tournaments/manage/guests`,
         tournamentId,
       });
     }
@@ -1140,11 +1141,8 @@ export class TournamentService {
     return { message: 'Tournament data cleaned up. Winner preserved.' };
   }
 
-  async cancelCleanup(tournamentId: string) {
-    return this.prisma.tournament.update({
-      where: { id: tournamentId },
-      data: { guestCleanupAt: null },
-    });
+  async cancelCleanup(_tournamentId: string) {
+    throw new BadRequestException('Guest expiry cannot be extended. Register the verified guest within 30 days of completion to keep their history.');
   }
 
   async resolveTie(
@@ -1437,22 +1435,6 @@ export class TournamentService {
     user?: JwtPayload,
     manageableOnly = false,
   ): Promise<Tournament[]> {
-    // Auto-purge expired guests
-    const now = new Date();
-    const expired = await this.prisma.user.findMany({
-      where: {
-        isGuest: true,
-        OR: [{ isExpired: true }, { expiresAt: { lte: now } }],
-      },
-      select: { id: true },
-    });
-    if (expired.length > 0) {
-      await this.prisma.user.updateMany({
-        where: { id: { in: expired.map((u) => u.id) } },
-        data: { isExpired: true },
-      });
-    }
-
     // Auto-open scheduled tournaments
     await this.prisma.tournament.updateMany({
       where: { status: TournamentStatus.UPCOMING, date: { lte: new Date() } },

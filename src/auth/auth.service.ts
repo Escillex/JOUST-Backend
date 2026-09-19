@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { guestHistoryInclude, guestDeadline, guestClaimProblem, retireGuest, GUEST_RETENTION_DAYS } from '../user/guest-lifecycle';
 import {
   requireJwtSecret,
   sessionCookieOptions,
@@ -7,6 +8,7 @@ import {
 import { TwoFactorService } from './two-factor.service';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -21,6 +23,7 @@ import {
   AuthDto,
   AdminCreateUserDto,
   ConvertGuestDto,
+  GuestHistoryExclusionDto,
   SignUpDto,
   BIO_MAX_LENGTH,
   UpdateProfileDto,
@@ -31,7 +34,7 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { isEmail } from './utils/check-input';
 import { Response } from 'express';
-import { Role, ParticipantStatus, TournamentStatus } from '@prisma/client';
+import { Role, ParticipantStatus, TournamentStatus, Prisma } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   effectiveRawConfig,
@@ -74,31 +77,72 @@ export class AuthService {
     private twoFactor: TwoFactorService,
   ) {}
 
-  // Scheduled guest cleanup used to live here as two crons (midnight + hourly),
-  // duplicating two more in jobs/cleanGuests.ts. All four were consolidated into
-  // the single hourly CleanGuestsJob, which calls deleteUser() below for the
-  // stale-guest phase so name-burning still happens.
-
-  // ──────────────────────────────────────────────
-  // PURGE EXPIRED GUESTS (Triggered by Admin/Organizer actions)
-  // ──────────────────────────────────────────────
+  // Called only by the hourly cleanup job. Reads never erase guest identities.
   async purgeExpiredGuests() {
-    const now = new Date();
-    const expired = await this.prisma.user.findMany({
-      where: {
-        isGuest: true,
-        OR: [{ isExpired: true }, { expiresAt: { lt: now } }],
-      },
-      select: { id: true },
+    const guests = await this.prisma.user.findMany({
+      where: { isGuest: true, username: { not: null } },
+      include: guestHistoryInclude,
     });
-
-    for (const user of expired) {
+    for (const guest of guests) {
+      const deadline = guestDeadline(guest);
+      if (!deadline || deadline > new Date()) continue;
       try {
-        await this.deleteUser(user.id);
-      } catch (err) {
-        // Silently skip if already gone or locked
+        await this.prisma.$transaction(async (tx) => {
+          const current = await tx.user.findUnique({ where: { id: guest.id }, include: guestHistoryInclude });
+          if (!current?.isGuest || !current.username) return;
+          const currentDeadline = guestDeadline(current);
+          if (currentDeadline && currentDeadline <= new Date()) await retireGuest(tx, current);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        // A concurrent registration or roster change wins safely; retry next hour.
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') continue;
+        throw error;
       }
     }
+  }
+
+  async getGuestRegistry(query = '') {
+    const guests = await this.prisma.user.findMany({
+      where: {
+        isGuest: true,
+        username: { not: null, contains: query.trim().slice(0, 80), mode: 'insensitive' },
+      },
+      include: guestHistoryInclude,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: 51,
+    });
+    return {
+      hasMore: guests.length > 50,
+      guests: guests.slice(0, 50).map((guest) => ({
+        id: guest.id, username: guest.username, displayName: guest.displayName,
+        expiresAt: guestDeadline(guest), claimProblem: guestClaimProblem(guest),
+        tournaments: guest.participatedTournaments.map(({ tournament, placement }) => ({
+          id: tournament.id, name: tournament.name, status: tournament.status,
+          completedAt: tournament.completedAt, placement,
+          isWinner: tournament.winnerId === guest.id || placement === 1,
+          excluded: tournament.guestHistoryExclusions.length > 0,
+          exclusion: tournament.guestHistoryExclusions[0] ?? null,
+        })),
+      })),
+    };
+  }
+
+  async excludeGuestTournament(guestId: string, tournamentId: string, excludedById: string, dto: GuestHistoryExclusionDto) {
+    const guest = await this.prisma.user.findUnique({ where: { id: guestId }, include: guestHistoryInclude });
+    if (!guest?.isGuest) throw new NotFoundException('Guest record not found');
+    const participation = guest.participatedTournaments.find((entry) => entry.tournament.id === tournamentId);
+    if (!participation) throw new NotFoundException('That tournament is not attached to this guest record');
+    await this.prisma.guestHistoryExclusion.upsert({
+      where: { guestId_tournamentId: { guestId, tournamentId } },
+      create: { guestId, tournamentId, excludedById, reason: dto.reason?.trim() || null },
+      update: { excludedById, reason: dto.reason?.trim() || null },
+    });
+    return { message: 'Tournament excluded from this guest account claim.' };
+  }
+
+  async restoreGuestTournament(guestId: string, tournamentId: string) {
+    await this.prisma.guestHistoryExclusion.deleteMany({ where: { guestId, tournamentId } });
+    return { message: 'Tournament restored to this guest account claim.' };
   }
 
   // ──────────────────────────────────────────────
@@ -846,8 +890,8 @@ export class AuthService {
   // GET ALL USERS
   // ──────────────────────────────────────────────
   async getAllUsers() {
-    await this.purgeExpiredGuests(); // Cleanup before returning list to admin/organizer
     return this.prisma.user.findMany({
+      where: { OR: [{ isGuest: false }, { username: { not: null } }] },
       select: {
         id: true,
         username: true,
@@ -902,7 +946,7 @@ export class AuthService {
   // ──────────────────────────────────────────────
   async CreateGuestUser(username: string) {
     const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 24); // 24-hour lifespan by default
+    expiresAt.setDate(expiresAt.getDate() + GUEST_RETENTION_DAYS);
 
     // No slug for guests — see joinTournamentAsGuest.
     return this.prisma.user.create({
@@ -1023,18 +1067,23 @@ export class AuthService {
   // ITEM 2: CONVERT GUEST TO A REGISTERED ACCOUNT
   // ──────────────────────────────────────────────
   async convertGuest(guestId: string, dto: ConvertGuestDto) {
+    if (dto.verifiedOwnership !== true) throw new BadRequestException('Confirm the player’s identity and tournament participation before registration.');
     const user = await this.prisma.user.findUnique({
       where: { id: guestId },
+      include: guestHistoryInclude,
     });
     if (!user) throw new NotFoundException('User not found');
     if (!user.isGuest)
       throw new BadRequestException('User already has a registered account');
 
+    const problem = guestClaimProblem(user);
+    if (problem) throw new ConflictException(problem);
+
     // Check for conflicts
     const conflict = await this.prisma.user.findFirst({
       where: {
         id: { not: guestId },
-        OR: [{ email: dto.email }, { username: dto.username }],
+        OR: [{ email: { equals: dto.email.trim(), mode: 'insensitive' } }, { username: { equals: dto.username.trim(), mode: 'insensitive' } }],
       },
     });
     if (conflict) {
@@ -1050,11 +1099,16 @@ export class AuthService {
     );
 
     const upgraded = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.user.findUnique({ where: { id: guestId }, include: guestHistoryInclude });
+      if (!current) throw new NotFoundException('Guest no longer exists');
+      const currentProblem = guestClaimProblem(current);
+      if (currentProblem) throw new ConflictException(currentProblem);
       const converted = await tx.user.update({
         where: { id: guestId },
         data: {
           username: dto.username,
-          email: dto.email,
+          email: dto.email.trim().toLowerCase(),
+          mustChangePassword: true,
           hashedPassword,
           isGuest: false,
           slug,
@@ -1081,6 +1135,7 @@ export class AuthService {
         include: {
           format: true,
           game: { select: { name: true } },
+          guestHistoryExclusions: { where: { guestId }, select: { id: true } },
           participants: {
             where: { userId: guestId },
             include: { stats: true },
@@ -1110,6 +1165,7 @@ export class AuthService {
       const byGame = new Map<string, Aggregate>();
 
       for (const tournament of tournaments) {
+        if (dto.excludedTournamentIds?.includes(tournament.id)) continue;
         const participant = tournament.participants[0];
         const stats = participant?.stats;
         if (stats) {
@@ -1175,6 +1231,11 @@ export class AuthService {
       }
 
       return converted;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch((error: unknown) => {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2034', 'P2002'].includes(error.code)) {
+        throw new ConflictException('The guest or account name changed while registering. Refresh and try again.');
+      }
+      throw error;
     });
 
     return {

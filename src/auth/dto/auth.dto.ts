@@ -1,5 +1,6 @@
 import {
   ArrayMaxSize,
+  Equals,
   IsArray,
   IsBoolean,
   IsEmail,
@@ -142,6 +143,14 @@ export class UpdateRolesDto {
 }
 
 export class ConvertGuestDto {
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  public excludedTournamentIds?: string[];
+  @IsBoolean()
+  @Equals(true, { message: 'Confirm the player’s identity and tournament participation.' })
+  public verifiedOwnership!: boolean;
+
   @IsNotEmpty()
   @IsString()
   @Length(3, 20)
@@ -156,6 +165,13 @@ export class ConvertGuestDto {
   @IsString()
   @MinLength(PASSWORD_MIN_LENGTH, { message: PASSWORD_RULE_MESSAGE })
   public password!: string;
+}
+
+export class GuestHistoryExclusionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  public reason?: string;
 }
 
 /** Long enough for a sentence or two about yourself; short enough that the

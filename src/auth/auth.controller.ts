@@ -6,6 +6,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   Res,
   Req,
   UseGuards,
@@ -25,6 +26,7 @@ import {
   ResetWithRecoveryDto,
   AuthDto,
   ConvertGuestDto,
+  GuestHistoryExclusionDto,
   GoogleCredentialDto,
   RecoveryCodeDto,
   ResendCodeDto,
@@ -334,12 +336,19 @@ export class AuthController {
     return this.authService.CreateGuestUser(username);
   }
 
+  @Get('guests')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  getGuestRegistry(@Query('q') query?: string) {
+    return this.authService.getGuestRegistry(query);
+  }
+
   // ITEM 2: Convert a guest to a registered account
   @Audit({
     action: 'user.convert_guest',
     category: AC.USER,
     targetUser: { param: 'id' },
-    pick: ['username'],
+    pick: ['username', 'verifiedOwnership'],
     describe: (c) =>
       `Converted guest ${c.target} into the account @${String(c.body.username ?? '')}`,
   })
@@ -348,6 +357,27 @@ export class AuthController {
   @Roles(Role.ORGANIZER, Role.ADMIN)
   convertGuest(@Param('id') guestId: string, @Body() dto: ConvertGuestDto) {
     return this.authService.convertGuest(guestId, dto);
+  }
+
+  @Patch('guests/:guestId/tournaments/:tournamentId/exclude')
+  @Audit({ action: 'user.exclude_guest_history', category: AC.USER, pick: ['reason'], describe: (c) => `Excluded guest history tournament ${c.params?.tournamentId}` })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  excludeGuestTournament(
+    @Param('guestId') guestId: string,
+    @Param('tournamentId') tournamentId: string,
+    @Body() dto: GuestHistoryExclusionDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.authService.excludeGuestTournament(guestId, tournamentId, req.user.id, dto);
+  }
+
+  @Delete('guests/:guestId/tournaments/:tournamentId/exclude')
+  @Audit({ action: 'user.restore_guest_history', category: AC.USER, describe: (c) => `Restored guest history tournament ${c.params?.tournamentId}` })
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  restoreGuestTournament(@Param('guestId') guestId: string, @Param('tournamentId') tournamentId: string) {
+    return this.authService.restoreGuestTournament(guestId, tournamentId);
   }
 
   // ──────────────────────────────────────────────

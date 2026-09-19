@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -263,7 +264,7 @@ export class DevService {
   }
 
   async setGuestExpiry(days: number) {
-    TournamentService.GUEST_EXPIRY_DAYS = days;
+    if (days !== TournamentService.GUEST_EXPIRY_DAYS) throw new BadRequestException('Guest retention is fixed at 30 days after tournament completion.');
     return {
       message: `Guest expiration period updated to ${days} days.`,
       current: TournamentService.GUEST_EXPIRY_DAYS,
