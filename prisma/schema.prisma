@@ -55,6 +55,12 @@ enum OrganizerInviteStatus {
   DECLINED
 }
 
+enum ParticipantInviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
 // Lifecycle of an organizer's request for a game not yet in the catalog (todo.md §5).
 enum GameRequestStatus {
   PENDING // awaiting an admin
@@ -71,6 +77,7 @@ enum NotificationType {
   TOURNAMENT_STARTED
   TOURNAMENT_PLACEMENT
   PARTICIPANT_ADDED
+  PARTICIPANT_INVITED
   PARTICIPANT_REMOVED
   PARTICIPANT_FORFEITED
   ORGANIZER_INVITED
@@ -235,6 +242,8 @@ model User {
 
   organizerRoles   TournamentOrganizer[] @relation("TournamentOrganizerUser")
   organizerInvites TournamentOrganizer[] @relation("TournamentOrganizerInviter")
+  participantInvites     TournamentParticipantInvite[] @relation("ParticipantInvitee")
+  participantInvitesSent TournamentParticipantInvite[] @relation("ParticipantInviter")
 
   settingsChanged SystemSetting[]
 
@@ -573,6 +582,7 @@ model Tournament {
   guestCleanupAt DateTime?
 
   participants TournamentParticipant[]
+  participantInvitations TournamentParticipantInvite[]
   organizers   TournamentOrganizer[]
   rounds       Round[]
   gameRequests GameRequest[]
@@ -917,6 +927,26 @@ model TournamentOrganizer {
   // Re-inviting an existing invitee is an update, not a duplicate row.
   @@unique([tournamentId, userId])
   // Serves "my pending invitations".
+  @@index([userId, status])
+}
+
+// A registered player's invitation to join a tournament. This is separate from
+// TournamentOrganizer because accepting it creates a roster participant rather
+// than management access.
+model TournamentParticipantInvite {
+  id           String     @id @default(uuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation("ParticipantInvitee", fields: [userId], references: [id], onDelete: Cascade)
+  invitedById  String?
+  invitedBy    User?      @relation("ParticipantInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  status      ParticipantInviteStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  respondedAt DateTime?
+
+  @@unique([tournamentId, userId])
   @@index([userId, status])
 }
 

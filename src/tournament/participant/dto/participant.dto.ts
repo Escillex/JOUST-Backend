@@ -13,6 +13,11 @@ export class JoinTournamentDto {
   userId!: string;
 }
 
+export class InviteParticipantDto {
+  @IsUUID('4')
+  userId!: string;
+}
+
 export class JoinGuestDto {
   @IsString()
   @MinLength(3, { message: 'Username must be at least 3 characters long' })

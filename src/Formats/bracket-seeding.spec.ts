@@ -59,6 +59,23 @@ describe('seedingMode', () => {
     const hybrid = { seedingMode: 'MANUAL', phase1: { bestOf: 1 }, phase2: {} };
     expect(resolveConfig(hybrid).seedingMode).toBe('MANUAL');
   });
+
+  it('inherits startingHp and trackingMode in phase 2 from phase 1 unless overridden', () => {
+    const hybrid = {
+      phase1: { bestOf: 1, startingHp: 8000, pointsThreshold: 0 },
+      phase2: { bestOf: 3 },
+    };
+    const p1Config = resolveConfig(hybrid, 1);
+    expect(p1Config.startingHp).toBe(8000);
+    expect(p1Config.trackingMode).toBe('HP');
+    expect(p1Config.bestOf).toBe(1);
+
+    const p2Config = resolveConfig(hybrid, 2);
+    expect(p2Config.startingHp).toBe(8000);
+    expect(p2Config.trackingMode).toBe('HP');
+    expect(p2Config.bestOf).toBe(3);
+    expect(p2Config.defaultStartingValue).toBe(8000);
+  });
 });
 
 describe('seedBracketSlots — properties every bracket must satisfy', () => {

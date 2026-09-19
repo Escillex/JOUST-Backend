@@ -224,10 +224,14 @@ export function resolveConfig(
   // phase-2 rules (e.g. bestOf for the top cut) are no longer silently dropped and
   // the completion logic and the match logic can't disagree about the shape (F4).
   const base = config ?? {};
-  const phaseObj = phase === 2 ? base.phase2 : base.phase1;
+  const p1 = base.phase1 && typeof base.phase1 === 'object' ? (base.phase1 as Record<string, any>) : {};
+  const p2 = base.phase2 && typeof base.phase2 === 'object' ? (base.phase2 as Record<string, any>) : {};
+  // For phase 2 (top cut), inherit game rules (startingHp, pointsThreshold, etc.)
+  // from phase 1 unless explicitly overridden by phase 2.
+  const phaseObj = phase === 2 ? { ...p1, ...p2 } : p1;
   const c =
-    phaseObj && typeof phaseObj === 'object'
-      ? { ...base, ...(phaseObj as Record<string, any>) }
+    phaseObj && Object.keys(phaseObj).length > 0
+      ? { ...base, ...phaseObj }
       : base;
 
   // `bestOf` is the number of games in the series; winsNeeded is ceil(bestOf/2).

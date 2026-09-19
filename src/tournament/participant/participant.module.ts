@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { ParticipantService } from './participant.service';
 import { ParticipantController } from './participant.controller';
+import { ParticipantInvitationController } from './invitation.controller';
 import { PrismaModule } from 'prisma/prisma.module';
 import { AuthModule } from 'src/auth/auth.module';
 import { MatchModule } from '../match/match.module';
@@ -18,7 +19,7 @@ import { NotificationModule } from 'src/notification/notification.module';
     RealtimeModule,
     NotificationModule,
   ],
-  controllers: [ParticipantController],
+  controllers: [ParticipantController, ParticipantInvitationController],
   providers: [ParticipantService],
   exports: [ParticipantService],
 })

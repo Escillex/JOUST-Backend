@@ -56,6 +56,7 @@ export interface AuditSpec {
     | { param: string }
     | { matchParam: string }
     | { invitationParam: string }
+    | { participantInvitationParam: string }
     | { result: string }
     | { body: string };
   /** Where the affected user comes from. */

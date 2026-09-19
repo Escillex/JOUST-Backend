@@ -33,6 +33,11 @@ import { isEmail } from './utils/check-input';
 import { Response } from 'express';
 import { Role, ParticipantStatus, TournamentStatus } from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import {
+  effectiveRawConfig,
+  resolveConfig,
+  systemOf,
+} from '../Formats/format-config.helper';
 
 /** Trim, cap blank-line runs at one (a bio is a paragraph, not a layout), and
  *  treat an empty result as "no bio". The length rule itself is the DTO's. */
@@ -1038,21 +1043,138 @@ export class AuthService {
 
     const hashedPassword = await this.hashPassword(dto.password);
 
-    const upgraded = await this.prisma.user.update({
-      where: { id: guestId },
-      data: {
-        username: dto.username,
-        email: dto.email,
-        hashedPassword,
-        isGuest: false,
-      },
-      select: {
-        id: true,
-        username: true,
-        displayName: true,
-        email: true,
-        roles: true,
-      },
+    const slug = await generateUniqueUserSlug(
+      this.prisma,
+      dto.username,
+      guestId,
+    );
+
+    const upgraded = await this.prisma.$transaction(async (tx) => {
+      const converted = await tx.user.update({
+        where: { id: guestId },
+        data: {
+          username: dto.username,
+          email: dto.email,
+          hashedPassword,
+          isGuest: false,
+          slug,
+          expiresAt: null,
+          isExpired: false,
+        },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          email: true,
+          roles: true,
+        },
+      });
+
+      // Guests are deliberately excluded from lifetime stats when a tournament
+      // completes. Conversion keeps the same user/participant UUID, so rebuild
+      // the rows from the preserved tournament stats at the moment the guest
+      // becomes a real account.
+      const tournaments = await tx.tournament.findMany({
+        where: {
+          participants: { some: { userId: guestId } },
+        },
+        include: {
+          format: true,
+          game: { select: { name: true } },
+          participants: {
+            where: { userId: guestId },
+            include: { stats: true },
+          },
+        },
+      });
+
+      type Aggregate = {
+        tournamentsPlayed: number;
+        tournamentsWon: number;
+        gamesPlayed: number;
+        wins: number;
+        losses: number;
+        draws: number;
+        globalPoints: number;
+      };
+      const emptyAggregate = (): Aggregate => ({
+        tournamentsPlayed: 0,
+        tournamentsWon: 0,
+        gamesPlayed: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        globalPoints: 0,
+      });
+      const global = emptyAggregate();
+      const byGame = new Map<string, Aggregate>();
+
+      for (const tournament of tournaments) {
+        const participant = tournament.participants[0];
+        const stats = participant?.stats;
+        if (stats) {
+          global.gamesPlayed += stats.gamesPlayed;
+          global.wins += stats.wins;
+          global.losses += stats.losses;
+          global.draws += stats.draws;
+        }
+
+        const gameName = tournament.game?.name ?? tournament.format?.gameName ?? null;
+        const gameStats = gameName
+          ? (byGame.get(gameName) ?? (byGame.set(gameName, emptyAggregate()), byGame.get(gameName)!))
+          : null;
+        if (gameStats && stats) {
+          gameStats.gamesPlayed += stats.gamesPlayed;
+          gameStats.wins += stats.wins;
+          gameStats.losses += stats.losses;
+          gameStats.draws += stats.draws;
+        }
+
+        if (tournament.status !== TournamentStatus.COMPLETED) continue;
+
+        global.tournamentsPlayed += 1;
+        if (gameStats) gameStats.tournamentsPlayed += 1;
+
+        if (tournament.winnerId === guestId || participant?.placement === 1) {
+          global.tournamentsWon += 1;
+          if (gameStats) gameStats.tournamentsWon += 1;
+        }
+
+        const placement = participant?.placement;
+        if (!placement) continue;
+        const config = resolveConfig(effectiveRawConfig(tournament));
+        const isHybrid = systemOf(tournament) === 'HYBRID';
+        const points = placement === 1
+          ? config.placementPointsChampion
+          : placement === 2
+            ? config.placementPoints2nd
+            : placement === 3
+              ? config.placementPoints3rd
+              : isHybrid
+                ? config.placementPointsTopCut
+                : config.placementPointsParticipation;
+        global.globalPoints += points;
+        if (gameStats) gameStats.globalPoints += points;
+      }
+
+      const statsData = (aggregate: Aggregate) => ({
+        ...aggregate,
+        winRate: aggregate.gamesPlayed > 0 ? aggregate.wins / aggregate.gamesPlayed : 0,
+      });
+      await tx.userGlobalStats.upsert({
+        where: { userId: guestId },
+        create: { userId: guestId, ...statsData(global) },
+        update: statsData(global),
+      });
+      for (const [gameName, aggregate] of byGame) {
+        await tx.userGameStats.upsert({
+          where: { userId_gameName: { userId: guestId, gameName } },
+          create: { userId: guestId, gameName, ...statsData(aggregate) },
+          update: statsData(aggregate),
+        });
+      }
+
+      return converted;
     });
 
     return {

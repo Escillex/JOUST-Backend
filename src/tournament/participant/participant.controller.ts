@@ -19,6 +19,7 @@ import {
 import { ParticipantService } from './participant.service';
 import {
   JoinTournamentDto,
+  InviteParticipantDto,
   JoinGuestDto,
   UpdateSeedDto,
   ReplaceParticipantDto,
@@ -81,6 +82,32 @@ export class ParticipantController {
       }
     }
     return this.participantService.joinTournament(tournamentId, dto.userId);
+  }
+
+  // POST /tournaments/:tournamentId/participants/invite
+  @Audit({
+    action: 'participant.invite',
+    category: AC.PARTICIPANT,
+    tournament: { param: 'tournamentId' },
+    targetUser: { body: 'userId' },
+    describe: (c) => `Invited ${c.target} to ${c.t}`,
+  })
+  @Post('invite')
+  @UseGuards(JwtAuthGuard, RolesGuard, TournamentAccessGuard)
+  @Roles(Role.ORGANIZER, Role.ADMIN)
+  @TournamentAccess('tournamentId')
+  @HttpCode(HttpStatus.CREATED)
+  async invite(
+    @Param('tournamentId', ParseUUIDPipe) tournamentId: string,
+    @Body() dto: InviteParticipantDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    await this.participantService.inviteTournamentParticipant(
+      tournamentId,
+      dto.userId,
+      req.user.id,
+    );
+    return { success: true };
   }
 
   // POST /tournaments/:tournamentId/participants/guest

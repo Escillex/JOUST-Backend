@@ -862,6 +862,7 @@ export class FormatsService {
         player1Id: p1,
         player2Id: p2,
         isBye: false,
+        phase,
         matchIndex: i,
       });
       matchesCreated.push(match);
@@ -875,6 +876,7 @@ export class FormatsService {
         player1Id: byePlayer,
         player2Id: undefined,
         isBye: true,
+        phase,
         matchIndex: pairings.length,
       });
       matchesCreated.push(byeMatch);

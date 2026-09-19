@@ -70,7 +70,16 @@ export class CleanGuestsJob {
         // Re-check: a guest may have been converted to a real account since the
         // cleanup was scheduled, and those must never be deleted.
         const stillGuests = await this.prisma.user.findMany({
-          where: { id: { in: guestIds }, isGuest: true },
+          where: {
+            id: { in: guestIds },
+            isGuest: true,
+            // A guest identity may now be reused across tournaments. Preserve
+            // it while any other tournament is still active; deleting the
+            // User would cascade its roster row there as well.
+            participatedTournaments: {
+              every: { tournament: { status: 'COMPLETED' } },
+            },
+          },
           select: { id: true },
         });
         const toDelete = stillGuests.map((g) => g.id);

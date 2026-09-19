@@ -105,6 +105,17 @@ export class AuditService {
         });
         out.tournamentId = inv?.tournamentId ?? null;
       }
+      if (
+        src &&
+        'participantInvitationParam' in src &&
+        params[src.participantInvitationParam]
+      ) {
+        const inv = await this.prisma.tournamentParticipantInvite.findUnique({
+          where: { id: params[src.participantInvitationParam] },
+          select: { tournamentId: true },
+        });
+        out.tournamentId = inv?.tournamentId ?? null;
+      }
       if (out.tournamentId) {
         const t = await this.prisma.tournament.findUnique({
           where: { id: out.tournamentId },

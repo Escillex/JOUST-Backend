@@ -14,6 +14,7 @@ import {
   ParticipantStatus,
   MatchStatus,
   NotificationType,
+  ParticipantInviteStatus,
   Prisma,
 } from '@prisma/client';
 import { JwtPayload } from 'src/guards/jwt-auth.guard';
@@ -40,7 +41,7 @@ export class ParticipantService {
       throw new NotFoundException('Tournament not found');
     }
 
-    // 2. Only allow joining while OPEN
+    // 2. Registered players may only join while OPEN.
     if (tournament.status !== 'OPEN') {
       throw new BadRequestException(
         'Tournament has already started — registration is closed',
@@ -152,28 +153,42 @@ export class ParticipantService {
       throw new NotFoundException('Tournament not found');
     }
 
-    if (tournament.status !== 'OPEN') {
+    // Guest registration is allowed while the field is OPEN and for historical
+    // records after completion. It never reopens or mutates an ongoing bracket.
+    const isOpen = tournament.status === 'OPEN';
+    const isCompleted = tournament.status === 'COMPLETED';
+    if (!isOpen && !isCompleted) {
       throw new BadRequestException(
-        'Tournament has already started — registration is closed',
+        'Guest registration is available while registration is open or after the tournament is completed',
       );
     }
 
-    if (tournament.participants.length >= tournament.maxPlayers) {
+    // A completed tournament is being given a historical guest record, not a
+    // bracket seat. Do not reject that record just because the original field
+    // reached maxPlayers; the guest is not added to any match.
+    if (isOpen && tournament.participants.length >= tournament.maxPlayers) {
       throw new BadRequestException(
         `Tournament is full (${tournament.maxPlayers} players max)`,
       );
     }
 
-    if (tournament.isPrivate) {
+    if (isOpen && tournament.isPrivate) {
       throw new BadRequestException(
         'Private tournaments cannot be joined by guests',
       );
     }
 
-    const expiresAt = new Date();
-    expiresAt.setDate(
-      expiresAt.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
+    const now = new Date();
+    const newExpiry = new Date(now);
+    newExpiry.setDate(
+      newExpiry.getDate() + TournamentService.GUEST_EXPIRY_DAYS,
     );
+    // Keep post-completion guests on the tournament's existing cleanup window
+    // when it is still active. If that window already passed, start a new one
+    // so the new historical record has a complete retention period.
+    const expiresAt = isCompleted && tournament.guestCleanupAt && tournament.guestCleanupAt > now
+      ? tournament.guestCleanupAt
+      : newExpiry;
 
     // One transaction for the same reason as joinTournament, plus a second: the
     // guest User row is created here. Without it, a failure between the two
@@ -184,11 +199,49 @@ export class ParticipantService {
           const seated = await tx.tournamentParticipant.count({
             where: { tournamentId },
           });
-          if (seated >= tournament.maxPlayers) {
+          if (isOpen && seated >= tournament.maxPlayers) {
             throw new BadRequestException(
               `Tournament is full (${tournament.maxPlayers} players max)`,
             );
           }
+
+          const normalizedUsername = username.trim();
+          const existingUser = await tx.user.findFirst({
+            where: {
+              username: { equals: normalizedUsername, mode: 'insensitive' },
+            },
+          });
+
+          if (existingUser && !existingUser.isGuest) {
+            throw new ConflictException(
+              'That name belongs to a registered player. Use Invite Player instead.',
+            );
+          }
+
+          const existingParticipant = existingUser
+            ? await tx.tournamentParticipant.findUnique({
+                where: {
+                  userId_tournamentId: {
+                    userId: existingUser.id,
+                    tournamentId,
+                  },
+                },
+                include: {
+                  user: {
+                    select: {
+                      id: true,
+                      username: true,
+                      displayName: true,
+                      email: true,
+                    },
+                  },
+                  tournament: {
+                    select: { id: true, name: true, maxPlayers: true },
+                  },
+                },
+              })
+            : null;
+          if (existingParticipant) return existingParticipant;
 
           // No slug. A guest is a temporary row that the cleanup job deletes,
           // and a public profile handle for one is both useless and costly: it
@@ -197,14 +250,21 @@ export class ParticipantService {
           // `GET /users/:handle/profile` resolves either way; `profileHref`
           // already falls back to it. The replace path below never generated
           // one, so this also makes the three guest-creation sites agree.
-          const guestUser = await tx.user.create({
+          const guestUser = existingUser ?? await tx.user.create({
             data: {
               isGuest: true,
-              username,
+              username: normalizedUsername,
               roles: ['PLAYER'],
               expiresAt,
             },
           });
+
+          if (existingUser) {
+            await tx.user.update({
+              where: { id: existingUser.id },
+              data: { expiresAt, isExpired: false },
+            });
+          }
 
           const participant = await tx.tournamentParticipant.create({
             data: { tournamentId, userId: guestUser.id },
@@ -227,6 +287,13 @@ export class ParticipantService {
             data: { participantId: participant.id },
           });
 
+          if (isCompleted) {
+            await tx.tournament.update({
+              where: { id: tournamentId },
+              data: { guestCleanupAt: expiresAt },
+            });
+          }
+
           return participant;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -238,10 +305,98 @@ export class ParticipantService {
         ) {
           throw new ConflictException(
             'Another player joined at the same moment. Please try again.',
-          );
-        }
+      );
+  }
+
         throw error;
       });
+  }
+
+  /** Queue a registered player's invitation without occupying their roster
+   * seat. Force-add continues to use joinTournament and bypasses this flow. */
+  async inviteTournamentParticipant(tournamentId: string, userId: string, invitedById: string): Promise<void> {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      include: { participants: true },
+    });
+    if (!tournament) throw new NotFoundException('Tournament not found');
+    if (tournament.status !== 'OPEN') throw new BadRequestException('Tournament registration is closed');
+    if (tournament.participants.length >= tournament.maxPlayers) throw new BadRequestException('Tournament is full');
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.isGuest) throw new NotFoundException('Registered player not found');
+    if (tournament.participants.some((p) => p.userId === userId)) {
+      throw new ConflictException('That player is already in this tournament');
+    }
+
+    const existing = await this.prisma.tournamentParticipantInvite.findUnique({
+      where: { tournamentId_userId: { tournamentId, userId } },
+    });
+    if (existing?.status === ParticipantInviteStatus.PENDING) {
+      throw new ConflictException('That player already has a pending invitation');
+    }
+    if (existing?.status === ParticipantInviteStatus.ACCEPTED) {
+      throw new ConflictException('That player already accepted an invitation');
+    }
+
+    await this.prisma.tournamentParticipantInvite.upsert({
+      where: { tournamentId_userId: { tournamentId, userId } },
+      create: { tournamentId, userId, invitedById, status: ParticipantInviteStatus.PENDING },
+      update: { invitedById, status: ParticipantInviteStatus.PENDING, respondedAt: null },
+    });
+    await this.notifications.notify({
+      userId,
+      type: NotificationType.PARTICIPANT_INVITED,
+      title: `You were invited to join ${tournament.name}`,
+      body: 'Open the tournament to accept or decline the invitation.',
+      link: `/tournaments/${tournamentId}`,
+      tournamentId,
+    });
+  }
+
+  async listMyParticipantInvitations(userId: string) {
+    return this.prisma.tournamentParticipantInvite.findMany({
+      where: { userId, status: ParticipantInviteStatus.PENDING },
+      orderBy: { createdAt: 'desc' },
+      include: { tournament: { select: { id: true, name: true, status: true } } },
+    });
+  }
+
+  async respondToParticipantInvitation(invitationId: string, userId: string, accept: boolean): Promise<void> {
+    const invitation = await this.prisma.tournamentParticipantInvite.findUnique({
+      where: { id: invitationId },
+      include: { tournament: { select: { id: true, status: true, maxPlayers: true } } },
+    });
+    if (!invitation || invitation.userId !== userId) throw new NotFoundException('Invitation not found');
+    if (invitation.status !== ParticipantInviteStatus.PENDING) {
+      throw new BadRequestException('This invitation has already been answered');
+    }
+    if (!accept) {
+      await this.prisma.tournamentParticipantInvite.update({
+        where: { id: invitationId },
+        data: { status: ParticipantInviteStatus.DECLINED, respondedAt: new Date() },
+      });
+      return;
+    }
+    if (invitation.tournament.status !== 'OPEN') throw new BadRequestException('Tournament registration is closed');
+
+    await this.prisma.$transaction(async (tx) => {
+      const seated = await tx.tournamentParticipant.count({ where: { tournamentId: invitation.tournamentId } });
+      if (seated >= invitation.tournament.maxPlayers) throw new BadRequestException('Tournament is full');
+      const alreadyJoined = await tx.tournamentParticipant.findUnique({
+        where: { userId_tournamentId: { userId, tournamentId: invitation.tournamentId } },
+      });
+      if (alreadyJoined) throw new ConflictException('You are already in this tournament');
+      const participant = await tx.tournamentParticipant.create({
+        data: { tournamentId: invitation.tournamentId, userId },
+      });
+      await tx.tournamentParticipantStats.create({ data: { participantId: participant.id } });
+      await tx.tournamentParticipantInvite.update({
+        where: { id: invitationId },
+        data: { status: ParticipantInviteStatus.ACCEPTED, respondedAt: new Date() },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    this.realtime.emitTournamentUpdated(invitation.tournamentId);
   }
 
   // ❌ LEAVE TOURNAMENT
