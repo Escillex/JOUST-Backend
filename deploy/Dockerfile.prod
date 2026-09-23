@@ -17,6 +17,10 @@ RUN npm run build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
 FROM node:22-alpine
+LABEL org.opencontainers.image.source="https://github.com/Escillex/JOUST-Backend" \
+      org.opencontainers.image.title="JOUST backend" \
+      org.opencontainers.image.description="Tournament engine API (NestJS + Prisma)" \
+      org.opencontainers.image.licenses="UNLICENSED"
 # The backup service shells out to pg_dump/pg_restore/psql. Keep this runtime
 # dependency in the canonical production image, just as it is in server/Dockerfile.
 RUN apk add --no-cache postgresql17-client
@@ -41,5 +45,15 @@ COPY --from=build /app/tsconfig.build.json ./
 # crash-loops the container. Shipping src costs nothing here: dist is the same
 # code compiled, and node_modules is deliberately unpruned anyway.
 COPY --from=build /app/src ./src
+# Secret bootstrap + entrypoint for the published-image deploy. They are copied
+# explicitly because the runtime stage cherry-picks from the build stage rather
+# than taking the whole tree.
+COPY --from=build /app/deploy/docker-entrypoint.sh /usr/local/bin/joust-entrypoint
+COPY --from=build /app/deploy/init-secrets.sh /usr/local/bin/joust-init-secrets
+RUN chmod +x /usr/local/bin/joust-entrypoint /usr/local/bin/joust-init-secrets
 EXPOSE 4000
+# The entrypoint resolves secrets, builds DATABASE_URL, migrates and seeds, then
+# execs CMD. It is a no-op passthrough when every value is already in the
+# environment, which is what the pm2 and build-from-source paths do.
+ENTRYPOINT ["/usr/local/bin/joust-entrypoint"]
 CMD ["node", "dist/src/main.js"]

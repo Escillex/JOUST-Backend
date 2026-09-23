@@ -8,8 +8,10 @@ services:
       # is resolved relative to this context, i.e. <repo>/deploy/Dockerfile.prod.
       context: ${JOUST_SERVER_DIR:-./server}
       dockerfile: deploy/Dockerfile.prod
-    # seed is guarded (won't overwrite an existing admin) — safe on every restart,
-    # and gives a fresh DB its first admin + built-in formats (deploy.md §2.3).
-    command: sh -c "npx prisma migrate deploy && npx prisma db seed && node dist/src/main.js"
+    # No `command:` — the image's entrypoint (deploy/docker-entrypoint.sh) applies
+    # migrations and runs the guarded seed before starting the server, so both the
+    # setup.sh path and the published-image path get identical startup behaviour.
+    # The seed won't overwrite an existing admin, so it is safe on every restart
+    # and is what gives a fresh DB its first admin + built-in formats (deploy.md §2.3).
     expose:
       - "4000"

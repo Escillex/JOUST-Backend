@@ -8,14 +8,22 @@ import { TournamentService } from '../src/tournament/tournament.service';
  */
 const svcWith = (tournament: any, matches = 0) => {
   const tx = {
-    match: { deleteMany: jest.fn(async () => ({ count: matches })) },
+    match: {
+      // The service clears bracket destinations before deleting matches.
+      findMany: jest.fn(async () => []),
+      updateMany: jest.fn(async () => ({ count: matches })),
+      deleteMany: jest.fn(async () => ({ count: matches })),
+    },
     round: { deleteMany: jest.fn(async () => ({ count: 0 })) },
     tournamentParticipant: { deleteMany: jest.fn(async () => ({ count: 0 })) },
     tournament: { delete: jest.fn(async () => ({})) },
   };
   const prisma: any = {
     tournament: { findUnique: jest.fn(async () => tournament) },
-    match: { count: jest.fn(async () => matches) },
+    match: {
+      findMany: jest.fn(async () => []),
+      count: jest.fn(async () => matches),
+    },
     $transaction: jest.fn(async (fn: any) => fn(tx)),
   };
   const service = new TournamentService(

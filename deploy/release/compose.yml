@@ -1,0 +1,171 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# JOUST — published-image deployment.
+#
+#   curl -O https://raw.githubusercontent.com/Escillex/JOUST-Backend/main/deploy/release/compose.yml
+#   docker compose up -d
+#
+# That is the whole install. Nothing is built, nothing is cloned, no setup.sh:
+# the two application images are pulled from GHCR and the secrets that setup.sh
+# used to write into a host .env are generated on first boot into the `secrets`
+# volume instead (see the `init` service).
+#
+# Everything is optional-by-default. To point it at a real domain, or to move it
+# off port 8080, write a .env beside this file — see .env.example.
+#
+# Requires Docker Compose v2.23+ (the inline `configs.content` below).
+#
+# `name:` is pinned so the project does not inherit the directory name.
+#
+# ⚠ If a Compose project called `joust` ALREADY exists on the host — an older
+#   setup.sh deployment uses exactly that name — this file would adopt its
+#   containers and volumes rather than create its own. Check with
+#   `docker compose ls` first, and give a second stack its own name:
+#   `docker compose -p joust-staging up -d`.
+# ─────────────────────────────────────────────────────────────────────────────
+name: joust
+
+services:
+  # ── secret bootstrap ───────────────────────────────────────────────────────
+  # Runs once, before anything else, and exits. Writes one file per secret into
+  # the `secrets` volume, generating only what is missing. A value supplied in
+  # .env is adopted into the file, so it stays the single source of truth.
+  init:
+    image: ghcr.io/escillex/joust-backend:${JOUST_VERSION:-latest}
+    entrypoint: ["/usr/local/bin/joust-init-secrets"]
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-}
+      SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:-}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    volumes:
+      - secrets:/secrets
+    restart: "no"
+
+  # ── database ───────────────────────────────────────────────────────────────
+  # No host port. Nothing outside the compose network has any business reaching
+  # it; `docker compose exec db psql -U joust` is the way in.
+  db:
+    image: postgres:17-alpine
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-joust}
+      POSTGRES_DB: ${POSTGRES_DB:-joust}
+      # The official entrypoint's `_FILE` convention — it re-execs itself as the
+      # `postgres` user and re-reads this on the second pass, which is why
+      # init-secrets.sh leaves this one file world-readable inside the volume.
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+    volumes:
+      - secrets:/secrets:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-joust}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ── backend ────────────────────────────────────────────────────────────────
+  # The image entrypoint reads /secrets, assembles DATABASE_URL, applies
+  # migrations and runs the guarded seed, then starts the server. First boot is
+  # therefore slower than later ones — Caddy 502s until it is listening.
+  server:
+    image: ghcr.io/escillex/joust-backend:${JOUST_VERSION:-latest}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      POSTGRES_USER: ${POSTGRES_USER:-joust}
+      POSTGRES_DB: ${POSTGRES_DB:-joust}
+      # Required in production — the app refuses to boot without it rather than
+      # reflect arbitrary origins while credentials are enabled. Everything is
+      # same-origin behind Caddy, so this is just the public address.
+      ALLOWED_ORIGINS: ${JOUST_PUBLIC_URL:-http://localhost:8080}
+      SOCKET_ALLOWED_ORIGINS: ${JOUST_PUBLIC_URL:-http://localhost:8080}
+      BACKUP_DIR: /backups
+      # Mail defaults to the console transport: verification codes are printed to
+      # `docker compose logs server` until SMTP is configured in the admin UI.
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-console}
+    volumes:
+      - secrets:/secrets:ro
+      # main.ts serves uploads from <cwd>/../images, and cwd is /app.
+      - images:/images
+      - backups:/backups
+    expose:
+      - "4000"
+    # start_period covers the migrate + seed the entrypoint runs before listening,
+    # so a slow first boot is not counted as a failure.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
+  # ── frontend ───────────────────────────────────────────────────────────────
+  # The standalone Next bundle has BACKEND_URL=http://server:4000 compiled into
+  # its rewrites, and no NEXT_PUBLIC_* baked in — so the browser talks to
+  # /api/backend on its own origin and opens its socket same-origin too. Both
+  # depend on Caddy being in front; do not publish this service directly.
+  new:
+    image: ghcr.io/escillex/joust-frontend:${JOUST_VERSION:-latest}
+    depends_on:
+      - server
+    expose:
+      - "3000"
+    restart: unless-stopped
+
+  # ── reverse proxy ──────────────────────────────────────────────────────────
+  # Not optional. Next does not forward /socket.io/, so without something that
+  # routes it to the backend every realtime feature falls back to polling
+  # forever. This is also what makes the whole app one origin.
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - server
+      - new
+    environment:
+      # A bare ":80" means "any host" — plain HTTP, no certificate. Set
+      # JOUST_SITE_ADDRESS to a hostname in .env and Caddy obtains a
+      # Let's Encrypt certificate for it automatically (ports 80+443 must then
+      # be the published ports, and the DNS must already point here).
+      JOUST_SITE_ADDRESS: ${JOUST_SITE_ADDRESS:-:80}
+    ports:
+      - "${JOUST_HTTP_PORT:-8080}:80"
+      - "${JOUST_HTTPS_PORT:-8443}:443"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      # Certificates and ACME account state. Losing this re-hits Let's Encrypt
+      # on every restart, which is rate-limited.
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+# Inlined so this file is the only one to download. `$$` escapes Compose's own
+# interpolation, leaving Caddy's `{$VAR}` placeholder intact.
+configs:
+  caddyfile:
+    content: |
+      {$$JOUST_SITE_ADDRESS} {
+      	handle /socket.io/* {
+      		reverse_proxy server:4000
+      	}
+      	reverse_proxy new:3000
+      }
+
+volumes:
+  # ⚠ `docker compose down -v` destroys all of these. `secrets` holds the key
+  #   that encrypts every database backup: losing it makes those backups
+  #   permanently unreadable. See README.md, "Keeping the secrets".
+  secrets:
+  pgdata:
+  images:
+  backups:
+  caddy_data:
+  caddy_config:

@@ -32,6 +32,7 @@ describe('ParticipantService.replaceParticipant', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       user: {
+        findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn(),
         create: jest.fn(),
       },
