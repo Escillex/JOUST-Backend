@@ -65,7 +65,7 @@ describe('bracket result reset and re-report', () => {
           return { ...rows[where.id] };
         }),
       },
-      matchGameLog: { update: jest.fn() },
+      matchGameLog: { update: jest.fn(), deleteMany: jest.fn() },
       round: { findFirst: jest.fn().mockResolvedValue(null) },
       tournament: {
         findUnique: jest.fn().mockResolvedValue(null),
@@ -106,6 +106,28 @@ describe('bracket result reset and re-report', () => {
         winner,
       ]);
     }
+  });
+
+  it('clears an entire best-of-3 series, not just its deciding game', async () => {
+    const { service, rows, prisma } = setup();
+    Object.assign(rows.semi1, {
+      player1Score: 2,
+      player2Score: 1,
+      gameLogs: [1, 2, 3].map((gameNumber) => ({
+        id: `log${gameNumber}`,
+        gameNumber,
+        trackerActive: false,
+        winnerId: gameNumber === 2 ? 'b' : 'a',
+        completedAt: new Date(),
+      })),
+    });
+    await service.resetMatch('semi1');
+    expect(rows.semi1.status).toBe('ONGOING');
+    expect([rows.semi1.player1Score, rows.semi1.player2Score]).toEqual([0, 0]);
+    expect(prisma.matchGameLog.deleteMany).toHaveBeenCalledWith({
+      where: { matchId: 'semi1' },
+    });
+    expect(prisma.matchGameLog.update).not.toHaveBeenCalled();
   });
 
   it('repairs a pending final whose slots were duplicated by an earlier reset', async () => {

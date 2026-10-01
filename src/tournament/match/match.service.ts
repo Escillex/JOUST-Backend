@@ -334,10 +334,11 @@ export class MatchService {
   }
 
   // A player's deciding game bumps the series score and closes its game log
-  // before the result is verified. Undoing that decision — rejecting a pending
-  // report on an ONGOING match, or resetting a COMPLETED match back to play —
-  // must undo BOTH, or the tracker keeps declaring a winner while the match is
-  // still being played. Completing a match means one side reached winsNeeded,
+  // before the result is verified. Rejecting that pending report must undo BOTH,
+  // or the tracker keeps declaring a winner while the match is still being
+  // played. This is deliberately one game only: a rejected report takes back the
+  // game it reported and leaves the rest of the series standing (a full match
+  // reset is resetMatch, which clears the series outright). Completing a match means one side reached winsNeeded,
   // so subtracting one win (floored at 0) guarantees that side is no longer
   // decisive; reopening the deciding log hands the players back a live game.
   // A result carries no deciding log (a bare self/quick report or a draw) — it
@@ -440,7 +441,6 @@ export class MatchService {
                 },
               },
             },
-            gameLogs: true,
           },
         });
 
@@ -504,20 +504,25 @@ export class MatchService {
           -1,
         );
 
-        // Revert match status, clear winner/timestamps, and take back the deciding
-        // game (series score −1 + the closed game log reopened) so the tracker does
-        // not keep declaring a winner on an ONGOING match.
-        const reset = await this.undoDecidingResult(
-          match,
-          match.winnerId,
-          {
+        // A reset replays the whole match, not just its last game: the series
+        // returns to 0–0 and every game log is discarded, so the tracker starts
+        // again at game 1 (openTracker numbers from gameLogs.length + 1). Undoing
+        // only the deciding game — what this used to do, and what
+        // rejectReportedResult still correctly does for a single pending report —
+        // left a best-of-3 sitting at 1–0 with game 2 reopened, which continues a
+        // match instead of resetting it.
+        const reset = await tx.match.update({
+          where: { id: matchId },
+          data: {
             status: MatchStatus.ONGOING,
             winnerId: null,
             completedAt: null,
             reportedWinnerId: null,
+            player1Score: 0,
+            player2Score: 0,
           },
-          tx,
-        );
+        });
+        await tx.matchGameLog.deleteMany({ where: { matchId } });
 
         for (const next of destinations) {
           const feeders = await tx.match.findMany({

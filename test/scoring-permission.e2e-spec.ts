@@ -95,6 +95,10 @@ describe('scoring permission', () => {
           ...data,
         })),
         update: jest.fn(({ data }: any) => ({ id: 'log1', ...data })),
+        deleteMany: jest.fn(async () => {
+          match.gameLogs = [];
+          return { count: 0 };
+        }),
       },
       // The tournament belongs to somebody else, so only an ADMIN counts as
       // staff below.
@@ -578,7 +582,7 @@ describe('scoring permission', () => {
       return { prisma, notifications, realtime, service, run, match };
     };
 
-    it('returns a completed match to ONGOING and takes back the deciding game', async () => {
+    it('returns a completed match to ONGOING and clears the whole series', async () => {
       const { run, prisma, match } = call(
         makeMatch(
           {
@@ -615,14 +619,19 @@ describe('scoring permission', () => {
             winnerId: null,
             completedAt: null,
             reportedWinnerId: null,
-            player1Score: 1,
-            player2Score: 1,
+            player1Score: 0,
+            player2Score: 0,
           }),
         }),
       );
-      expect(prisma.matchGameLog.update).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'log3' } }),
-      );
+      // A best-of-3 decided 2–1 must not come back as 1–1 with game 3
+      // reopened: every game log goes, so the tracker restarts at game 1.
+      expect(prisma.matchGameLog.deleteMany).toHaveBeenCalledWith({
+        where: { matchId: 'm1' },
+      });
+      expect(prisma.matchGameLog.update).not.toHaveBeenCalled();
+      expect(match.player1Score).toBe(0);
+      expect(match.player2Score).toBe(0);
     });
 
     it('reopens a completed tournament as ONGOING', async () => {

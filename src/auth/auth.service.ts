@@ -1,5 +1,11 @@
 import { randomUUID } from 'crypto';
-import { guestHistoryInclude, guestDeadline, guestClaimProblem, retireGuest, GUEST_RETENTION_DAYS } from '../user/guest-lifecycle';
+import {
+  guestHistoryInclude,
+  guestDeadline,
+  guestClaimProblem,
+  retireGuest,
+  GUEST_RETENTION_DAYS,
+} from '../user/guest-lifecycle';
 import {
   requireJwtSecret,
   sessionCookieOptions,
@@ -10,6 +16,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -34,7 +41,12 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { isEmail } from './utils/check-input';
 import { Response } from 'express';
-import { Role, ParticipantStatus, TournamentStatus, Prisma } from '@prisma/client';
+import {
+  Role,
+  ParticipantStatus,
+  TournamentStatus,
+  Prisma,
+} from '@prisma/client';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   effectiveRawConfig,
@@ -71,6 +83,8 @@ type ChallengeStep = 'verify' | 'signin' | 'reset';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -87,16 +101,37 @@ export class AuthService {
       const deadline = guestDeadline(guest);
       if (!deadline || deadline > new Date()) continue;
       try {
-        await this.prisma.$transaction(async (tx) => {
-          const current = await tx.user.findUnique({ where: { id: guest.id }, include: guestHistoryInclude });
-          if (!current?.isGuest || !current.username) return;
-          const currentDeadline = guestDeadline(current);
-          if (currentDeadline && currentDeadline <= new Date()) await retireGuest(tx, current);
-        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+        await this.prisma.$transaction(
+          async (tx) => {
+            const current = await tx.user.findUnique({
+              where: { id: guest.id },
+              include: guestHistoryInclude,
+            });
+            if (!current?.isGuest || !current.username) return;
+            const currentDeadline = guestDeadline(current);
+            if (currentDeadline && currentDeadline <= new Date())
+              await retireGuest(tx, current);
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
       } catch (error) {
         // A concurrent registration or roster change wins safely; retry next hour.
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') continue;
-        throw error;
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034'
+        )
+          continue;
+        // Anything else belongs to this one guest, not to the pass. Rethrowing
+        // abandoned every guest still queued behind it and surfaced as an
+        // unhandled rejection out of the cron, so one unreadable row could
+        // stall retention for the whole platform, silently and indefinitely.
+        // Log it and carry on; the next hourly tick retries this guest.
+        this.logger.error(
+          `Failed to retire guest ${guest.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        continue;
       }
     }
   }
@@ -105,7 +140,11 @@ export class AuthService {
     const guests = await this.prisma.user.findMany({
       where: {
         isGuest: true,
-        username: { not: null, contains: query.trim().slice(0, 80), mode: 'insensitive' },
+        username: {
+          not: null,
+          contains: query.trim().slice(0, 80),
+          mode: 'insensitive',
+        },
       },
       include: guestHistoryInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
@@ -114,34 +153,62 @@ export class AuthService {
     return {
       hasMore: guests.length > 50,
       guests: guests.slice(0, 50).map((guest) => ({
-        id: guest.id, username: guest.username, displayName: guest.displayName,
-        expiresAt: guestDeadline(guest), claimProblem: guestClaimProblem(guest),
-        tournaments: guest.participatedTournaments.map(({ tournament, placement }) => ({
-          id: tournament.id, name: tournament.name, status: tournament.status,
-          completedAt: tournament.completedAt, placement,
-          isWinner: tournament.winnerId === guest.id || placement === 1,
-          excluded: tournament.guestHistoryExclusions.length > 0,
-          exclusion: tournament.guestHistoryExclusions[0] ?? null,
-        })),
+        id: guest.id,
+        username: guest.username,
+        displayName: guest.displayName,
+        expiresAt: guestDeadline(guest),
+        claimProblem: guestClaimProblem(guest),
+        tournaments: guest.participatedTournaments.map(
+          ({ tournament, placement }) => ({
+            id: tournament.id,
+            name: tournament.name,
+            status: tournament.status,
+            completedAt: tournament.completedAt,
+            placement,
+            isWinner: tournament.winnerId === guest.id || placement === 1,
+            excluded: tournament.guestHistoryExclusions.length > 0,
+            exclusion: tournament.guestHistoryExclusions[0] ?? null,
+          }),
+        ),
       })),
     };
   }
 
-  async excludeGuestTournament(guestId: string, tournamentId: string, excludedById: string, dto: GuestHistoryExclusionDto) {
-    const guest = await this.prisma.user.findUnique({ where: { id: guestId }, include: guestHistoryInclude });
+  async excludeGuestTournament(
+    guestId: string,
+    tournamentId: string,
+    excludedById: string,
+    dto: GuestHistoryExclusionDto,
+  ) {
+    const guest = await this.prisma.user.findUnique({
+      where: { id: guestId },
+      include: guestHistoryInclude,
+    });
     if (!guest?.isGuest) throw new NotFoundException('Guest record not found');
-    const participation = guest.participatedTournaments.find((entry) => entry.tournament.id === tournamentId);
-    if (!participation) throw new NotFoundException('That tournament is not attached to this guest record');
+    const participation = guest.participatedTournaments.find(
+      (entry) => entry.tournament.id === tournamentId,
+    );
+    if (!participation)
+      throw new NotFoundException(
+        'That tournament is not attached to this guest record',
+      );
     await this.prisma.guestHistoryExclusion.upsert({
       where: { guestId_tournamentId: { guestId, tournamentId } },
-      create: { guestId, tournamentId, excludedById, reason: dto.reason?.trim() || null },
+      create: {
+        guestId,
+        tournamentId,
+        excludedById,
+        reason: dto.reason?.trim() || null,
+      },
       update: { excludedById, reason: dto.reason?.trim() || null },
     });
     return { message: 'Tournament excluded from this guest account claim.' };
   }
 
   async restoreGuestTournament(guestId: string, tournamentId: string) {
-    await this.prisma.guestHistoryExclusion.deleteMany({ where: { guestId, tournamentId } });
+    await this.prisma.guestHistoryExclusion.deleteMany({
+      where: { guestId, tournamentId },
+    });
     return { message: 'Tournament restored to this guest account claim.' };
   }
 
@@ -1067,7 +1134,10 @@ export class AuthService {
   // ITEM 2: CONVERT GUEST TO A REGISTERED ACCOUNT
   // ──────────────────────────────────────────────
   async convertGuest(guestId: string, dto: ConvertGuestDto) {
-    if (dto.verifiedOwnership !== true) throw new BadRequestException('Confirm the player’s identity and tournament participation before registration.');
+    if (dto.verifiedOwnership !== true)
+      throw new BadRequestException(
+        'Confirm the player’s identity and tournament participation before registration.',
+      );
     const user = await this.prisma.user.findUnique({
       where: { id: guestId },
       include: guestHistoryInclude,
@@ -1083,7 +1153,10 @@ export class AuthService {
     const conflict = await this.prisma.user.findFirst({
       where: {
         id: { not: guestId },
-        OR: [{ email: { equals: dto.email.trim(), mode: 'insensitive' } }, { username: { equals: dto.username.trim(), mode: 'insensitive' } }],
+        OR: [
+          { email: { equals: dto.email.trim(), mode: 'insensitive' } },
+          { username: { equals: dto.username.trim(), mode: 'insensitive' } },
+        ],
       },
     });
     if (conflict) {
@@ -1098,145 +1171,179 @@ export class AuthService {
       guestId,
     );
 
-    const upgraded = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.user.findUnique({ where: { id: guestId }, include: guestHistoryInclude });
-      if (!current) throw new NotFoundException('Guest no longer exists');
-      const currentProblem = guestClaimProblem(current);
-      if (currentProblem) throw new ConflictException(currentProblem);
-      const converted = await tx.user.update({
-        where: { id: guestId },
-        data: {
-          username: dto.username,
-          email: dto.email.trim().toLowerCase(),
-          mustChangePassword: true,
-          hashedPassword,
-          isGuest: false,
-          slug,
-          expiresAt: null,
-          isExpired: false,
-        },
-        select: {
-          id: true,
-          username: true,
-          displayName: true,
-          email: true,
-          roles: true,
-        },
-      });
+    const upgraded = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const current = await tx.user.findUnique({
+            where: { id: guestId },
+            include: guestHistoryInclude,
+          });
+          if (!current) throw new NotFoundException('Guest no longer exists');
+          const currentProblem = guestClaimProblem(current);
+          if (currentProblem) throw new ConflictException(currentProblem);
+          const converted = await tx.user.update({
+            where: { id: guestId },
+            data: {
+              username: dto.username,
+              email: dto.email.trim().toLowerCase(),
+              mustChangePassword: true,
+              hashedPassword,
+              isGuest: false,
+              slug,
+              expiresAt: null,
+              isExpired: false,
+            },
+            select: {
+              id: true,
+              username: true,
+              displayName: true,
+              email: true,
+              roles: true,
+            },
+          });
 
-      // Guests are deliberately excluded from lifetime stats when a tournament
-      // completes. Conversion keeps the same user/participant UUID, so rebuild
-      // the rows from the preserved tournament stats at the moment the guest
-      // becomes a real account.
-      const tournaments = await tx.tournament.findMany({
-        where: {
-          participants: { some: { userId: guestId } },
-        },
-        include: {
-          format: true,
-          game: { select: { name: true } },
-          guestHistoryExclusions: { where: { guestId }, select: { id: true } },
-          participants: {
+          // Guests are deliberately excluded from lifetime stats when a tournament
+          // completes. Conversion keeps the same user/participant UUID, so rebuild
+          // the rows from the preserved tournament stats at the moment the guest
+          // becomes a real account.
+          const tournaments = await tx.tournament.findMany({
+            where: {
+              participants: { some: { userId: guestId } },
+            },
+            include: {
+              format: true,
+              game: { select: { name: true } },
+              guestHistoryExclusions: {
+                where: { guestId },
+                select: { id: true },
+              },
+              participants: {
+                where: { userId: guestId },
+                include: { stats: true },
+              },
+            },
+          });
+
+          type Aggregate = {
+            tournamentsPlayed: number;
+            tournamentsWon: number;
+            gamesPlayed: number;
+            wins: number;
+            losses: number;
+            draws: number;
+            globalPoints: number;
+          };
+          const emptyAggregate = (): Aggregate => ({
+            tournamentsPlayed: 0,
+            tournamentsWon: 0,
+            gamesPlayed: 0,
+            wins: 0,
+            losses: 0,
+            draws: 0,
+            globalPoints: 0,
+          });
+          const global = emptyAggregate();
+          const byGame = new Map<string, Aggregate>();
+
+          for (const tournament of tournaments) {
+            // Two ways a tournament can be left out of the claim, and both bind.
+            // The list on the request is the registering organizer's one-time
+            // judgement ("this one isn't theirs"). A GuestHistoryExclusion row is
+            // a standing decision somebody already made and recorded, with a
+            // reason and an audit entry — it is fetched above precisely so it
+            // can be honoured here, and it used to be fetched and then dropped,
+            // which made the exclude endpoint a no-op on the only thing it was
+            // meant to affect.
+            if (dto.excludedTournamentIds?.includes(tournament.id)) continue;
+            if (tournament.guestHistoryExclusions.length > 0) continue;
+            const participant = tournament.participants[0];
+            const stats = participant?.stats;
+            if (stats) {
+              global.gamesPlayed += stats.gamesPlayed;
+              global.wins += stats.wins;
+              global.losses += stats.losses;
+              global.draws += stats.draws;
+            }
+
+            const gameName =
+              tournament.game?.name ?? tournament.format?.gameName ?? null;
+            const gameStats = gameName
+              ? (byGame.get(gameName) ??
+                (byGame.set(gameName, emptyAggregate()), byGame.get(gameName)!))
+              : null;
+            if (gameStats && stats) {
+              gameStats.gamesPlayed += stats.gamesPlayed;
+              gameStats.wins += stats.wins;
+              gameStats.losses += stats.losses;
+              gameStats.draws += stats.draws;
+            }
+
+            if (tournament.status !== TournamentStatus.COMPLETED) continue;
+
+            global.tournamentsPlayed += 1;
+            if (gameStats) gameStats.tournamentsPlayed += 1;
+
+            if (
+              tournament.winnerId === guestId ||
+              participant?.placement === 1
+            ) {
+              global.tournamentsWon += 1;
+              if (gameStats) gameStats.tournamentsWon += 1;
+            }
+
+            const placement = participant?.placement;
+            if (!placement) continue;
+            const config = resolveConfig(effectiveRawConfig(tournament));
+            const isHybrid = systemOf(tournament) === 'HYBRID';
+            const points =
+              placement === 1
+                ? config.placementPointsChampion
+                : placement === 2
+                  ? config.placementPoints2nd
+                  : placement === 3
+                    ? config.placementPoints3rd
+                    : isHybrid
+                      ? config.placementPointsTopCut
+                      : config.placementPointsParticipation;
+            global.globalPoints += points;
+            if (gameStats) gameStats.globalPoints += points;
+          }
+
+          const statsData = (aggregate: Aggregate) => ({
+            ...aggregate,
+            winRate:
+              aggregate.gamesPlayed > 0
+                ? aggregate.wins / aggregate.gamesPlayed
+                : 0,
+          });
+          await tx.userGlobalStats.upsert({
             where: { userId: guestId },
-            include: { stats: true },
-          },
+            create: { userId: guestId, ...statsData(global) },
+            update: statsData(global),
+          });
+          for (const [gameName, aggregate] of byGame) {
+            await tx.userGameStats.upsert({
+              where: { userId_gameName: { userId: guestId, gameName } },
+              create: { userId: guestId, gameName, ...statsData(aggregate) },
+              update: statsData(aggregate),
+            });
+          }
+
+          return converted;
         },
-      });
-
-      type Aggregate = {
-        tournamentsPlayed: number;
-        tournamentsWon: number;
-        gamesPlayed: number;
-        wins: number;
-        losses: number;
-        draws: number;
-        globalPoints: number;
-      };
-      const emptyAggregate = (): Aggregate => ({
-        tournamentsPlayed: 0,
-        tournamentsWon: 0,
-        gamesPlayed: 0,
-        wins: 0,
-        losses: 0,
-        draws: 0,
-        globalPoints: 0,
-      });
-      const global = emptyAggregate();
-      const byGame = new Map<string, Aggregate>();
-
-      for (const tournament of tournaments) {
-        if (dto.excludedTournamentIds?.includes(tournament.id)) continue;
-        const participant = tournament.participants[0];
-        const stats = participant?.stats;
-        if (stats) {
-          global.gamesPlayed += stats.gamesPlayed;
-          global.wins += stats.wins;
-          global.losses += stats.losses;
-          global.draws += stats.draws;
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((error: unknown) => {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          ['P2034', 'P2002'].includes(error.code)
+        ) {
+          throw new ConflictException(
+            'The guest or account name changed while registering. Refresh and try again.',
+          );
         }
-
-        const gameName = tournament.game?.name ?? tournament.format?.gameName ?? null;
-        const gameStats = gameName
-          ? (byGame.get(gameName) ?? (byGame.set(gameName, emptyAggregate()), byGame.get(gameName)!))
-          : null;
-        if (gameStats && stats) {
-          gameStats.gamesPlayed += stats.gamesPlayed;
-          gameStats.wins += stats.wins;
-          gameStats.losses += stats.losses;
-          gameStats.draws += stats.draws;
-        }
-
-        if (tournament.status !== TournamentStatus.COMPLETED) continue;
-
-        global.tournamentsPlayed += 1;
-        if (gameStats) gameStats.tournamentsPlayed += 1;
-
-        if (tournament.winnerId === guestId || participant?.placement === 1) {
-          global.tournamentsWon += 1;
-          if (gameStats) gameStats.tournamentsWon += 1;
-        }
-
-        const placement = participant?.placement;
-        if (!placement) continue;
-        const config = resolveConfig(effectiveRawConfig(tournament));
-        const isHybrid = systemOf(tournament) === 'HYBRID';
-        const points = placement === 1
-          ? config.placementPointsChampion
-          : placement === 2
-            ? config.placementPoints2nd
-            : placement === 3
-              ? config.placementPoints3rd
-              : isHybrid
-                ? config.placementPointsTopCut
-                : config.placementPointsParticipation;
-        global.globalPoints += points;
-        if (gameStats) gameStats.globalPoints += points;
-      }
-
-      const statsData = (aggregate: Aggregate) => ({
-        ...aggregate,
-        winRate: aggregate.gamesPlayed > 0 ? aggregate.wins / aggregate.gamesPlayed : 0,
+        throw error;
       });
-      await tx.userGlobalStats.upsert({
-        where: { userId: guestId },
-        create: { userId: guestId, ...statsData(global) },
-        update: statsData(global),
-      });
-      for (const [gameName, aggregate] of byGame) {
-        await tx.userGameStats.upsert({
-          where: { userId_gameName: { userId: guestId, gameName } },
-          create: { userId: guestId, gameName, ...statsData(aggregate) },
-          update: statsData(aggregate),
-        });
-      }
-
-      return converted;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }).catch((error: unknown) => {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2034', 'P2002'].includes(error.code)) {
-        throw new ConflictException('The guest or account name changed while registering. Refresh and try again.');
-      }
-      throw error;
-    });
 
     return {
       message: 'Guest successfully converted to a registered account',
